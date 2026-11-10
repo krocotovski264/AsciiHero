@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#06070b">
+<meta name="mobile-web-app-capable" content="yes">
+<title>ASCII MMORPG — Создание героя (beta 0.4)</title>
+<style>
+  :root{ --bg:#06070b; --fg:#cfc6b0; --dim:#6f6a5e; --acc:#f0b640; --acc2:#6fd8ff; --line:#262630; --panel:#0b0c12; }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);overflow:hidden;
+    font-family:"Courier New",ui-monospace,Menlo,Consolas,monospace; user-select:none; -webkit-user-select:none;}
+  #app{display:flex;flex-direction:column;height:100dvh;height:100vh;padding-top:env(safe-area-inset-top);}
+  @supports(height:100dvh){#app{height:100dvh}}
+  header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--line);}
+  .title{color:var(--acc);font-weight:bold;letter-spacing:2px;font-size:15px;text-shadow:0 0 8px rgba(240,182,64,.5)}
+  .title small{color:var(--dim);font-weight:normal;letter-spacing:1px;font-size:11px;margin-left:6px}
+  .hbtns{display:flex;gap:6px}
+  .ib{background:transparent;border:1px solid var(--line);color:var(--fg);font:inherit;font-size:13px;padding:5px 9px;border-radius:3px}
+  .ib.on{border-color:var(--acc);color:var(--acc)}
+  #view{position:relative;flex:1 1 auto;min-height:0;
+    background:radial-gradient(ellipse at 50% 60%, #121420 0%, #07080d 60%, #040407 100%);}
+  #cv{position:absolute;inset:0;width:100%;height:100%;touch-action:none;display:block}
+  #hint{position:absolute;left:0;right:0;bottom:8px;text-align:center;color:var(--dim);font-size:11px;pointer-events:none;transition:opacity 1s}
+  #badge{position:absolute;left:10px;top:8px;color:var(--dim);font-size:11px;line-height:1.5;pointer-events:none;white-space:pre}
+  #badge b{color:var(--acc)}
+  #fps{position:absolute;right:10px;top:8px;color:#3d3d48;font-size:10px;pointer-events:none}
+  #panel{flex:0 0 auto;max-height:42vh;display:flex;flex-direction:column;background:var(--panel);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+  .tabs{display:flex;border-bottom:1px solid var(--line)}
+  .tabs button{flex:1;background:transparent;border:0;border-bottom:2px solid transparent;color:var(--dim);font:inherit;font-size:13px;letter-spacing:2px;padding:10px 0}
+  .tabs button.on{color:var(--acc);border-bottom-color:var(--acc)}
+  .tab{display:none;overflow-y:auto;padding:10px 12px;-webkit-overflow-scrolling:touch}
+  .tab.on{display:block}
+  .row{margin-bottom:12px}
+  .row>label{display:flex;justify-content:space-between;font-size:11px;letter-spacing:2px;color:var(--dim);margin-bottom:6px}
+  .row>label b{color:var(--acc);letter-spacing:0}
+  .seg{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .seg.four{grid-template-columns:1fr 1fr}
+  .seg button,.opt{background:#0f1018;border:1px solid var(--line);color:var(--fg);font:inherit;font-size:13px;padding:9px 6px;border-radius:3px;text-align:center}
+  .seg button.on,.opt.on{border-color:var(--acc);color:var(--acc);background:rgba(240,182,64,.08);box-shadow:inset 0 0 12px rgba(240,182,64,.08)}
+  .opts{display:flex;flex-direction:column;gap:6px}
+  .opt{display:flex;align-items:center;gap:10px;text-align:left;padding:8px 10px}
+  .opt .ico{flex:0 0 46px;color:var(--acc2);font-size:9px;line-height:9px;white-space:pre;text-align:center}
+  .opt.on .ico{color:var(--acc)}
+  .opt .t{display:flex;flex-direction:column}
+  .opt .n{font-size:14px}
+  .opt .d{font-size:11px;color:var(--dim);margin-top:2px}
+  .opt.on .d{color:#a08a55}
+  .hrow{display:flex;align-items:center;gap:8px}
+  .hrow .ib{padding:6px 12px;font-size:16px}
+  input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:28px;background:transparent}
+  input[type=range]::-webkit-slider-runnable-track{height:4px;background:repeating-linear-gradient(90deg,#3a3a46 0 6px,transparent 6px 9px)}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:22px;margin-top:-9px;background:var(--bg);border:2px solid var(--acc);border-radius:2px}
+  input[type=range]::-moz-range-track{height:4px;background:#3a3a46}
+  input[type=range]::-moz-range-thumb{width:16px;height:20px;background:var(--bg);border:2px solid var(--acc);border-radius:2px}
+  .scale{display:flex;justify-content:space-between;font-size:10px;color:#4a4a55;padding:0 2px}
+  footer{display:flex;gap:8px;padding:8px 12px;border-top:1px solid var(--line)}
+  footer button{flex:1;background:transparent;border:1px solid var(--line);color:var(--fg);font:inherit;font-size:13px;letter-spacing:1px;padding:10px 0;border-radius:3px}
+  footer #done{border-color:var(--acc);color:var(--bg);background:var(--acc);font-weight:bold}
+  #toast{position:fixed;left:50%;top:22%;transform:translate(-50%,-10px);background:#101119;border:1px solid var(--acc);color:var(--acc);padding:10px 14px;font-size:12px;opacity:0;transition:.3s;pointer-events:none;text-align:center;white-space:pre}
+  #toast.show{opacity:1;transform:translate(-50%,0)}
+  @media (orientation:landscape) and (min-width:600px){
+    #main{flex-direction:row}
+    #panel{max-height:none;width:340px;border-top:0;border-left:1px solid var(--line)}
+  }
+  #main{flex:1;display:flex;flex-direction:column;min-height:0}
+  #stick{position:absolute;left:22px;bottom:calc(26px + env(safe-area-inset-bottom));width:132px;height:132px;border-radius:50%;
+    border:1px solid rgba(240,182,64,.45);background:radial-gradient(circle,rgba(240,182,64,.07),rgba(0,0,0,.25));display:none;touch-action:none;z-index:5}
+  #knob{position:absolute;left:50%;top:50%;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;border:2px solid var(--acc);
+    background:rgba(240,182,64,.18);box-shadow:0 0 14px rgba(240,182,64,.35);pointer-events:none}
+  #stick .lbl{position:absolute;left:0;right:0;top:-18px;text-align:center;font-size:10px;color:var(--dim);letter-spacing:1px}
+  @media (orientation:landscape) and (min-width:600px){ #main{flex-direction:row} #panel{max-height:none;width:330px;border-top:0;border-left:1px solid var(--line)} }
+  body.world #panel{display:none}
+  #rotate{display:none;position:fixed;inset:0;z-index:50;background:#06070b;color:var(--fg);flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:20px}
+  #rotate pre{color:var(--acc);font-size:14px;line-height:15px;margin:0;text-shadow:0 0 8px rgba(240,182,64,.5)}
+  #rotate button{background:transparent;border:1px solid var(--line);color:var(--dim);font:inherit;font-size:11px;padding:6px 10px}
+  @media (orientation:portrait) and (max-width:760px){ body:not(.portrait-ok) #rotate{display:flex} }
+  @media (orientation:landscape) and (max-height:520px){
+    header{padding:4px 10px} .title{font-size:13px} .ib{padding:3px 8px;font-size:12px}
+    #panel{width:330px} .tabs button{padding:7px 0} .tab{padding:8px 10px} .row{margin-bottom:8px}
+    .seg button,.opt{padding:6px 6px} .opt .ico{display:none} footer{padding:6px 10px} footer button{padding:7px 0}
+    #stick{width:118px;height:118px;left:max(18px,env(safe-area-inset-left));bottom:18px}
+  }
+  body.world #stick{display:block}
+  body.world #auto, body.world #reset{display:none}
+  #back,#lock{display:none}
+  body.world #back, body.world #lock{display:inline-block}
+
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="title" id="title">⚔ СОЗДАНИЕ ГЕРОЯ<small>beta 0.4</small></div>
+    <div class="hbtns">
+      <button class="ib" id="lock">🎯 Цель</button>
+      <button class="ib" id="back">← Герой</button>
+      <button class="ib on" id="auto" title="Авто-вращение">⟲ авто</button>
+      <button class="ib" id="reset" title="Сбросить вид">⌖</button>
+    </div>
+  </header>
+  <div id="main">
+    <div id="view">
+      <canvas id="cv"></canvas>
+      <div id="badge"></div>
+      <div id="fps"></div>
+      <div id="loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#f0b640;font-size:13px;letter-spacing:2px">ЗАГРУЗКА МОДЕЛЕЙ…</div>
+      <div id="stick"><div class="lbl">ДВИЖЕНИЕ</div><div id="knob"></div></div>
+      <div id="hint">☝ крути пальцем · ✌ щипок — зум · 2× тап — сброс</div>
+    </div>
+    <div id="panel">
+      <nav class="tabs">
+        <button data-tab="body" class="on">ТЕЛО</button>
+        <button data-tab="armor">БРОНЯ</button>
+        <button data-tab="weapon">ОРУЖИЕ</button>
+      </nav>
+      <section class="tab on" id="tab-body">
+        <div class="row"><label>ПОЛ</label>
+          <div class="seg" id="sex"><button data-v="m">♂ Мужской</button><button data-v="f">♀ Женский</button></div></div>
+        <div class="row"><label>РОСТ <b id="hval">178 см</b></label>
+          <div class="hrow"><button class="ib" id="hminus">−</button><input type="range" id="height" min="150" max="200" step="1"><button class="ib" id="hplus">+</button></div>
+          <div class="scale"><span>150</span><span>165</span><span>180</span><span>200</span></div></div>
+        <div class="row"><label>ТЕЛОСЛОЖЕНИЕ</label>
+          <div class="seg four" id="build"></div></div>
+      </section>
+      <section class="tab" id="tab-armor"><div class="opts" id="armors"></div></section>
+      <section class="tab" id="tab-weapon"><div class="opts" id="weapons"></div></section>
+      <footer><button id="rand">[ СЛУЧАЙНО ]</button><button id="done">В ТРАКТИР ►</button></footer>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+<div id="rotate"><pre>  ___________
+ |  _______  |
+ | |       | |  ⟳
+ | |_______| |
+ |___________|</pre><div>Поверните телефон горизонтально</div><button id="rotOk">продолжить так</button></div>
+
+<script>/*__BUNDLE__*/</script>
+</body>
+</html>
