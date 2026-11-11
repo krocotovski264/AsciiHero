@@ -7,6 +7,7 @@
 //   ND camera     -> rtND  (glyph grid: view normal xy, depth / 12, material id) — AsciiHero/Lit switches its output
 //                    through the global _AsciiNDPass, set in RenderPipelineManager.beginCameraRendering
 // Composite() then turns them into coloured glyphs, adds bloom and produces `final` (drawn by the UI).
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
@@ -62,6 +63,21 @@ namespace AsciiHero
             glyphCam.cullingMask = 1 << GlyphLayer.LAYER;
             cam.cullingMask = ~(1 << GlyphLayer.LAYER);
             RenderPipelineManager.beginCameraRendering += OnBeginCamera;
+            RenderPipelineManager.endContextRendering += OnEndContext;
+        }
+
+        // Glyphs + bloom are composed right after the cameras have rendered, outside of OnGUI:
+        // Graphics.Blit switches the active render target, and inside OnGUI that sent the whole
+        // interface into the texture instead of the screen (black screen on device).
+        int composedFrame = -1;
+        void OnEndContext(ScriptableRenderContext ctx, List<Camera> cameras)
+        {
+            if (plain || final == null || composedFrame == Time.frameCount || !cameras.Contains(cam)) return;
+            composedFrame = Time.frameCount;
+            var prev = RenderTexture.active;
+            try { Composite(); }
+            catch (System.Exception e) { Debug.LogException(e); }
+            RenderTexture.active = prev;
         }
 
         static void Setup(Camera c, float depth, bool shadows)
@@ -79,7 +95,7 @@ namespace AsciiHero
             Shader.SetGlobalFloat(ND_PASS, c == ndCam ? 1f : 0f);
         }
 
-        public void Dispose() { RenderPipelineManager.beginCameraRendering -= OnBeginCamera; }
+        public void Dispose() { RenderPipelineManager.beginCameraRendering -= OnBeginCamera; RenderPipelineManager.endContextRendering -= OnEndContext; }
 
         static Shader Load(string n) { var s = Shader.Find(n); if (s == null) Debug.LogError("Shader not found: " + n); return s; }
 
@@ -148,8 +164,8 @@ namespace AsciiHero
             glyphCam.transform.localPosition = Vector3.zero; glyphCam.transform.localRotation = Quaternion.identity;
         }
 
-        /// glyphs + bloom; call after the cameras have rendered this frame (OnGUI repaint)
-        public void Composite()
+        /// glyphs + bloom; runs after the cameras have rendered this frame
+        void Composite()
         {
             if (final == null) return;
             RenderTexture src = rtAscii;

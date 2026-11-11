@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.9.1 · Unity";
+        public const string VERSION = "beta 0.9.2 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -602,8 +602,7 @@ namespace AsciiHero
             var vr = ViewRect();
             if (!ascii.plain)
             {
-                try { ascii.Composite(); }   // the scene cameras have rendered this frame
-                catch (System.Exception e) { Debug.LogException(e); }
+                RenderTexture.active = null;   // the interface always goes to the screen
                 if (ascii.final != null) GUI.DrawTexture(vr, ascii.final, ScaleMode.StretchToFill, false);
                 else GUI.Label(new Rect(vr.x + 20 * k, vr.center.y, vr.width - 40 * k, 30 * k), "Кадр ASCII ещё не готов", sSmall);
             }
