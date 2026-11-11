@@ -62,7 +62,8 @@ export const MATERIAL_DEFS = {
 // that point (light, shadow, and nearer = brighter); hidden points (back faces, covered by armour) are skipped.
 export const GLYPH = {
   tGlyph: { value: null }, uRows: { value: RAMPS.length }, uExposure: { value: 1 }, uMode: { value: 1 },
-  tLit: { value: null }, tDepth: { value: null }, uNear: { value: 0.05 }, uFar: { value: 30 }, uDepthRef: { value: 4 }, uEps: { value: 0.006 },
+  tLit: { value: null }, tDepth: { value: null }, uNear: { value: 0.05 }, uFar: { value: 30 }, uDepthRef: { value: 4 }, uEps: { value: 0.008 },
+  uScale: { value: 1.5 }, uMinGlyph: { value: 5 },
 };
 let ATLAS = null;
 export function glyphAtlas() { if (!ATLAS) { ATLAS = buildAtlas(); GLYPH.tGlyph.value = ATLAS; } return ATLAS; }
@@ -104,7 +105,7 @@ attribute vec3 anormal;
 attribute float aseed;
 uniform sampler2D tLit, tDepth;
 uniform vec2 uCell;
-uniform float uRow, uActor, uExposure, uNear, uFar, uDepthRef, uEps;
+uniform float uRow, uActor, uExposure, uNear, uFar, uDepthRef, uEps, uScale, uMinGlyph;
 varying vec2 vLocal;
 varying vec3 vCol;
 varying float vGi;
@@ -122,19 +123,18 @@ void main() {
   // visible only if this surface point is what the camera sees there (not a back face, not under armour)
   float sceneZ = -perspectiveDepthToViewZ(texture2D(tDepth, suv).x, uNear, uFar);
   float myZ = -mv.z;
-  bool vis = dot(nV, toCam) > 0.03 && myZ <= sceneZ + uEps && all(greaterThanEqual(suv, vec2(0.0))) && all(lessThanEqual(suv, vec2(1.0)));
+  bool vis = dot(nV, toCam) > -0.05 && myZ <= sceneZ + uEps + 0.002 * myZ && all(greaterThanEqual(suv, vec2(0.0))) && all(lessThanEqual(suv, vec2(1.0)));
   vec3 col = pow(max(texture2D(tLit, suv).rgb, 0.0), vec3(1.0 / 2.2));
   float lum = dot(col, vec3(0.299, 0.587, 0.114));
   float depthK = clamp(1.0 - (myZ - uDepthRef) * 0.09, 0.5, 1.2);          // nearer = brighter
   lum = clamp((lum * 1.15 * uExposure * (1.0 + 0.55 * uActor) + 0.06 * uActor) * depthK, 0.0, 1.0);
-  float gi = floor(clamp(pow(lum, 0.85) + (aseed - 0.5) * 0.09, 0.0, 1.0) * 15.99);
-  if (gi < 1.0 && lum > 0.008) gi = 1.0;
-  if (gi < 0.5) vis = false;
+  // dense glyphs only (no '.' or ' '): darkness is carried by colour, so the surface stays filled
+  float gi = uMinGlyph + floor(clamp(pow(lum, 0.85) + (aseed - 0.5) * 0.09, 0.0, 1.0) * (15.99 - uMinGlyph));
   float m = max(max(col.r, col.g), col.b);
-  vCol = (uRow > 8.5 && uRow < 9.5) ? col * 1.3 + 0.15 : (col / max(m, 1e-3)) * (0.32 + 0.85 * lum);
+  vCol = (uRow > 8.5 && uRow < 9.5) ? col * 1.3 + 0.15 : (col / max(m, 1e-3)) * (0.10 + 0.95 * lum);
   vGi = gi;
   vLocal = position.xy + 0.5;
-  mv.xy += position.xy * uCell;              // upright character in the view plane, never skewed
+  mv.xy += position.xy * uCell * uScale;     // upright character in the view plane, never skewed; slight overlap
   gl_Position = vis ? projectionMatrix * mv : vec4(2.0, 2.0, 2.0, 1.0);
 }`;
 const GLYPH_FS = `
@@ -174,13 +174,26 @@ function sampleSurface(geom, cw, ch) {
     a3.fromBufferAttribute(P, ia); b3.fromBufferAttribute(P, ib); c3.fromBufferAttribute(P, ic);
     const area3 = b3.clone().sub(a3).cross(c3.clone().sub(a3)).length() / 2;
     const det = (ub - ua) * (vc - va) - (uc - ua) * (vb - va), areaUV = Math.abs(det) / 2;
-    if (areaUV < 1e-12 || areaUV > area3 * 4 + 1e-9) continue;          // degenerate or across a seam
+    if (areaUV < area3 * 0.6 || areaUV > area3 * 4) {
+      // seam, pole or squeezed mapping: scatter points by real area instead, so no bald patches appear
+      const want = area3 / (cw * ch); let k = Math.floor(want); if (Math.random() < want - k) k++;
+      for (let q = 0; q < k; q++) {
+        let r1 = halton(t * 7 + q, 2), r2 = halton(t * 7 + q, 3); if (r1 + r2 > 1) { r1 = 1 - r1; r2 = 1 - r2; }
+        emit(ia, ib, ic, 1 - r1 - r2, r1, r2, t * 31 + q, q);
+      }
+      continue;
+    }
     const i0 = Math.ceil(Math.min(ua, ub, uc) / cw - 0.5), i1 = Math.floor(Math.max(ua, ub, uc) / cw - 0.5);
     const j0 = Math.ceil(Math.min(va, vb, vc) / ch - 0.5), j1 = Math.floor(Math.max(va, vb, vc) / ch - 0.5);
     for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
       const u = (i + 0.5) * cw, v = (j + 0.5) * ch;
       const wb = ((u - ua) * (vc - va) - (uc - ua) * (v - va)) / det, wc = ((ub - ua) * (v - va) - (u - ua) * (vb - va)) / det, wa = 1 - wb - wc;
       if (wa < 0 || wb < 0 || wc < 0 || (wb === 0 && wc === 0)) continue;
+      emit(ia, ib, ic, wa, wb, wc, i, j);
+    }
+  }
+  return { n: seed.length, anc, nor, seed, si, sw };
+  function emit(ia, ib, ic, wa, wb, wc, i, j) {
       for (let k = 0; k < 3; k++) anc.push(P.getComponent(ia, k) * wa + P.getComponent(ib, k) * wb + P.getComponent(ic, k) * wc);
       let nx = 0, ny = 0, nz = 0;
       for (const [vi, w] of [[ia, wa], [ib, wb], [ic, wc]]) { nx += N.getX(vi) * w; ny += N.getY(vi) * w; nz += N.getZ(vi) * w; }
@@ -194,10 +207,9 @@ function sampleSurface(geom, cw, ch) {
         const top = [...acc].sort((x, y) => y[1] - x[1]).slice(0, 4); let sum = 0; for (const e of top) sum += e[1];
         for (let k = 0; k < 4; k++) { si.push(top[k] ? top[k][0] : 0); sw.push(top[k] ? top[k][1] / (sum || 1) : 0); }
       }
-    }
   }
-  return { n: seed.length, anc, nor, seed, si, sw };
 }
+function halton(i, b) { let f = 1, r = 0; i += 1; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; }
 
 function makeGlyphs(mesh) {
   const g = mesh.geometry, mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;

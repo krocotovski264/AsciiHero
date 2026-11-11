@@ -80,7 +80,17 @@ namespace AsciiHero
                 Vector2 a = U[ia], b = U[ib], c = U[ic];
                 float area3 = Vector3.Cross(P[ib] - P[ia], P[ic] - P[ia]).magnitude / 2;
                 float det = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y), areaUV = Mathf.Abs(det) / 2;
-                if (areaUV < 1e-12f || areaUV > area3 * 4 + 1e-9f) continue;     // degenerate or across a seam
+                if (areaUV < area3 * 0.6f || areaUV > area3 * 4f)
+                {
+                    // seam, pole or squeezed mapping: scatter points by real area instead, so no bald patches appear
+                    float want = area3 / (cw * ch); int kk = Mathf.FloorToInt(want); if (Random.value < want - kk) kk++;
+                    for (int q = 0; q < kk; q++)
+                    {
+                        float r1 = Halton(t * 7 + q, 2), r2 = Halton(t * 7 + q, 3); if (r1 + r2 > 1) { r1 = 1 - r1; r2 = 1 - r2; }
+                        Emit(1 - r1 - r2, r1, r2, t * 31 + q, q);
+                    }
+                    continue;
+                }
                 int i0 = Mathf.CeilToInt(Mathf.Min(a.x, Mathf.Min(b.x, c.x)) / cw - 0.5f), i1 = Mathf.FloorToInt(Mathf.Max(a.x, Mathf.Max(b.x, c.x)) / cw - 0.5f);
                 int j0 = Mathf.CeilToInt(Mathf.Min(a.y, Mathf.Min(b.y, c.y)) / ch - 0.5f), j1 = Mathf.FloorToInt(Mathf.Max(a.y, Mathf.Max(b.y, c.y)) / ch - 0.5f);
                 for (int i = i0; i <= i1; i++)
@@ -91,6 +101,11 @@ namespace AsciiHero
                         float wc = ((b.x - a.x) * (v - a.y) - (u - a.x) * (b.y - a.y)) / det;
                         float wa = 1 - wb - wc;
                         if (wa < 0 || wb < 0 || wc < 0 || (wb == 0 && wc == 0)) continue;
+                        Emit(wa, wb, wc, i, j);
+                    }
+
+                void Emit(float wa, float wb, float wc, int i, int j)
+                {
                         Vector3 p = P[ia] * wa + P[ib] * wb + P[ic] * wc;
                         Vector3 n = (N[ia] * wa + N[ib] * wb + N[ic] * wc).normalized;
                         float seed = Mathf.Abs(Mathf.Sin(i * 12.9898f + j * 78.233f) * 43758.5453f) % 1f;
@@ -108,7 +123,7 @@ namespace AsciiHero
                             if (skinned) bws.Add(bw);
                         }
                         tris.Add(o); tris.Add(o + 2); tris.Add(o + 1); tris.Add(o); tris.Add(o + 3); tris.Add(o + 2);
-                    }
+                }
             }
             if (verts.Count == 0) return null;
             var m = new Mesh { name = src.name + " glyphs" };
@@ -120,6 +135,7 @@ namespace AsciiHero
             count += verts.Count / 4;
             return m;
         }
+        static float Halton(int i, int b) { float f = 1, r = 0; i += 1; while (i > 0) { f /= b; r += f * (i % b); i /= b; } return r; }
         static void Add(Dictionary<int, float> acc, BoneWeight w, float k)
         {
             void A(int i, float x) { if (x <= 0) return; float c; acc.TryGetValue(i, out c); acc[i] = c + x * k; }
