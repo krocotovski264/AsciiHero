@@ -1,6 +1,7 @@
 // GPU ASCII renderer for URP. Two looks:
-// surfaceGlyphs = true (default): the models themselves are drawn with characters (AsciiHero/Lit, uv2 glyph
-//   coordinates); the colour camera renders at full resolution and Composite() only adds bloom.
+// surfaceGlyphs = true (default): models are BUILT from characters (GlyphLayer). The colour and ND cameras render
+//   the lit scene and its depth at half resolution; the glyph camera draws only the character layer at full
+//   resolution, each character reading its brightness and visibility from those two targets.
 // surfaceGlyphs = false (beta 0.8 screen grid): two cameras render every frame into low-resolution targets:
 //   colour camera -> rtCol (2x the glyph grid, lit scene)
 //   ND camera     -> rtND  (glyph grid: view normal xy, depth / 12, material id) — AsciiHero/Lit switches its output
@@ -19,9 +20,10 @@ namespace AsciiHero
         public bool surfaceGlyphs = true;
         bool builtSurface;
         public RenderTexture final;
-        RenderTexture rtCol, rtND, rtAscii, rtB1, rtB2;
+        RenderTexture rtCol, rtND, rtAscii, rtB1, rtB2, rtFull;
         readonly Material asciiMat, blurMat, finalMat; readonly Texture2D atlas;
-        readonly Camera cam, ndCam;
+        readonly Camera cam, ndCam, glyphCam;
+        public float depthRef = 4f;
         readonly bool linear;
         static readonly int ND_PASS = Shader.PropertyToID("_AsciiNDPass");
 
@@ -52,6 +54,11 @@ namespace AsciiHero
             ndCam = new GameObject("NDCamera").AddComponent<Camera>();
             ndCam.transform.SetParent(cam.transform, false);
             Setup(ndCam, -2, false);
+            glyphCam = new GameObject("GlyphCamera").AddComponent<Camera>();
+            glyphCam.transform.SetParent(cam.transform, false);
+            Setup(glyphCam, -1, false);
+            glyphCam.cullingMask = 1 << GlyphLayer.LAYER;
+            cam.cullingMask = ~(1 << GlyphLayer.LAYER);
             RenderPipelineManager.beginCameraRendering += OnBeginCamera;
         }
 
@@ -87,21 +94,32 @@ namespace AsciiHero
             w = Mathf.Max(8, w); h = Mathf.Max(8, h);
             float cw = Mathf.Max(3f, cellPx), chh = cw / 0.6f;
             int c = Mathf.Max(8, Mathf.FloorToInt(w / cw)), r = Mathf.Max(8, Mathf.FloorToInt(h / chh));
-            Shader.SetGlobalFloat("_AsciiGlyphMode", surfaceGlyphs ? 1f : 0f);
             Shader.SetGlobalFloat("_AsciiExposure", exposure);
+            Shader.SetGlobalFloat("_AsciiDepthRef", depthRef);
             if (w == W && h == H && c == cols && r == rows && final != null && builtSurface == surfaceGlyphs) { SyncND(); return; }
             W = w; H = h; cols = c; rows = r; builtSurface = surfaceGlyphs;
-            cam.targetTexture = null; ndCam.targetTexture = null;
-            Free(ref rtCol); Free(ref rtND); Free(ref rtAscii); Free(ref rtB1); Free(ref rtB2); Free(ref final);
+            cam.targetTexture = null; ndCam.targetTexture = null; glyphCam.targetTexture = null;
+            Free(ref rtCol); Free(ref rtND); Free(ref rtAscii); Free(ref rtB1); Free(ref rtB2); Free(ref final); Free(ref rtFull);
             var half = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGBHalf) ? RenderTextureFormat.ARGBHalf : RenderTextureFormat.ARGB32;
-            rtCol = surfaceGlyphs ? RT(W, H, half, FilterMode.Bilinear, 24, RenderTextureReadWrite.Linear)
-                                  : RT(cols * 2, rows * 2, half, FilterMode.Bilinear, 24, RenderTextureReadWrite.Linear);
-            rtND = RT(cols, rows, half, FilterMode.Point, 24, RenderTextureReadWrite.Linear);
+            if (surfaceGlyphs)
+            {
+                int hw = (W + 1) / 2, hh = (H + 1) / 2;
+                rtCol = RT(hw, hh, half, FilterMode.Bilinear, 24, RenderTextureReadWrite.Linear);
+                rtND = RT(hw, hh, half, FilterMode.Point, 24, RenderTextureReadWrite.Linear);
+                rtFull = RT(W, H, half, FilterMode.Bilinear, 0, RenderTextureReadWrite.Linear);
+                Shader.SetGlobalTexture("_AsciiLitTex", rtCol); Shader.SetGlobalTexture("_AsciiNDTex", rtND);
+            }
+            else
+            {
+                rtCol = RT(cols * 2, rows * 2, half, FilterMode.Bilinear, 24, RenderTextureReadWrite.Linear);
+                rtND = RT(cols, rows, half, FilterMode.Point, 24, RenderTextureReadWrite.Linear);
+            }
             rtAscii = RT(W, H, RenderTextureFormat.ARGB32, FilterMode.Bilinear, 0, RenderTextureReadWrite.Linear);
             rtB1 = RT((W + 3) / 4, (H + 3) / 4, half, FilterMode.Bilinear, 0, RenderTextureReadWrite.Linear);
             rtB2 = RT((W + 3) / 4, (H + 3) / 4, half, FilterMode.Bilinear, 0, RenderTextureReadWrite.Linear);
             final = RT(W, H, RenderTextureFormat.ARGB32, FilterMode.Point, 0, RenderTextureReadWrite.Default);
-            cam.targetTexture = rtCol; ndCam.targetTexture = rtND; ndCam.enabled = !surfaceGlyphs;
+            cam.targetTexture = rtCol; ndCam.targetTexture = rtND;
+            glyphCam.targetTexture = rtFull; glyphCam.enabled = surfaceGlyphs;
             asciiMat.SetVector("_Grid", new Vector4(cols, rows, 0, 0));
             asciiMat.SetVector("_CellPx", new Vector4((float)W / cols, (float)H / rows, 0, 0));
             asciiMat.SetVector("_OutPx", new Vector4(W, H, 0, 0));
@@ -115,6 +133,9 @@ namespace AsciiHero
             ndCam.fieldOfView = cam.fieldOfView; ndCam.nearClipPlane = cam.nearClipPlane; ndCam.farClipPlane = cam.farClipPlane;
             ndCam.aspect = cam.aspect; ndCam.cullingMask = cam.cullingMask;
             ndCam.transform.localPosition = Vector3.zero; ndCam.transform.localRotation = Quaternion.identity;
+            glyphCam.fieldOfView = cam.fieldOfView; glyphCam.nearClipPlane = cam.nearClipPlane; glyphCam.farClipPlane = cam.farClipPlane;
+            glyphCam.aspect = cam.aspect;
+            glyphCam.transform.localPosition = Vector3.zero; glyphCam.transform.localRotation = Quaternion.identity;
         }
 
         /// glyphs + bloom; call after the cameras have rendered this frame (OnGUI repaint)
@@ -122,7 +143,7 @@ namespace AsciiHero
         {
             if (final == null) return;
             RenderTexture src = rtAscii;
-            if (builtSurface) src = rtCol;
+            if (builtSurface) src = rtFull;
             else
             {
                 asciiMat.SetTexture("_ColTex", rtCol); asciiMat.SetTexture("_NDTex", rtND);

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { loadHuman, MAT } from './human.js';
 import { buildCharacter, ARMORS, WEAPONS, BUILDS } from './character.js';
-import { AsciiRenderer, makeMaterials, addGlyphUV, GLYPH } from './ascii.js';
+import { AsciiRenderer, makeMaterials, buildGlyphLayer, GLYPH, GLYPH_STATS } from './ascii.js';
 import { buildTavern } from './tavern.js';
 import { applyPose } from './pose.js';
 import { makeActor, animateActor, locomotion, loadMocap } from './anim.js';
@@ -119,7 +119,7 @@ function floorTexture() {
 }
 const floorMat = mats.STONE; floorMat.map = floorTexture(); floorMat.color.set(0xffffff); floorMat.needsUpdate = true;
 const floor = new THREE.Mesh(new THREE.CircleGeometry(2.6, 64), floorMat);
-floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor); addGlyphUV(floor);
+floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor); buildGlyphLayer(floor);
 
 const camera = new THREE.PerspectiveCamera(36, 1, 0.05, 30);
 
@@ -136,7 +136,7 @@ function rebuild() {
     char.group.traverse(o => { if (o.geometry) o.geometry.dispose(); });
   }
   char = buildCharacter(cfg, actorMats);
-  addGlyphUV(char.group);
+  buildGlyphLayer(char.group);
   scene.add(char.group);
   char.cfgWeapon = cfg.weapon;
   player = makeActor(char);
@@ -218,11 +218,11 @@ function placePlayerInWorld() {
 }
 function enterWorld() {
   if (!tavern) {
-    tavern = buildTavern(mats); setupWorldLights(); addGlyphUV(tavern.group);
+    tavern = buildTavern(mats); setupWorldLights(); buildGlyphLayer(tavern.group);
     const bt = buildCharacter({ sex: 'm', build: 3, height: 178, armor: 'cloth', weapon: 'none' }, actorMats);
     bt.cfgWeapon = 'none';
     const s = 1.78 / bt.height; bt.group.scale.set(1 + (s - 1) * 0.45, s, 1 + (s - 1) * 0.45);
-    bt.group.position.copy(tavern.bartender); addGlyphUV(bt.group);
+    bt.group.position.copy(tavern.bartender); buildGlyphLayer(bt.group);
     bartender = makeActor(bt);
     tavern.colliders.push({ x: tavern.bartender.x, z: tavern.bartender.z, r: 0.3 });
   }
@@ -339,9 +339,10 @@ function frame(now) {
   rim.position.copy(rot(-2.5, 2.2, -3.0));
   fill.position.copy(rot(-2.5, 0.8, 2.0));
   }
+  AR.depthRef = mode === 'world' ? ISO.dist : cam.dist;
   if (window.__plain) { AR.renderer.setRenderTarget(null); AR.renderer.render(scene, camera); } else AR.render(scene, camera, t);
   fpsAcc += dt; fpsN++;
-  if (fpsAcc > 1) { $('fps').textContent = Math.round(fpsN / fpsAcc) + ' fps · ' + AR.cols + '×' + AR.rows; fpsAcc = 0; fpsN = 0; }
+  if (fpsAcc > 1) { $('fps').textContent = Math.round(fpsN / fpsAcc) + ' fps · ' + (GLYPH.uMode.value > 0.5 ? GLYPH_STATS.count + ' симв.' : AR.cols + '×' + AR.rows); fpsAcc = 0; fpsN = 0; }
   requestAnimationFrame(frame);
 }
 window.__dbg = { cam, setCfg, enterWorld, leaveWorld, stick, get pos() { return pos; }, get player() { return player; }, get auto() { return autoRotate; }, set auto(v) { autoRotate = v; }, AR };

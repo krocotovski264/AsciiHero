@@ -1,9 +1,7 @@
-// Scene material for URP: PBR lighting drawn with characters.
-// _AsciiGlyphMode = 1 (default): surface glyphs. Characters live on the model in surface coordinates (uv2, metres),
-//   so they wrap around limbs, follow the shape and stay sharp at any screen resolution; the glyph of each cell
-//   is picked from the lit brightness at the cell centre.
-// _AsciiGlyphMode = 0: screen grid (beta 0.8). The colour camera outputs lit colour; the ND camera
-//   (global _AsciiNDPass = 1) outputs view normal xy, depth / 12 and the material id for the composite shader.
+// Scene material for URP: PBR lighting + ASCII material id. It is never shown directly: the colour camera
+// renders lit colour and the ND camera (global _AsciiNDPass = 1) renders view normal xy, depth / 12 and the
+// material id. Glyph mode reads both per character (AsciiHero/Glyph); grid mode turns them into a screen grid.
+// _AsciiRow / _GlyphCell / _AsciiActor describe the characters built on this material's surface.
 Shader "AsciiHero/Lit"
 {
     Properties
@@ -40,8 +38,7 @@ Shader "AsciiHero/Lit"
             float4 _GlyphCell;
         CBUFFER_END
         TEXTURE2D(_MainTex); SAMPLER(sampler_MainTex);
-        TEXTURE2D(_AsciiAtlas); SAMPLER(sampler_AsciiAtlas);
-        float _AsciiNDPass, _AsciiGlyphMode, _AsciiRows, _AsciiExposure, _AsciiLinear;
+        float _AsciiNDPass;
         ENDHLSL
 
         Pass
@@ -63,7 +60,7 @@ Shader "AsciiHero/Lit"
             #pragma multi_compile_instancing
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
-            struct Attributes { float4 positionOS : POSITION; float3 normalOS : NORMAL; float2 uv : TEXCOORD0; float2 glyph : TEXCOORD1; UNITY_VERTEX_INPUT_INSTANCE_ID };
+            struct Attributes { float4 positionOS : POSITION; float3 normalOS : NORMAL; float2 uv : TEXCOORD0; UNITY_VERTEX_INPUT_INSTANCE_ID };
             struct Varyings
             {
                 float4 positionCS : SV_POSITION;
@@ -71,7 +68,6 @@ Shader "AsciiHero/Lit"
                 float3 normalWS : TEXCOORD1;
                 float2 uv : TEXCOORD2;
                 float viewZ : TEXCOORD3;
-                float2 glyph : TEXCOORD4;
             };
 
             Varyings vert (Attributes i)
@@ -85,7 +81,6 @@ Shader "AsciiHero/Lit"
                 o.normalWS = n.normalWS;
                 o.uv = TRANSFORM_TEX(i.uv, _MainTex);
                 o.viewZ = -p.positionVS.z;
-                o.glyph = i.glyph;
                 return o;
             }
 
@@ -124,34 +119,7 @@ Shader "AsciiHero/Lit"
                 s.alpha = 1;
 
                 half4 c = UniversalFragmentPBR(d, s);
-                if (_AsciiGlyphMode < 0.5) return half4(c.rgb, 1);
-
-                // ---- surface glyphs ----
-                float3 gcol = _AsciiLinear > 0.5 ? pow(max(c.rgb, 0.0), 1.0 / 2.2) : max(c.rgb, 0.0);
-                float glum = dot(gcol, float3(0.299, 0.587, 0.114));
-                glum = saturate(glum * 1.15 * _AsciiExposure * (1.0 + 0.55 * _AsciiActor) + 0.06 * _AsciiActor);
-                float2 g = i.glyph / _GlyphCell.xy;
-                float2 gcell = floor(g), gloc = frac(g);
-                float2 gx = ddx(g), gy = ddy(g);
-                // brightness at the centre of this glyph cell, so one cell shows one whole symbol
-                float gdet = gx.x * gy.y - gx.y * gy.x;
-                float2 goff = gcell + 0.5 - g;
-                float2 gso = abs(gdet) > 1e-9 ? float2(gy.y * goff.x - gy.x * goff.y, -gx.y * goff.x + gx.x * goff.y) / gdet : float2(0, 0);
-                gso = clamp(gso, -6.0, 6.0);
-                float glc = saturate(glum + ddx(glum) * gso.x + ddy(glum) * gso.y);
-                float gh = frac(sin(dot(gcell, float2(12.9898, 78.233))) * 43758.5453);
-                float gi = floor(saturate(pow(glc, 0.85) + (gh - 0.5) * 0.09) * 15.99);
-                if (gi < 1.0 && glc > 0.02) gi = 1.0;
-                float2 gl2 = clamp(gloc, 0.06, 0.94);
-                float2 gs = float2(1.0 / 16.0, 1.0 / max(_AsciiRows, 1.0));
-                float2 gauv = float2((gi + gl2.x) * gs.x, 1.0 - (_AsciiRow + 1.0) * gs.y + gl2.y * gs.y);
-                float gmask = SAMPLE_TEXTURE2D_GRAD(_AsciiAtlas, sampler_AsciiAtlas, gauv, gx * gs, gy * gs).r;
-                float gmx = max(max(gcol.r, gcol.g), gcol.b);
-                float3 ghue = gcol / max(gmx, 1e-3);
-                float3 gout = ghue * (0.30 + 0.85 * glc) * gmask + gcol * _GlyphFill;
-                if (_AsciiRow > 8.5 && _AsciiRow < 9.5) gout = (gcol * 1.3 + 0.15) * max(gmask, 0.35);
-                // display-referred value; the Final pass converts back for a Linear project
-                return half4(gout, 1);
+                return half4(c.rgb, 1);
             }
             ENDHLSL
         }

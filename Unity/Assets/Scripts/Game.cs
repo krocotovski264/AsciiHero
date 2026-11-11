@@ -172,6 +172,7 @@ namespace AsciiHero
             c.Ring(cx, cx, rp - 3, 5, Canvas2D.RGB(0x8a, 0x7c, 0x60));
             var fm = mats.WithTexture("STONE", c.Texture(false), Vector2.one);
             floor = MeshGen.Obj(DiscMesh(2.6f, 64), fm, editorRoot.transform, Vector3.zero, Quaternion.identity, false, "Floor");
+            GlyphLayer.Build(floor);
         }
         static Mesh DiscMesh(float r, int seg)
         {
@@ -187,6 +188,7 @@ namespace AsciiHero
         void SetupWorld()
         {
             tavern = Tavern.Build(mats);
+            GlyphLayer.Build(tavern.root);
             worldLightsRoot = new GameObject("WorldLights");
             var hl = new GameObject("HeroLight"); hl.transform.SetParent(worldLightsRoot.transform, false);
             heroLight = hl.AddComponent<Light>(); heroLight.type = LightType.Point; heroLight.color = Mats.Hex(0xffe6c8); heroLight.intensity = 1.6f; heroLight.range = 4.2f; heroLight.renderMode = LightRenderMode.ForcePixel;
@@ -194,6 +196,7 @@ namespace AsciiHero
             moon.transform.rotation = Quaternion.LookRotation(new Vector3(1f, -7.5f, 7.5f));
             bartenderChar = Character.Build(new CharConfig { sex = 'm', build = 3, height = 178, armor = "cloth", weapon = "none" }, actorMats, "Bartender");
             bartenderChar.go.transform.position = tavern.bartender;
+            GlyphLayer.Build(bartenderChar.go);
             bartender = new MotionActor(bartenderChar);
             tavern.colliders.Add(Collider2.Circle(tavern.bartender.x, tavern.bartender.z, 0.3f));
         }
@@ -239,6 +242,7 @@ namespace AsciiHero
         {
             if (hero != null) Destroy(hero.go);
             hero = Character.Build(cfg, actorMats, "Hero");
+            GlyphLayer.Build(hero.go);
             player = new MotionActor(hero);
             if (useAnimator && locoCtrl != null)
             {
@@ -314,7 +318,7 @@ namespace AsciiHero
             if (player.driver == null) player.Animate(tNow, dt);   // Animator mode: after the Animator, in LateUpdate
             if (toastT > 0) toastT -= dt;
             fpsAcc += Time.unscaledDeltaTime; fpsN++;
-            if (fpsAcc > 1) { fpsText = Mathf.RoundToInt(fpsN / fpsAcc) + " fps · " + ascii.cols + "×" + ascii.rows; fpsAcc = 0; fpsN = 0; }
+            if (fpsAcc > 1) { fpsText = Mathf.RoundToInt(fpsN / fpsAcc) + " fps · " + (ascii.surfaceGlyphs ? GlyphLayer.count + " симв." : ascii.cols + "×" + ascii.rows); fpsAcc = 0; fpsN = 0; }
         }
 
         bool InUi(Vector2 p) { foreach (var r in uiRectsPrev) if (r.Contains(p)) return true; return false; }
@@ -441,6 +445,7 @@ namespace AsciiHero
             float dp = Screen.dpi > 0 ? Mathf.Clamp(Screen.dpi / 160f, 1f, 4f) : Mathf.Max(1f, k);
             float wcss = vr.width / dp;
             float cell = Mathf.Max(4f / dp, world ? Mathf.Min(1.7f, wcss / 540f) : Mathf.Min(2.0f, wcss / 310f));
+            ascii.depthRef = world ? ISO_DIST : cam.dist;
             ascii.SetSize(Mathf.RoundToInt(vr.width), Mathf.RoundToInt(vr.height), cell * dp);
             if (!world)
             {

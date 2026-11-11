@@ -77,12 +77,11 @@ namespace AsciiHero
                 m.SetColor("_EmissionColor", Hex(d.emissive));
                 m.SetFloat("_Cull", d.twoSided ? 0f : 2f);
                 m.SetFloat("_AsciiId", AsciiIdValue(d.id, actor));
-                // surface glyphs: ramp row, glyph cell size in metres (characters are finer than walls), base fill
+                // characters built on this surface: ramp row, glyph size in metres (finer on characters than on walls)
                 m.SetFloat("_AsciiRow", d.id < MatId.RAMP.Length ? MatId.RAMP[d.id] : 0);
                 m.SetFloat("_AsciiActor", actor ? 1 : 0);
-                m.SetFloat("_GlyphFill", actor ? 0.05f : 0.07f);
                 bool big = kv.Key == "FLOOR" || kv.Key == "PLASTER" || kv.Key == "PLANK" || kv.Key == "HEARTH" || kv.Key == "STONE" || kv.Key == "BEAM";
-                m.SetVector("_GlyphCell", actor ? new Vector4(0.017f, 0.028f, 0, 0) : big ? new Vector4(0.045f, 0.075f, 0, 0) : new Vector4(0.03f, 0.05f, 0, 0));
+                m.SetVector("_GlyphCell", actor ? new Vector4(0.017f, 0.028f, 0, 0) : big ? new Vector4(0.06f, 0.1f, 0, 0) : new Vector4(0.034f, 0.056f, 0, 0));
                 map[kv.Key] = m;
             }
         }

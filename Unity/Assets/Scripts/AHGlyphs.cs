@@ -1,0 +1,140 @@
+// Builds the character layer: points laid in rows on every model surface (uv2 = surface coordinates in metres),
+// one glyph quad per point. Skinned meshes get a skinned glyph mesh with the same bones, so the characters
+// follow the animation. Rendered by the glyph camera only (layer LAYER).
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace AsciiHero
+{
+    public static class GlyphLayer
+    {
+        public const int LAYER = 31;
+        public static int count;
+        static readonly Dictionary<string, Material> MATS = new Dictionary<string, Material>();
+
+        static Material GlyphMaterial(float row, Vector4 cell, float actor)
+        {
+            string key = row + ":" + cell.x + ":" + actor;
+            Material m;
+            if (MATS.TryGetValue(key, out m)) return m;
+            var sh = Shader.Find("AsciiHero/Glyph");
+            if (sh == null) { Debug.LogError("AsciiHero/Glyph shader not found"); return null; }
+            m = new Material(sh) { name = "Glyph " + key };
+            m.SetFloat("_AsciiRow", row); m.SetFloat("_AsciiActor", actor); m.SetVector("_GlyphCell", cell);
+            MATS[key] = m; return m;
+        }
+
+        /// add the character layer to every renderer under root (once per renderer)
+        public static void Build(GameObject root)
+        {
+            var list = new List<Renderer>(root.GetComponentsInChildren<Renderer>(true));
+            foreach (var r in list)
+            {
+                if (r.gameObject.layer == LAYER || r.transform.Find("Glyphs") != null) continue;
+                var mat = r.sharedMaterial; if (mat == null || !mat.HasProperty("_AsciiRow")) continue;
+                var smr = r as SkinnedMeshRenderer;
+                Mesh src = smr != null ? smr.sharedMesh : (r.GetComponent<MeshFilter>() != null ? r.GetComponent<MeshFilter>().sharedMesh : null);
+                if (src == null) continue;
+                var gm = GlyphMaterial(mat.GetFloat("_AsciiRow"), mat.GetVector("_GlyphCell"), mat.GetFloat("_AsciiActor"));
+                if (gm == null) return;
+                var mesh = Sample(src, mat.GetVector("_GlyphCell"), smr != null);
+                if (mesh == null) continue;
+                var go = new GameObject("Glyphs"); go.layer = LAYER;
+                if (smr != null)
+                {
+                    go.transform.SetParent(r.transform.parent, false);
+                    go.transform.localPosition = r.transform.localPosition; go.transform.localRotation = r.transform.localRotation; go.transform.localScale = r.transform.localScale;
+                    var g = go.AddComponent<SkinnedMeshRenderer>();
+                    mesh.bindposes = src.bindposes;
+                    g.sharedMesh = mesh; g.bones = smr.bones; g.rootBone = smr.rootBone; g.sharedMaterial = gm;
+                    g.updateWhenOffscreen = true;
+                    g.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; g.receiveShadows = false;
+                    // keep the pair together (visibility, destruction)
+                    new GameObject("Glyphs").transform.SetParent(r.transform, false);
+                }
+                else
+                {
+                    go.transform.SetParent(r.transform, false);
+                    go.AddComponent<MeshFilter>().sharedMesh = mesh;
+                    var g = go.AddComponent<MeshRenderer>(); g.sharedMaterial = gm;
+                    g.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; g.receiveShadows = false;
+                }
+            }
+        }
+
+        // rows of points: one per glyph cell centre of the surface coordinates
+        static Mesh Sample(Mesh src, Vector4 cell, bool skinned)
+        {
+            var P = src.vertices; var N = src.normals; var U = new List<Vector2>(); src.GetUVs(1, U);
+            if (U.Count != P.Length || N == null || N.Length != P.Length) return null;
+            var BW = skinned ? src.boneWeights : null;
+            var T = src.triangles;
+            float cw = cell.x, ch = cell.y;
+            var verts = new List<Vector3>(); var nors = new List<Vector3>(); var corners = new List<Vector2>(); var seeds = new List<Vector2>();
+            var bws = new List<BoneWeight>(); var tris = new List<int>();
+            var acc = new Dictionary<int, float>();
+            Vector2[] CORNER = { new Vector2(-0.5f, -0.5f), new Vector2(0.5f, -0.5f), new Vector2(0.5f, 0.5f), new Vector2(-0.5f, 0.5f) };
+            for (int t = 0; t < T.Length; t += 3)
+            {
+                int ia = T[t], ib = T[t + 1], ic = T[t + 2];
+                Vector2 a = U[ia], b = U[ib], c = U[ic];
+                float area3 = Vector3.Cross(P[ib] - P[ia], P[ic] - P[ia]).magnitude / 2;
+                float det = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y), areaUV = Mathf.Abs(det) / 2;
+                if (areaUV < 1e-12f || areaUV > area3 * 4 + 1e-9f) continue;     // degenerate or across a seam
+                int i0 = Mathf.CeilToInt(Mathf.Min(a.x, Mathf.Min(b.x, c.x)) / cw - 0.5f), i1 = Mathf.FloorToInt(Mathf.Max(a.x, Mathf.Max(b.x, c.x)) / cw - 0.5f);
+                int j0 = Mathf.CeilToInt(Mathf.Min(a.y, Mathf.Min(b.y, c.y)) / ch - 0.5f), j1 = Mathf.FloorToInt(Mathf.Max(a.y, Mathf.Max(b.y, c.y)) / ch - 0.5f);
+                for (int i = i0; i <= i1; i++)
+                    for (int j = j0; j <= j1; j++)
+                    {
+                        float u = (i + 0.5f) * cw, v = (j + 0.5f) * ch;
+                        float wb = ((u - a.x) * (c.y - a.y) - (c.x - a.x) * (v - a.y)) / det;
+                        float wc = ((b.x - a.x) * (v - a.y) - (u - a.x) * (b.y - a.y)) / det;
+                        float wa = 1 - wb - wc;
+                        if (wa < 0 || wb < 0 || wc < 0 || (wb == 0 && wc == 0)) continue;
+                        Vector3 p = P[ia] * wa + P[ib] * wb + P[ic] * wc;
+                        Vector3 n = (N[ia] * wa + N[ib] * wb + N[ic] * wc).normalized;
+                        float seed = Mathf.Abs(Mathf.Sin(i * 12.9898f + j * 78.233f) * 43758.5453f) % 1f;
+                        BoneWeight bw = new BoneWeight();
+                        if (skinned)
+                        {
+                            acc.Clear();
+                            Add(acc, BW[ia], wa); Add(acc, BW[ib], wb); Add(acc, BW[ic], wc);
+                            bw = Top4(acc);
+                        }
+                        int o = verts.Count;
+                        for (int k = 0; k < 4; k++)
+                        {
+                            verts.Add(p); nors.Add(n); corners.Add(CORNER[k]); seeds.Add(new Vector2(seed, 0));
+                            if (skinned) bws.Add(bw);
+                        }
+                        tris.Add(o); tris.Add(o + 2); tris.Add(o + 1); tris.Add(o); tris.Add(o + 3); tris.Add(o + 2);
+                    }
+            }
+            if (verts.Count == 0) return null;
+            var m = new Mesh { name = src.name + " glyphs" };
+            m.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+            m.SetVertices(verts); m.SetNormals(nors); m.SetUVs(0, corners); m.SetUVs(1, seeds); m.SetTriangles(tris, 0);
+            if (skinned) m.boneWeights = bws.ToArray();
+            m.RecalculateBounds();
+            var bnd = m.bounds; bnd.Expand(1f); m.bounds = bnd;
+            count += verts.Count / 4;
+            return m;
+        }
+        static void Add(Dictionary<int, float> acc, BoneWeight w, float k)
+        {
+            void A(int i, float x) { if (x <= 0) return; float c; acc.TryGetValue(i, out c); acc[i] = c + x * k; }
+            A(w.boneIndex0, w.weight0); A(w.boneIndex1, w.weight1); A(w.boneIndex2, w.weight2); A(w.boneIndex3, w.weight3);
+        }
+        static BoneWeight Top4(Dictionary<int, float> acc)
+        {
+            var l = new List<KeyValuePair<int, float>>(acc); l.Sort((x, y) => y.Value.CompareTo(x.Value));
+            float s = 0; for (int i = 0; i < Mathf.Min(4, l.Count); i++) s += l[i].Value; if (s <= 0) s = 1;
+            var b = new BoneWeight();
+            if (l.Count > 0) { b.boneIndex0 = l[0].Key; b.weight0 = l[0].Value / s; }
+            if (l.Count > 1) { b.boneIndex1 = l[1].Key; b.weight1 = l[1].Value / s; }
+            if (l.Count > 2) { b.boneIndex2 = l[2].Key; b.weight2 = l[2].Value / s; }
+            if (l.Count > 3) { b.boneIndex3 = l[3].Key; b.weight3 = l[3].Value / s; }
+            return b;
+        }
+    }
+}

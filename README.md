@@ -56,7 +56,7 @@ git lfs pull
 | `AHCharacter.cs` | сборка героя: броня, волосы, оружие, щит |
 | `AHMotion.cs` | Motion Matching и Foot IK |
 | `AHAnimatorDriver.cs` | режим Animator Controller: параметры Speed / LeanAngle / TurnAngle и т. д. |
-| `AHAscii.cs` + `Resources/Shaders` | две камеры (цвет и нормали/глубина/id) → глифы → bloom |
+| `AHGlyphs.cs`, `AHAscii.cs` + `Resources/Shaders` | модели собраны из символов: точки рядами по поверхности, каждая — ровный символ лицом к камере, яркость от света и глубины; запасной режим — сетка экрана |
 | `AHTavern.cs` | трактир, свет, коллизии, срез стен |
 | `Game.cs`, `AHInput.cs` | режимы, интерфейс, ввод (Input System) |
 | `Editor/AnimatorProjectPatcher.cs` | **Tools → Patch Project Locomotion**: клипы из mocap + Animator Controller |
