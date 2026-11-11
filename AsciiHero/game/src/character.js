@@ -229,6 +229,7 @@ function robeSkirt(h, mats, yTop, skeleton, skinned) {
   for (let r = 0; r < rings; r++) for (let s = 0; s < segs; s++) { const a = r * (segs + 1) + s, b = a + segs + 1; idx.push(a, a + 1, b, a + 1, b + 1, b); }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+  g.userData.glyphCyl = true;
   const m = mesh(g, mats.ROBE); m.material.side = THREE.DoubleSide;
   const hem = mesh(new THREE.TorusGeometry(1, 0.012, 4, 48), mats.GOLD);
   const last = pos.length / 3 - segs - 1;

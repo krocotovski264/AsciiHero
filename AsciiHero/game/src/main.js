@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { loadHuman, MAT } from './human.js';
 import { buildCharacter, ARMORS, WEAPONS, BUILDS } from './character.js';
-import { AsciiRenderer, makeMaterials } from './ascii.js';
+import { AsciiRenderer, makeMaterials, addGlyphUV, GLYPH } from './ascii.js';
 import { buildTavern } from './tavern.js';
 import { applyPose } from './pose.js';
 import { makeActor, animateActor, locomotion, loadMocap } from './anim.js';
@@ -65,6 +65,11 @@ $('rand').onclick = () => {
 function toast(t) { const el = $('toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toast._t); toast._t = setTimeout(() => el.classList.remove('show'), 2600); }
 $('done').onclick = () => { try { localStorage.setItem('ascii_hero3d', JSON.stringify(cfg)); } catch (e) {} enterWorld(); };
 $('back').onclick = () => leaveWorld();
+// where the characters live: on the models (surface glyphs) or on a screen grid (beta 0.8)
+try { const gm = localStorage.getItem('ascii_hero_gmode'); if (gm !== null) GLYPH.uMode.value = +gm; } catch (e) {}
+function syncGMode() { const on = GLYPH.uMode.value > 0.5; $('gmode').classList.toggle('on', on); $('gmode').textContent = on ? 'Aa на моделях' : 'Aa сеткой экрана'; }
+$('gmode').onclick = () => { GLYPH.uMode.value = GLYPH.uMode.value > 0.5 ? 0 : 1; try { localStorage.setItem('ascii_hero_gmode', GLYPH.uMode.value); } catch (e) {} syncGMode(); resize(); };
+syncGMode();
 $('lock').onclick = () => {
   lockOn = !lockOn; $('lock').classList.toggle('on', lockOn);
   lockFixed = null;
@@ -114,7 +119,7 @@ function floorTexture() {
 }
 const floorMat = mats.STONE; floorMat.map = floorTexture(); floorMat.color.set(0xffffff); floorMat.needsUpdate = true;
 const floor = new THREE.Mesh(new THREE.CircleGeometry(2.6, 64), floorMat);
-floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor); addGlyphUV(floor);
 
 const camera = new THREE.PerspectiveCamera(36, 1, 0.05, 30);
 
@@ -131,6 +136,7 @@ function rebuild() {
     char.group.traverse(o => { if (o.geometry) o.geometry.dispose(); });
   }
   char = buildCharacter(cfg, actorMats);
+  addGlyphUV(char.group);
   scene.add(char.group);
   char.cfgWeapon = cfg.weapon;
   player = makeActor(char);
@@ -173,7 +179,7 @@ setTimeout(hideHint, 6000);
 
 function resize() {
   const r = $('view').getBoundingClientRect(); W = Math.max(1, r.width); H = Math.max(1, r.height);
-  const dpr = Math.min(2.5, window.devicePixelRatio || 1);
+  const dpr = Math.min(GLYPH.uMode.value > 0.5 ? 2 : 2.5, window.devicePixelRatio || 1);
   const cell = Math.max(4 / dpr, mode === 'world' ? Math.min(1.7, W / 540) : Math.min(2.0, W / 310));
   AR.setSize(W, H, dpr, cell * QUALITY);
   camera.aspect = W / H; camera.updateProjectionMatrix();
@@ -212,11 +218,11 @@ function placePlayerInWorld() {
 }
 function enterWorld() {
   if (!tavern) {
-    tavern = buildTavern(mats); setupWorldLights();
+    tavern = buildTavern(mats); setupWorldLights(); addGlyphUV(tavern.group);
     const bt = buildCharacter({ sex: 'm', build: 3, height: 178, armor: 'cloth', weapon: 'none' }, actorMats);
     bt.cfgWeapon = 'none';
     const s = 1.78 / bt.height; bt.group.scale.set(1 + (s - 1) * 0.45, s, 1 + (s - 1) * 0.45);
-    bt.group.position.copy(tavern.bartender);
+    bt.group.position.copy(tavern.bartender); addGlyphUV(bt.group);
     bartender = makeActor(bt);
     tavern.colliders.push({ x: tavern.bartender.x, z: tavern.bartender.z, r: 0.3 });
   }

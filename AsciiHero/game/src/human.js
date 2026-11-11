@@ -86,12 +86,13 @@ export class Human {
     this.partTris = partT;
     const key = sex + build;
     const C = CACHE[key];
-    if (C) { this.nor = C.nor; this.adj = C.adj; this.region = C.region; this.side = C.side; this.limbT = C.limbT; }
+    if (C) { this.nor = C.nor; this.adj = C.adj; this.region = C.region; this.side = C.side; this.limbT = C.limbT; this.gUV = C.gUV; }
     else {
       this.nor = vertexNormals(pos, Uint32Array.from(partT[0]), n);
       this.adj = adjacency(Uint32Array.from(partT[0]), n);
       this.computeRegions();
-      CACHE[key] = { nor: this.nor, adj: this.adj, region: this.region, side: this.side, limbT: this.limbT };
+      this.computeGlyphUV();
+      CACHE[key] = { nor: this.nor, adj: this.adj, region: this.region, side: this.side, limbT: this.limbT, gUV: this.gUV };
     }
   }
   head(b) { return this.heads[this.BI[b]]; }
@@ -137,6 +138,49 @@ export class Human {
     }
   }
 
+  // Surface glyph coordinates (metres) in the rest pose: every body part gets a cylindrical frame around its bone
+  // (rings of characters wrap around arms, legs and torso), the head a spherical one (concentric rings on the crown).
+  // u runs left->right seen from outside, v runs "up" (towards the joint the limb hangs from).
+  computeGlyphUV() {
+    const n = this.n, P = this.pos, R = this.region, uv = new Float32Array(n * 2);
+    const H = b => this.head(b);
+    const seg = { upperarm: ['upperarm01', 'lowerarm01'], forearm: ['lowerarm01', 'wrist'], hand: ['wrist', 'finger3-1'],
+      thigh: ['upperleg01', 'lowerleg01'], shin: ['lowerleg01', 'foot'], foot: ['foot', 'toe3-1'] };
+    const V = THREE.Vector3, tmp = new V(), r = new V(), e1 = new V(), e2 = new V();
+    const frames = {};
+    const frameFor = (reg, s) => {
+      const k = reg + s; if (frames[k]) return frames[k];
+      let A, D, sph = false;
+      if (seg[reg]) { const a = H(seg[reg][0] + '.' + s), b = H(seg[reg][1] + '.' + s); A = b.clone(); D = a.clone().sub(b).normalize(); }
+      else if (reg === 'head') { const h = H('head'); A = new V(0, (h.y + this.tail('head').y) / 2, h.z + 0.01); D = new V(0, 1, 0); sph = true; }
+      else { const sp = H('spine03'); A = new V(0, 0, sp.z); D = new V(0, 1, 0); }
+      const f = new V(0, 0, 1); if (Math.abs(f.dot(D)) > 0.9) f.set(0, 1, 0);
+      const E1 = f.addScaledVector(D, -f.dot(D)).normalize(), E2 = new V().crossVectors(D, E1);
+      return (frames[k] = { A, D, E1, E2, sph, rsum: 0, rn: 0 });
+    };
+    const fr = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const reg0 = R[i], reg = seg[reg0] || reg0 === 'head' ? reg0 : 'trunk', s = P[i * 3] >= 0 ? 'L' : 'R';
+      const F = frameFor(reg, seg[reg] ? s : ''); fr[i] = F;
+      tmp.set(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]).sub(F.A);
+      if (F.sph) F.rsum += tmp.length(); else { r.copy(tmp).addScaledVector(F.D, -tmp.dot(F.D)); F.rsum += r.length(); }
+      F.rn++;
+    }
+    for (let i = 0; i < n; i++) {
+      const F = fr[i], Rm = F.rsum / Math.max(1, F.rn);
+      tmp.set(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]).sub(F.A);
+      if (F.sph) {
+        const l = tmp.length() || 1, polar = Math.acos(Math.max(-1, Math.min(1, tmp.dot(F.D) / l)));
+        const az = Math.atan2(tmp.dot(F.E2), tmp.dot(F.E1));
+        uv[i * 2] = az * Rm * Math.sin(Math.max(0.35, polar)); uv[i * 2 + 1] = (Math.PI / 2 - polar) * Rm;
+      } else {
+        const t = tmp.dot(F.D); r.copy(tmp).addScaledVector(F.D, -t);
+        uv[i * 2] = Math.atan2(r.dot(F.E2), r.dot(F.E1)) * Rm; uv[i * 2 + 1] = t;
+      }
+    }
+    this.gUV = uv;
+  }
+
   // garment shell: select body faces by predicate(vertex) -> offset along normal
   shell(pred, thick, opts = {}) {
     const n = this.n, P = this.pos, N = this.nor, T = this.partTris[0];
@@ -164,17 +208,19 @@ export class Human {
     const map = new Map(); const out = [];
     for (const v of tris) { if (!map.has(v)) map.set(v, map.size); out.push(map.get(v)); }
     const m = map.size;
-    const pos = new Float32Array(m * 3), si = new Uint16Array(m * 4), sw = new Float32Array(m * 4), uv = new Float32Array(m * 2);
+    const pos = new Float32Array(m * 3), si = new Uint16Array(m * 4), sw = new Float32Array(m * 4), uv = new Float32Array(m * 2), gl = new Float32Array(m * 2);
     for (const [v, j] of map) {
       pos[j * 3] = posAll[v * 3]; pos[j * 3 + 1] = posAll[v * 3 + 1]; pos[j * 3 + 2] = posAll[v * 3 + 2];
       for (let k = 0; k < 4; k++) { si[j * 4 + k] = this.skinIndex[v * 4 + k]; sw[j * 4 + k] = this.skinWeight[v * 4 + k] / 255; }
       uv[j * 2] = this.limbT[v]; uv[j * 2 + 1] = posAll[v * 3 + 1];
+      gl[j * 2] = this.gUV[v * 2]; gl[j * 2 + 1] = this.gUV[v * 2 + 1];
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     g.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
     g.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
     g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    g.setAttribute('glyphUV', new THREE.BufferAttribute(gl, 2));
     g.setIndex(out.length > 65535 ? new THREE.Uint32BufferAttribute(out, 1) : new THREE.Uint16BufferAttribute(out, 1));
     if (opts.flip) { const ix = g.index.array; for (let t = 0; t < ix.length; t += 3) { const s = ix[t]; ix[t] = ix[t + 1]; ix[t + 1] = s; } }
     g.computeVertexNormals();

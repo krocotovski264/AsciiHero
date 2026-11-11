@@ -56,14 +56,86 @@ export const MATERIAL_DEFS = {
   STONE: { id: MAT.STONE, color: 0xffffff, rough: 0.95, metal: 0, lambert: true },
 };
 
+// Shared uniforms of the surface-glyph look (mode 1): characters live ON the models, in surface coordinates
+// (attribute glyphUV, metres), so they wrap around limbs, follow folds and keep their size at any screen resolution.
+export const GLYPH = { tGlyph: { value: null }, uRows: { value: RAMPS.length }, uExposure: { value: 1 }, uMode: { value: 1 } };
+let ATLAS = null;
+export function glyphAtlas() { if (!ATLAS) { ATLAS = buildAtlas(); GLYPH.tGlyph.value = ATLAS; } return ATLAS; }
+// glyph cell (width, height) in metres per material family
+const CELL_ACTOR = new THREE.Vector2(0.017, 0.028), CELL_PROP = new THREE.Vector2(0.03, 0.05), CELL_BIG = new THREE.Vector2(0.045, 0.075);
+const BIG = new Set(['FLOOR', 'PLASTER', 'PLANK', 'HEARTH', 'STONE', 'BEAM']);
+
+const GLYPH_VERT_HEAD = 'attribute vec2 glyphUV;\nvarying vec2 vGlyph;\n';
+const GLYPH_FRAG_HEAD = `uniform sampler2D tGlyph; uniform float uRows, uExposure, uMode, uRow, uActor, uFill; uniform vec2 uCell;
+varying vec2 vGlyph;
+`;
+const glyphFragTail = (id) => `
+  if (uMode > 0.5) {
+    vec3 gcol = pow(max(gl_FragColor.rgb, 0.0), vec3(1.0 / 2.2));
+    float glum = dot(gcol, vec3(0.299, 0.587, 0.114));
+    glum = clamp(glum * 1.15 * uExposure * (1.0 + 0.55 * uActor) + 0.06 * uActor, 0.0, 1.0);
+    vec2 g = vGlyph / uCell;
+    vec2 gcell = floor(g), gloc = fract(g);
+    vec2 gx = dFdx(g), gy = dFdy(g);
+    // brightness at the centre of this glyph cell (linear extrapolation in screen space), so a whole glyph uses one symbol
+    float gdet = gx.x * gy.y - gx.y * gy.x;
+    vec2 goff = gcell + 0.5 - g;
+    vec2 gso = abs(gdet) > 1e-9 ? vec2(gy.y * goff.x - gy.x * goff.y, -gx.y * goff.x + gx.x * goff.y) / gdet : vec2(0.0);
+    gso = clamp(gso, vec2(-6.0), vec2(6.0));
+    float glc = clamp(glum + dFdx(glum) * gso.x + dFdy(glum) * gso.y, 0.0, 1.0);
+    float gh = fract(sin(dot(gcell, vec2(12.9898, 78.233))) * 43758.5453);
+    float gi = floor(clamp(pow(glc, 0.85) + (gh - 0.5) * 0.09, 0.0, 1.0) * 15.99);
+    if (gi < 1.0 && glc > 0.02) gi = 1.0;
+    vec2 gl2 = clamp(gloc, 0.06, 0.94);
+    vec2 gs = vec2(1.0 / 16.0, 1.0 / uRows);
+    vec2 gauv = vec2((gi + gl2.x) * gs.x, 1.0 - (uRow + 1.0) * gs.y + gl2.y * gs.y);
+    float gmask = textureGrad(tGlyph, gauv, gx * gs, gy * gs).r;
+    float gmx = max(max(gcol.r, gcol.g), gcol.b);
+    vec3 ghue = gcol / max(gmx, 1e-3);
+    vec3 gout = ghue * (0.30 + 0.85 * glc) * gmask + gcol * uFill;
+    if (uRow > 8.5 && uRow < 9.5) gout = (gcol * 1.3 + 0.15) * max(gmask, 0.35);
+    gl_FragColor = vec4(gout, 1.0);
+  } else {
+    gl_FragColor.a = ${(id / 255).toFixed(6)};
+  }
+}`;
+
+// planar / cylindrical glyph coordinates for rigid props (object space, metres)
+export function addGlyphUV(root) {
+  root.traverse(o => {
+    if (!o.isMesh || !o.geometry || o.geometry.getAttribute('glyphUV')) return;
+    const g = o.geometry, P = g.getAttribute('position'); if (!P) return;
+    if (!g.getAttribute('normal')) g.computeVertexNormals();
+    const N = g.getAttribute('normal'), n = P.count, uv = new Float32Array(n * 2);
+    const cyl = /Lathe|Cylinder|Cone|Capsule/.test(g.type) || g.userData.glyphCyl;
+    let rm = 0; if (cyl) { for (let i = 0; i < n; i++) rm += Math.hypot(P.getX(i), P.getZ(i)); rm = Math.max(0.01, rm / n); }
+    for (let i = 0; i < n; i++) {
+      const x = P.getX(i), y = P.getY(i), z = P.getZ(i), nx = N.getX(i), ny = N.getY(i), nz = N.getZ(i);
+      const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
+      if (cyl && ay < 0.7) { uv[i * 2] = Math.atan2(x, z) * rm; uv[i * 2 + 1] = y; }
+      else if (ay >= ax && ay >= az) { uv[i * 2] = x; uv[i * 2 + 1] = ny > 0 ? -z : z; }
+      else if (ax >= az) { uv[i * 2] = nx > 0 ? -z : z; uv[i * 2 + 1] = y; }
+      else { uv[i * 2] = nz > 0 ? x : -x; uv[i * 2 + 1] = y; }
+    }
+    g.setAttribute('glyphUV', new THREE.BufferAttribute(uv, 2));
+  });
+}
+
 export function makeMaterials(envMap, actor = false) {
   const out = {};
+  glyphAtlas();
   for (const [k, d] of Object.entries(MATERIAL_DEFS)) {
     const m = d.lambert ? new THREE.MeshLambertMaterial({ color: d.color, emissive: d.emissive || 0 }) : new THREE.MeshStandardMaterial({ color: d.color, roughness: d.rough, metalness: d.metal, emissive: d.emissive || 0, side: d.side || THREE.FrontSide, envMap: envMap || null, envMapIntensity: 0.9 });
     const id = (MAT_RAMP[d.id] !== undefined ? d.id : 0) + 1 + (actor ? 128 : 0);
     m.userData.matId = id;
+    const row = MAT_RAMP[d.id] !== undefined ? MAT_RAMP[d.id] : 0;
+    const own = { uRow: { value: row }, uActor: { value: actor ? 1 : 0 }, uFill: { value: actor ? 0.05 : 0.07 },
+      uCell: { value: actor ? CELL_ACTOR : BIG.has(k) ? CELL_BIG : CELL_PROP } };
+    m.userData.glyph = own;
     m.onBeforeCompile = (sh) => {
-      sh.fragmentShader = sh.fragmentShader.replace(/}\s*$/, `  gl_FragColor.a = ${(id / 255).toFixed(6)};\n}`);
+      Object.assign(sh.uniforms, GLYPH, own);
+      sh.vertexShader = GLYPH_VERT_HEAD + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vGlyph = glyphUV;');
+      sh.fragmentShader = GLYPH_FRAG_HEAD + sh.fragmentShader.replace(/}\s*$/, glyphFragTail(id));
     };
     m.customProgramCacheKey = () => 'mat' + id;
     out[k] = m;
@@ -116,7 +188,8 @@ export class AsciiRenderer {
     this.rtAscii = new THREE.WebGLRenderTarget(2, 2, { magFilter: THREE.LinearFilter, minFilter: THREE.LinearFilter });
     this.rtB1 = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, magFilter: THREE.LinearFilter, minFilter: THREE.LinearFilter });
     this.rtB2 = this.rtB1.clone();
-    this.atlas = buildAtlas();
+    this.atlas = glyphAtlas();
+    this.rtFull = new THREE.WebGLRenderTarget(2, 2, { magFilter: THREE.LinearFilter, minFilter: THREE.LinearFilter, depthBuffer: true, samples: 0 });
     const rampMap = new Float32Array(32).fill(0);
     for (const [k, v] of Object.entries(MAT_RAMP)) rampMap[+k + 1] = v;
     this.asciiMat = new THREE.ShaderMaterial({
@@ -214,6 +287,7 @@ export class AsciiRenderer {
     this.rtCol.setSize(cols * 2, rows * 2);
     this.rtND.setSize(cols, rows);
     this.rtAscii.setSize(W, H);
+    this.rtFull.setSize(W, H);
     this.rtB1.setSize(Math.ceil(W / 4), Math.ceil(H / 4)); this.rtB2.setSize(Math.ceil(W / 4), Math.ceil(H / 4));
     this.W = W; this.H = H;
   }
@@ -221,15 +295,26 @@ export class AsciiRenderer {
     const r = this.renderer;
     this.asciiMat.uniforms.time.value = t;
     r.setClearColor(0x000000, 0);
-    r.setRenderTarget(this.rtCol); r.clear(); r.render(scene, camera);
-    const bg = scene.background; scene.overrideMaterial = ND_MAT;
-    r.setRenderTarget(this.rtND); r.setClearColor(0x000000, 0); r.clear(); r.render(scene, camera);
-    scene.overrideMaterial = null;
-    this.quad.material = this.asciiMat; r.setRenderTarget(this.rtAscii); r.render(this.fsScene, this.fsCam);
+    let src;
+    GLYPH.uExposure.value = this.asciiMat.uniforms.exposure.value;
+    if (GLYPH.uMode.value > 0.5) {
+      // surface glyphs: the models themselves are drawn with characters at full resolution
+      r.setRenderTarget(this.rtFull); r.clear(); r.render(scene, camera);
+      src = this.rtFull;
+    } else {
+      // screen grid (beta 0.8): low-res render -> glyph per screen cell
+      r.setRenderTarget(this.rtCol); r.clear(); r.render(scene, camera);
+      scene.overrideMaterial = ND_MAT;
+      r.setRenderTarget(this.rtND); r.setClearColor(0x000000, 0); r.clear(); r.render(scene, camera);
+      scene.overrideMaterial = null;
+      this.quad.material = this.asciiMat; r.setRenderTarget(this.rtAscii); r.render(this.fsScene, this.fsCam);
+      src = this.rtAscii;
+    }
+    this.compMat.uniforms.tA.value = src.texture;
     // bloom
     this.quad.material = this.blurMat;
     const bw = this.rtB1.width, bh = this.rtB1.height;
-    this.blurMat.uniforms.tSrc.value = this.rtAscii.texture; this.blurMat.uniforms.dir.value.set(1.6 / bw, 0); r.setRenderTarget(this.rtB1); r.render(this.fsScene, this.fsCam);
+    this.blurMat.uniforms.tSrc.value = src.texture; this.blurMat.uniforms.dir.value.set(1.6 / bw, 0); r.setRenderTarget(this.rtB1); r.render(this.fsScene, this.fsCam);
     this.blurMat.uniforms.tSrc.value = this.rtB1.texture; this.blurMat.uniforms.dir.value.set(0, 1.6 / bh); r.setRenderTarget(this.rtB2); r.render(this.fsScene, this.fsCam);
     this.blurMat.uniforms.tSrc.value = this.rtB2.texture; this.blurMat.uniforms.dir.value.set(3.2 / bw, 0); r.setRenderTarget(this.rtB1); r.render(this.fsScene, this.fsCam);
     this.blurMat.uniforms.tSrc.value = this.rtB1.texture; this.blurMat.uniforms.dir.value.set(0, 3.2 / bh); r.setRenderTarget(this.rtB2); r.render(this.fsScene, this.fsCam);

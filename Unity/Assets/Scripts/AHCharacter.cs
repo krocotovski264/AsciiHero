@@ -230,6 +230,7 @@ namespace AsciiHero
             for (int r = 0; r < rows; r++) for (int s = 0; s < segs; s++)
                 { int a = r * (segs + 1) + s, b = a + segs + 1; idx.Add(a); idx.Add(a + 1); idx.Add(b); idx.Add(a + 1); idx.Add(b + 1); idx.Add(b); }
             var m = new Mesh(); m.SetVertices(v); m.SetTriangles(idx, 0); m.RecalculateNormals(); m.RecalculateBounds();
+            MeshGen.AddGlyphUV(m, false);
             var g = Group("LongHair"); Part(m, "HAIR2", g, Vector3.zero);
             Attach("head", g, Vector3.zero, Quaternion.identity);
         }
@@ -267,6 +268,7 @@ namespace AsciiHero
             for (int r = 0; r < rings; r++) for (int s = 0; s < segs; s++)
                 { int a = r * (segs + 1) + s, b = a + segs + 1; idx.Add(a); idx.Add(b); idx.Add(a + 1); idx.Add(a + 1); idx.Add(b); idx.Add(b + 1); }
             var m = new Mesh(); m.SetVertices(v); m.SetTriangles(idx, 0); m.RecalculateNormals(); m.RecalculateBounds();
+            MeshGen.AddGlyphUV(m, true);
             var g = Group("RobeSkirt"); Part(m, "ROBE", g, Vector3.zero);
             Attach("spine05", g, Vector3.zero, Quaternion.identity);
         }

@@ -12,12 +12,12 @@ namespace AsciiHero
     {
         public HumanVariant v; public char sex; public int build;
         public int n; public Vector3[] pos, nor; public int[][] adj;
-        public Region[] region; public float[] limbT;
+        public Region[] region; public float[] limbT; public Vector2[] gUV;
         public List<int>[] partTris = new List<int>[4];
         public Transform[] bones; public Transform root; public Transform meshRoot;
         public Matrix4x4[] bindposes;
 
-        class Cache { public Vector3[] nor; public int[][] adj; public Region[] region; public float[] limbT; }
+        class Cache { public Vector3[] nor; public int[][] adj; public Region[] region; public float[] limbT; public Vector2[] gUV; }
         static readonly Dictionary<string, Cache> CACHE = new Dictionary<string, Cache>();
 
         public Vector3 Head(string b) { return v.heads[HumanDB.BI[b]]; }
@@ -38,13 +38,14 @@ namespace AsciiHero
             }
             string key = sex.ToString() + build;
             Cache c;
-            if (CACHE.TryGetValue(key, out c)) { nor = c.nor; adj = c.adj; region = c.region; limbT = c.limbT; }
+            if (CACHE.TryGetValue(key, out c)) { nor = c.nor; adj = c.adj; region = c.region; limbT = c.limbT; gUV = c.gUV; }
             else
             {
                 nor = VertexNormals(pos, partTris[0], n);
                 adj = Adjacency(partTris[0], n);
                 ComputeRegions();
-                CACHE[key] = new Cache { nor = nor, adj = adj, region = region, limbT = limbT };
+                ComputeGlyphUV();
+                CACHE[key] = new Cache { nor = nor, adj = adj, region = region, limbT = limbT, gUV = gUV };
             }
         }
 
@@ -112,6 +113,57 @@ namespace AsciiHero
         }
         static float Proj(Vector3 p, Vector3 a, Vector3 b) { var d = b - a; return Vector3.Dot(p - a, d) / d.sqrMagnitude; }
 
+        // ---------- surface glyph coordinates ----------
+        // Rest-pose frames (metres): a cylinder around each limb bone, one around the trunk, a sphere for the head,
+        // so rows of characters wrap around the body and stay glued to it while it moves.
+        // Computed in the web build's right-handed coordinates (X mirrored back) so both builds look the same.
+        class GFrame { public Vector3 A, D, E1, E2; public bool sph; public float rsum; public int rn; }
+        static Vector3 Wb(Vector3 v) { return new Vector3(-v.x, v.y, v.z); }
+        void ComputeGlyphUV()
+        {
+            var seg = new Dictionary<Region, string[]> {
+                { Region.UpperArm, new[] { "upperarm01", "lowerarm01" } }, { Region.ForeArm, new[] { "lowerarm01", "wrist" } },
+                { Region.Hand, new[] { "wrist", "finger3-1" } }, { Region.Thigh, new[] { "upperleg01", "lowerleg01" } },
+                { Region.Shin, new[] { "lowerleg01", "foot" } }, { Region.Foot, new[] { "foot", "toe3-1" } } };
+            var frames = new Dictionary<string, GFrame>(); var fr = new GFrame[n];
+            for (int i = 0; i < n; i++)
+            {
+                var p = Wb(pos[i]); var reg = region[i];
+                bool limb = seg.ContainsKey(reg); string side = p.x >= 0 ? "L" : "R";
+                string key = limb ? reg + side : reg == Region.Head ? "head" : "trunk";
+                GFrame F;
+                if (!frames.TryGetValue(key, out F))
+                {
+                    F = new GFrame();
+                    if (limb) { Vector3 a = Wb(Head(seg[reg][0] + "." + side)), b = Wb(Head(seg[reg][1] + "." + side)); F.A = b; F.D = (a - b).normalized; }
+                    else if (reg == Region.Head) { var h = Wb(Head("head")); F.A = new Vector3(0, (h.y + Tail("head").y) / 2, h.z + 0.01f); F.D = Vector3.up; F.sph = true; }
+                    else { var sp = Wb(Head("spine03")); F.A = new Vector3(0, 0, sp.z); F.D = Vector3.up; }
+                    var f = Vector3.forward; if (Mathf.Abs(Vector3.Dot(f, F.D)) > 0.9f) f = Vector3.up;
+                    F.E1 = (f - F.D * Vector3.Dot(f, F.D)).normalized; F.E2 = Vector3.Cross(F.D, F.E1);
+                    frames[key] = F;
+                }
+                fr[i] = F;
+                var t = p - F.A;
+                F.rsum += F.sph ? t.magnitude : (t - F.D * Vector3.Dot(t, F.D)).magnitude; F.rn++;
+            }
+            gUV = new Vector2[n];
+            for (int i = 0; i < n; i++)
+            {
+                var F = fr[i]; float Rm = F.rsum / Mathf.Max(1, F.rn); var t = Wb(pos[i]) - F.A;
+                if (F.sph)
+                {
+                    float l = Mathf.Max(1e-5f, t.magnitude), polar = Mathf.Acos(Mathf.Clamp(Vector3.Dot(t, F.D) / l, -1, 1));
+                    float az = Mathf.Atan2(Vector3.Dot(t, F.E2), Vector3.Dot(t, F.E1));
+                    gUV[i] = new Vector2(az * Rm * Mathf.Sin(Mathf.Max(0.35f, polar)), (Mathf.PI / 2 - polar) * Rm);
+                }
+                else
+                {
+                    float h = Vector3.Dot(t, F.D); var r = t - F.D * h;
+                    gUV[i] = new Vector2(Mathf.Atan2(Vector3.Dot(r, F.E2), Vector3.Dot(r, F.E1)) * Rm, h);
+                }
+            }
+        }
+
         // ---------- skeleton ----------
         public void MakeSkeleton(Transform parent)
         {
@@ -135,10 +187,10 @@ namespace AsciiHero
             var map = new Dictionary<int, int>(); var outIdx = new List<int>(tris.Count);
             foreach (int vi in tris) { int j; if (!map.TryGetValue(vi, out j)) { j = map.Count; map[vi] = j; } outIdx.Add(j); }
             int m = map.Count;
-            var p = new Vector3[m]; var bw = new BoneWeight[m];
+            var p = new Vector3[m]; var bw = new BoneWeight[m]; var g2 = new Vector2[m];
             foreach (var kv in map)
             {
-                int vi = kv.Key, j = kv.Value; p[j] = posAll[vi];
+                int vi = kv.Key, j = kv.Value; p[j] = posAll[vi]; g2[j] = gUV[vi];
                 var w = new BoneWeight();
                 w.boneIndex0 = HumanDB.skinIndex[vi * 4]; w.weight0 = HumanDB.skinWeight[vi * 4] / 255f;
                 w.boneIndex1 = HumanDB.skinIndex[vi * 4 + 1]; w.weight1 = HumanDB.skinWeight[vi * 4 + 1] / 255f;
@@ -148,7 +200,7 @@ namespace AsciiHero
             }
             var mesh = new Mesh();
             if (m > 65000) mesh.indexFormat = IndexFormat.UInt32;
-            mesh.vertices = p; mesh.boneWeights = bw; mesh.SetTriangles(outIdx, 0);
+            mesh.vertices = p; mesh.boneWeights = bw; mesh.uv2 = g2; mesh.SetTriangles(outIdx, 0);
             mesh.bindposes = bindposes;
             mesh.RecalculateNormals(); mesh.RecalculateBounds();
             return mesh;

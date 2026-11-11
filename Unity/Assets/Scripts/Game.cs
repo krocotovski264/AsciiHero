@@ -95,6 +95,7 @@ namespace AsciiHero
             sceneCam = new GameObject("SceneCamera").AddComponent<Camera>();
             sceneCam.nearClipPlane = 0.05f; sceneCam.farClipPlane = 40; sceneCam.fieldOfView = 36; sceneCam.allowMSAA = false; sceneCam.allowHDR = false;
             ascii = new AsciiRenderer(sceneCam);
+            ascii.surfaceGlyphs = PlayerPrefs.GetInt("ascii_glyph_mode", 1) == 1;
 
             SetupEnvironment(); ApplyEditorAmbient();
             mats = new Mats(false); actorMats = new Mats(true);
@@ -179,6 +180,7 @@ namespace AsciiHero
             for (int i = 1; i <= seg; i++) { t.Add(0); t.Add(i + 1); t.Add(i); }
             var m = new Mesh(); m.SetVertices(v); m.SetUVs(0, uv); m.SetTriangles(t, 0); m.RecalculateNormals(); m.RecalculateBounds();
             if (m.normals[0].y < 0) { for (int i = 0; i < t.Count; i += 3) { int s = t[i + 1]; t[i + 1] = t[i + 2]; t[i + 2] = s; } m.SetTriangles(t, 0); m.RecalculateNormals(); }
+            MeshGen.AddGlyphUV(m, false);
             return m;
         }
 
@@ -454,6 +456,13 @@ namespace AsciiHero
             if (player != null && player.driver != null) player.Animate(tNow, Mathf.Min(0.1f, Time.deltaTime));
         }
 
+        void ToggleGlyphMode()
+        {
+            ascii.surfaceGlyphs = !ascii.surfaceGlyphs;
+            PlayerPrefs.SetInt("ascii_glyph_mode", ascii.surfaceGlyphs ? 1 : 0); PlayerPrefs.Save();
+            ShowToast(ascii.surfaceGlyphs ? "Символы на моделях" : "Символы сеткой экрана (beta 0.8)");
+        }
+
         void ToggleAnimMode()
         {
             if (!useAnimator)
@@ -569,6 +578,7 @@ namespace AsciiHero
             if (Button(new Rect(vr.xMax - 128 * k, T, 58 * k, 24 * k), "АВТО", autoRotate)) autoRotate = !autoRotate;
             if (Button(new Rect(vr.xMax - 66 * k, T, 58 * k, 24 * k), "СБРОС")) cam = CAM0;
             if (Button(new Rect(vr.xMax - 128 * k, T + 28 * k, 120 * k, 24 * k), useAnimator ? "АНИМ: ANIMATOR" : "АНИМ: MM", useAnimator)) ToggleAnimMode();
+            if (Button(new Rect(vr.xMax - 128 * k, T + 56 * k, 120 * k, 24 * k), ascii.surfaceGlyphs ? "Aa: НА МОДЕЛЯХ" : "Aa: СЕТКОЙ", ascii.surfaceGlyphs)) ToggleGlyphMode();
 
             // panel
             float px = vr.xMax, pw = W - px, right = safe.xMax;
@@ -629,6 +639,7 @@ namespace AsciiHero
             float R = safe.xMax - 10 * k;
             if (Button(new Rect(R - 96 * k, T, 96 * k, 28 * k), "← ГЕРОЙ")) { LeaveWorld(); return; }
             if (Button(new Rect(R - 200 * k, T + 32 * k, 200 * k, 26 * k), useAnimator ? "АНИМ: ANIMATOR" : "АНИМ: MM", useAnimator)) ToggleAnimMode();
+            if (Button(new Rect(R - 200 * k, T + 62 * k, 200 * k, 26 * k), ascii.surfaceGlyphs ? "Aa: НА МОДЕЛЯХ" : "Aa: СЕТКОЙ", ascii.surfaceGlyphs)) ToggleGlyphMode();
             if (Button(new Rect(R - 200 * k, T, 96 * k, 28 * k), "ЦЕЛЬ", lockOn))
             {
                 lockOn = !lockOn; lockFixed = null;

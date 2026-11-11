@@ -10,7 +10,29 @@ namespace AsciiHero
         {
             var m = new Mesh();
             if (v.Count > 65000) m.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
-            m.SetVertices(v); if (uv != null && uv.Count == v.Count) m.SetUVs(0, uv); m.SetTriangles(t, 0); m.RecalculateNormals(); m.RecalculateBounds(); return m;
+            m.SetVertices(v); if (uv != null && uv.Count == v.Count) m.SetUVs(0, uv); m.SetTriangles(t, 0); m.RecalculateNormals(); m.RecalculateBounds();
+            AddGlyphUV(m, cylNext); cylNext = false;
+            return m;
+        }
+        static bool cylNext;
+
+        /// Surface-glyph coordinates (uv2, metres, object space): planar by the dominant normal axis,
+        /// or cylindrical around local Y for turned shapes. u runs left -> right seen from outside, v runs up.
+        public static void AddGlyphUV(Mesh m, bool cylindrical)
+        {
+            var p = m.vertices; var n = m.normals; if (n == null || n.Length != p.Length) { m.RecalculateNormals(); n = m.normals; }
+            var uv = new Vector2[p.Length];
+            float rm = 0;
+            if (cylindrical) { foreach (var q in p) rm += Mathf.Sqrt(q.x * q.x + q.z * q.z); rm = Mathf.Max(0.01f, rm / Mathf.Max(1, p.Length)); }
+            for (int i = 0; i < p.Length; i++)
+            {
+                Vector3 q = p[i], nn = n[i]; float ax = Mathf.Abs(nn.x), ay = Mathf.Abs(nn.y), az = Mathf.Abs(nn.z);
+                if (cylindrical && ay < 0.7f) uv[i] = new Vector2(Mathf.Atan2(-q.x, q.z) * rm, q.y);
+                else if (ay >= ax && ay >= az) uv[i] = new Vector2(q.x, nn.y > 0 ? q.z : -q.z);
+                else if (ax >= az) uv[i] = new Vector2(nn.x > 0 ? q.z : -q.z, q.y);
+                else uv[i] = new Vector2(nn.z > 0 ? -q.x : q.x, q.y);
+            }
+            m.uv2 = uv;
         }
         // quad helper (Unity winding: clockwise seen from the front)
         static void Quad(List<int> t, int a, int b, int c, int d) { t.Add(a); t.Add(b); t.Add(c); t.Add(a); t.Add(c); t.Add(d); }
@@ -70,6 +92,7 @@ namespace AsciiHero
                     int a = r * (seg + 1) + s, b = a + seg + 1;
                     Quad(t, a, b, b + 1, a + 1);
                 }
+            cylNext = true;
             return FixRadial(v, t, uv);
         }
         // orient faces away from the Y axis (lathe / tubes)
