@@ -18,7 +18,9 @@ namespace AsciiHero
         public int cols, rows, W, H;
         public float exposure = 1f, actorBoost = 0f, bloom = 0.55f;
         public bool surfaceGlyphs = true;
-        bool builtSurface;
+        /// diagnostics: draw the plain 3D scene straight to the screen (no ASCII)
+        public bool plain;
+        bool builtSurface, builtPlain;
         public RenderTexture final;
         RenderTexture rtCol, rtND, rtAscii, rtB1, rtB2, rtFull;
         readonly Material asciiMat, blurMat, finalMat; readonly Texture2D atlas;
@@ -96,6 +98,13 @@ namespace AsciiHero
             int c = Mathf.Max(8, Mathf.FloorToInt(w / cw)), r = Mathf.Max(8, Mathf.FloorToInt(h / chh));
             Shader.SetGlobalFloat("_AsciiExposure", exposure);
             Shader.SetGlobalFloat("_AsciiDepthRef", depthRef);
+            if (plain)
+            {
+                if (!builtPlain) { builtPlain = true; cam.targetTexture = null; ndCam.enabled = false; glyphCam.enabled = false; cam.depth = 1; Debug.Log("ASCII выключен: обычная 3D-картинка"); }
+                cam.rect = new Rect(0, 0, (float)w / Screen.width, 1);
+                return;
+            }
+            if (builtPlain) { builtPlain = false; cam.rect = new Rect(0, 0, 1, 1); cam.depth = -3; ndCam.enabled = true; final = null; }
             if (w == W && h == H && c == cols && r == rows && final != null && builtSurface == surfaceGlyphs) { SyncND(); return; }
             W = w; H = h; cols = c; rows = r; builtSurface = surfaceGlyphs;
             cam.targetTexture = null; ndCam.targetTexture = null; glyphCam.targetTexture = null;
@@ -124,6 +133,7 @@ namespace AsciiHero
             asciiMat.SetVector("_CellPx", new Vector4((float)W / cols, (float)H / rows, 0, 0));
             asciiMat.SetVector("_OutPx", new Vector4(W, H, 0, 0));
             cam.aspect = (float)W / H;
+            Debug.Log("ASCII " + (surfaceGlyphs ? "символы на моделях" : "сетка экрана") + ": вывод " + W + "×" + H + ", сетка " + cols + "×" + rows + ", формат " + half);
             SyncND();
         }
 

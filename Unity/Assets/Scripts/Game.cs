@@ -9,11 +9,12 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.9 · Unity";
+        public const string VERSION = "beta 0.9.1 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
         {
+            LogHub.Install();
             if (FindAny<Game>() != null) return;
             // the default scene's camera and light are not used
             foreach (var c in FindAll<Camera>()) c.gameObject.SetActive(false);
@@ -78,34 +79,69 @@ namespace AsciiHero
             { "spear", "  ^  \n  |  \n  |  \n  |  " }, { "staff", "  @  \n  Y  \n  |  \n  |  " } };
 
         // ---------- setup ----------
-        void Start()
+        // ---------- loading (one step per frame, so the loading screen and the log stay visible) ----------
+        bool ready, failed; string stage = "Запуск"; int stageIndex, stageCount = 8; float loadT0;
+        bool consoleOpen; int seenErrors; Vector2 consoleScroll;
+
+        bool Step(string name, System.Action a)
         {
+            stage = name; stageIndex++;
+            float t0 = Time.realtimeSinceStartup;
+            try { a(); }
+            catch (System.Exception e)
+            {
+                failed = true; stage = name;
+                Debug.LogError("Загрузка остановилась на шаге «" + name + "»: " + e.GetType().Name + ": " + e.Message + "\n" + e.StackTrace);
+                return false;
+            }
+            Debug.Log("✓ " + name + " (" + ((Time.realtimeSinceStartup - t0) * 1000f).ToString("0") + " мс)");
+            return true;
+        }
+
+        System.Collections.IEnumerator Start()
+        {
+            loadT0 = Time.realtimeSinceStartup;
             Application.targetFrameRate = 60;
             Screen.sleepTimeout = SleepTimeout.NeverSleep;
             Screen.autorotateToPortrait = false; Screen.autorotateToPortraitUpsideDown = false;
             Screen.autorotateToLandscapeLeft = true; Screen.autorotateToLandscapeRight = true;
             Screen.orientation = ScreenOrientation.AutoRotation;
-            var urp = GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;
-            if (urp != null) { urp.maxAdditionalLightsCount = 8; urp.shadowCascadeCount = 1; }
-            SetShadowDistance(14);
-
             display = new GameObject("DisplayCamera").AddComponent<Camera>();
             display.cullingMask = 0; display.clearFlags = CameraClearFlags.SolidColor; display.backgroundColor = Color.black; display.depth = 0;
             { var dd = display.GetUniversalAdditionalCameraData(); dd.renderShadows = false; dd.renderPostProcessing = false; }
-            sceneCam = new GameObject("SceneCamera").AddComponent<Camera>();
-            sceneCam.nearClipPlane = 0.05f; sceneCam.farClipPlane = 40; sceneCam.fieldOfView = 36; sceneCam.allowMSAA = false; sceneCam.allowHDR = false;
-            ascii = new AsciiRenderer(sceneCam);
-            ascii.surfaceGlyphs = PlayerPrefs.GetInt("ascii_glyph_mode", 1) == 1;
-
-            SetupEnvironment(); ApplyEditorAmbient();
-            mats = new Mats(false); actorMats = new Mats(true);
-            SetupEditorScene();
-            LoadCfg();
-            useAnimator = PlayerPrefs.GetInt("ascii_anim_mode", 0) == 1;
-            if (useAnimator) { locoCtrl = Resources.Load<RuntimeAnimatorController>("Locomotion"); if (locoCtrl == null) useAnimator = false; }
-            HumanDB.Load(); MotionDB.Load();
-            Rebuild();
-            MakeUiAssets();
+            if (!Step("Интерфейс", MakeUiAssets)) yield break;
+            yield return null;
+            if (!Step("Камеры и ASCII-рендер", () =>
+            {
+                var urp = GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;
+                Debug.Log("Render pipeline: " + (urp != null ? urp.name : "нет (Built-in)"));
+                if (urp != null) { urp.maxAdditionalLightsCount = 8; urp.shadowCascadeCount = 1; }
+                SetShadowDistance(14);
+                sceneCam = new GameObject("SceneCamera").AddComponent<Camera>();
+                sceneCam.nearClipPlane = 0.05f; sceneCam.farClipPlane = 40; sceneCam.fieldOfView = 36; sceneCam.allowMSAA = false; sceneCam.allowHDR = false;
+                ascii = new AsciiRenderer(sceneCam);
+                ascii.surfaceGlyphs = PlayerPrefs.GetInt("ascii_glyph_mode", 1) == 1;
+            })) yield break;
+            yield return null;
+            if (!Step("Свет и окружение", () => { SetupEnvironment(); ApplyEditorAmbient(); })) yield break;
+            yield return null;
+            if (!Step("Материалы", () => { mats = new Mats(false); actorMats = new Mats(true); })) yield break;
+            yield return null;
+            if (!Step("Сцена редактора", () =>
+            {
+                SetupEditorScene();
+                LoadCfg();
+                useAnimator = PlayerPrefs.GetInt("ascii_anim_mode", 0) == 1;
+                if (useAnimator) { locoCtrl = Resources.Load<RuntimeAnimatorController>("Locomotion"); if (locoCtrl == null) useAnimator = false; }
+            })) yield break;
+            yield return null;
+            if (!Step("Тело MakeHuman", HumanDB.Load)) yield break;
+            yield return null;
+            if (!Step("База движений (mocap)", MotionDB.Load)) yield break;
+            yield return null;
+            if (!Step("Герой и символы", () => { Rebuild(); Debug.Log("Символов на сцене: " + GlyphLayer.count); })) yield break;
+            ready = true;
+            Debug.Log("Загрузка завершена за " + (Time.realtimeSinceStartup - loadT0).ToString("0.0") + " с");
         }
 
         void SetupEnvironment()
@@ -300,6 +336,8 @@ namespace AsciiHero
         void Update()
         {
             InputHub.Poll();
+            LogHub.Pump();
+            if (!ready) { HandlePointers(0); return; }
             float dt = Mathf.Min(0.1f, Time.deltaTime); tNow = Time.time;
             if (rebuildPending) { rebuildPending = false; Rebuild(); }
             HandlePointers(dt);
@@ -438,7 +476,7 @@ namespace AsciiHero
 
         void LateUpdate()
         {
-            if (ascii == null) return;
+            if (!ready || ascii == null) return;
             k = Mathf.Max(0.5f, Mathf.Min(Screen.height / 390f, Screen.width / 844f));
             safe = Screen.safeArea; safe.y = Screen.height - safe.yMax;   // to GUI coordinates
             var vr = ViewRect();
@@ -551,13 +589,24 @@ namespace AsciiHero
 
         void OnGUI()
         {
-            if (Event.current.type != EventType.Repaint || ascii == null || ascii.final == null) return;
+            if (Event.current.type != EventType.Repaint) return;
+            LogHub.Pump();
+            k = Mathf.Max(0.5f, Mathf.Min(Screen.height / 390f, Screen.width / 844f));
+            safe = Screen.safeArea; safe.y = Screen.height - safe.yMax;
+            if (texWhite == null) MakeUiAssets();
             if (sTitle == null || Mathf.Abs(sTitle.fontSize - Mathf.Max(8, Mathf.RoundToInt(15 * k))) > 0) Styles();
             uiRects.Clear();
             float W = Screen.width, H = Screen.height;
+            if (LogHub.errors > seenErrors) { seenErrors = LogHub.errors; consoleOpen = true; }
+            if (!ready || ascii == null) { LoadingScreen(W, H); ConsoleUI(W, H, true); FinishGui(); return; }
             var vr = ViewRect();
-            ascii.Composite();   // the scene cameras have rendered this frame
-            GUI.DrawTexture(vr, ascii.final, ScaleMode.StretchToFill, false);
+            if (!ascii.plain)
+            {
+                try { ascii.Composite(); }   // the scene cameras have rendered this frame
+                catch (System.Exception e) { Debug.LogException(e); }
+                if (ascii.final != null) GUI.DrawTexture(vr, ascii.final, ScaleMode.StretchToFill, false);
+                else GUI.Label(new Rect(vr.x + 20 * k, vr.center.y, vr.width - 40 * k, 30 * k), "Кадр ASCII ещё не готов", sSmall);
+            }
             float L = safe.x + 12 * k, T = safe.y + 8 * k;
             if (!world) EditorUI(W, H, vr, L, T); else WorldUI(W, H, L, T);
             if (toastT > 0 && !string.IsNullOrEmpty(toast))
@@ -566,8 +615,58 @@ namespace AsciiHero
                 Fill(r, new Color(0, 0, 0, 0.7f * a)); var old = GUI.color; GUI.color = new Color(1, 1, 1, a); GUI.Label(r, toast, sToast); GUI.color = old;
             }
             GUI.Label(new Rect(vr.xMax - 170 * k, H - 18 * k - (H - safe.yMax), 160 * k, 16 * k), fpsText, sSmall);
-            taps.Clear();
-            uiRectsPrev = new List<Rect>(uiRects);
+            ConsoleUI(W, H, false);
+            FinishGui();
+        }
+        void FinishGui() { taps.Clear(); uiRectsPrev = new List<Rect>(uiRects); }
+
+        // ---------- loading screen and on-screen log ----------
+        void LoadingScreen(float W, float H)
+        {
+            Fill(new Rect(0, 0, W, H), new Color(0.02f, 0.02f, 0.03f, 1));
+            float x = safe.x + 24 * k, y = safe.y + 24 * k, w = Mathf.Min(520 * k, W - 48 * k);
+            GUI.Label(new Rect(x, y, w, 26 * k), "ASCII HERO", sTitle);
+            GUI.Label(new Rect(x, y + 26 * k, w, 18 * k), Game.VERSION, sSmall);
+            string st = failed ? "Ошибка на шаге: " + stage : "Загрузка: " + stage + "…";
+            var stStyle = new GUIStyle(sBadge); stStyle.normal.textColor = failed ? new Color(1f, 0.45f, 0.4f) : new Color(0.86f, 0.84f, 0.78f);
+            GUI.Label(new Rect(x, y + 56 * k, w, 22 * k), st, stStyle);
+            var bar = new Rect(x, y + 84 * k, w, 6 * k);
+            Fill(bar, new Color(0.2f, 0.19f, 0.17f));
+            Fill(new Rect(bar.x, bar.y, bar.width * Mathf.Clamp01(stageIndex / (float)stageCount), bar.height), failed ? new Color(0.9f, 0.3f, 0.25f) : new Color(0.93f, 0.74f, 0.33f));
+            GUI.Label(new Rect(x, y + 96 * k, w, 18 * k), (Time.realtimeSinceStartup - loadT0).ToString("0.0") + " с · шаг " + stageIndex + " из " + stageCount, sSmall);
+            if (!consoleOpen) consoleOpen = failed;
+        }
+
+        void ConsoleUI(float W, float H, bool loading)
+        {
+            float top = safe.y + (loading ? 140 : 40) * k;
+            if (!consoleOpen)
+            {
+                string tag = LogHub.errors > 0 ? "LOG · " + LogHub.errors + " ош." : "LOG";
+                if (Button(new Rect(safe.x + 8 * k, H - (H - safe.yMax) - 30 * k, 96 * k, 24 * k), tag, LogHub.errors > 0)) consoleOpen = true;
+                return;
+            }
+            var panel = new Rect(safe.x + 8 * k, top, safe.width - 16 * k, H - (H - safe.yMax) - top - 8 * k);
+            Fill(panel, new Color(0, 0, 0, 0.86f)); Frame(panel, new Color(0.4f, 0.36f, 0.26f), Mathf.Max(1, k));
+            uiRects.Add(panel);
+            float bx = panel.xMax - 8 * k, by = panel.y + 6 * k, bh = 26 * k;
+            if (Button(new Rect(bx - 90 * k, by, 90 * k, bh), "Скрыть")) consoleOpen = false;
+            if (Button(new Rect(bx - 200 * k, by, 104 * k, bh), "Копировать")) { GUIUtility.systemCopyBuffer = LogHub.AllText(); ShowToast("Лог скопирован"); }
+            if (ready && ascii != null && Button(new Rect(bx - 330 * k, by, 124 * k, bh), ascii.plain ? "Вернуть ASCII" : "Без ASCII", ascii.plain)) ascii.plain = !ascii.plain;
+            GUI.Label(new Rect(panel.x + 8 * k, by + 2 * k, panel.width - 350 * k, bh), "Лог · ошибок: " + LogHub.errors + " · " + LogHub.FilePath, sSmall);
+            var st = new GUIStyle(sSmall) { wordWrap = true, richText = false, fontSize = Mathf.Max(8, Mathf.RoundToInt(9.5f * k)) };
+            if (mono != null) st.font = mono;
+            float lineH = st.lineHeight + 1, y = panel.yMax - 6 * k, x = panel.x + 8 * k, w = panel.width - 16 * k;
+            for (int i = LogHub.lines.Count - 1; i >= 0 && y > by + bh + 6 * k; i--)
+            {
+                var l = LogHub.lines[i];
+                string text = l.text.Length > 900 ? l.text.Substring(0, 900) + "…" : l.text;
+                float h = st.CalcHeight(new GUIContent(text), w);
+                y -= h + 2 * k; if (y < by + bh + 6 * k) break;
+                bool err = l.type == LogType.Error || l.type == LogType.Exception || l.type == LogType.Assert;
+                st.normal.textColor = err ? new Color(1f, 0.5f, 0.45f) : l.type == LogType.Warning ? new Color(0.95f, 0.8f, 0.4f) : new Color(0.8f, 0.8f, 0.78f);
+                GUI.Label(new Rect(x, y, w, h), text, st);
+            }
         }
 
         void EditorUI(float W, float H, Rect vr, float L, float T)
