@@ -110,7 +110,10 @@ namespace AsciiHero.Editor
                 return;
             var so = new SerializedObject(assets[0]);
             var input = so.FindProperty("activeInputHandler");
-            if (input != null && input.intValue != 1)
+            // The input backend only takes effect after an editor restart. Switching it inside a batch build
+            // (GitHub Actions) makes the editor and the player compile different engine code and the build fails,
+            // so CI keeps whatever the session started with; the game supports both backends.
+            if (input != null && input.intValue != 1 && !Application.isBatchMode)
             {
                 input.intValue = 1;
                 so.ApplyModifiedProperties();
