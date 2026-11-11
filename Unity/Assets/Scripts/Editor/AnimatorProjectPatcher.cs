@@ -342,7 +342,7 @@ namespace AsciiHero.Editor
         static Motion M(Dictionary<string, Pick> map, string role) { Pick p; return map.TryGetValue(role, out p) ? p.clip : null; }
 
         static AnimatorStateTransition T(AnimatorState from, AnimatorState to, float duration, bool exitTime, float exitAt = 0.85f,
-            TransitionInterruptionSource src = TransitionInterruptionSource.CurrentState)
+            TransitionInterruptionSource src = TransitionInterruptionSource.Source)
         {
             var t = from.AddTransition(to);
             t.hasFixedDuration = true; t.duration = duration; t.offset = 0;
@@ -445,12 +445,12 @@ namespace AsciiHero.Editor
             // stops: IsMoving == false with a speed threshold; the new stick input interrupts at once
             void StopIn(AnimatorState dst, float lo, float hi)
             {
-                var t = T(loco, dst, 0.15f, false, 0.85f, TransitionInterruptionSource.NextState);
+                var t = T(loco, dst, 0.15f, false, 0.85f, TransitionInterruptionSource.Destination);
                 t.AddCondition(AnimatorConditionMode.IfNot, 0, "IsMoving");
                 t.AddCondition(AnimatorConditionMode.Greater, lo, "Speed");
                 if (hi < 99) t.AddCondition(AnimatorConditionMode.Less, hi, "Speed");
-                var back = T(dst, loco, 0.25f, true, 0.85f, TransitionInterruptionSource.NextState);
-                var go = T(dst, loco, 0.2f, false, 0.85f, TransitionInterruptionSource.NextState); go.AddCondition(AnimatorConditionMode.If, 0, "IsMoving");
+                var back = T(dst, loco, 0.25f, true, 0.85f, TransitionInterruptionSource.Destination);
+                var go = T(dst, loco, 0.2f, false, 0.85f, TransitionInterruptionSource.Destination); go.AddCondition(AnimatorConditionMode.If, 0, "IsMoving");
             }
             StopIn(sprintStop, 4.75f, 999f); StopIn(jogStop, 2.5f, 4.75f); StopIn(walkStop, 0.6f, 2.5f);
 
