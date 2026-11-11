@@ -42,6 +42,43 @@ git lfs pull
 
 Игровой код — `Unity/Assets/Scripts/`.
 
+## Что уже в Unity
+
+Порт прототипа beta 0.8 на C# и URP: редактор героя (пол, рост, телосложение, 5 комплектов брони, 6 видов оружия),
+трактир «Пьяный дракон», ASCII-рендер на GPU, Motion Matching на mocap CMU, Foot IK, камера сверху, стик и свайп.
+Сцена не нужна: `Game` создаёт всё сам после загрузки любой сцены (стандартные камера и свет отключаются).
+
+| Файл | Что делает |
+|---|---|
+| `AHData.cs` | загрузка `Resources/human.bytes` (тело MakeHuman) и `mm.bytes` (база движений), перевод в систему координат Unity |
+| `AHHuman.cs`, `AHPose.cs` | скелет, скиннинг, одежда-оболочки по телу, базовые позы рук |
+| `AHMesh.cs`, `AHMaterials.cs` | генератор примитивов, палитра материалов с ASCII-id |
+| `AHCharacter.cs` | сборка героя: броня, волосы, оружие, щит |
+| `AHMotion.cs` | Motion Matching и Foot IK |
+| `AHAnimatorDriver.cs` | режим Animator Controller: параметры Speed / LeanAngle / TurnAngle и т. д. |
+| `AHAscii.cs` + `Resources/Shaders` | две камеры (цвет и нормали/глубина/id) → глифы → bloom |
+| `AHTavern.cs` | трактир, свет, коллизии, срез стен |
+| `Game.cs`, `AHInput.cs` | режимы, интерфейс, ввод (Input System) |
+| `Editor/AnimatorProjectPatcher.cs` | **Tools → Patch Project Locomotion**: клипы из mocap + Animator Controller |
+| `Editor/CIBuild.cs` | сборка APK (меню **Tools → Build Android APK** и GitHub Actions) |
+
+## APK через GitHub Actions
+
+`.github/workflows/android.yml` собирает APK на серверах GitHub при каждом пуше в `main` или `unity-port`
+(и вручную: Actions → Android APK → Run workflow). Готовый файл — в запуске, раздел **Artifacts → AsciiHero-apk**.
+
+Один раз нужно добавить секреты репозитория (Settings → Secrets and variables → Actions → New repository secret):
+
+| Секрет | Что положить |
+|---|---|
+| `UNITY_EMAIL` | почта аккаунта Unity |
+| `UNITY_PASSWORD` | пароль аккаунта Unity |
+| `UNITY_LICENSE` | всё содержимое файла лицензии `Unity_lic.ulf` |
+
+Файл лицензии появляется после входа в Unity Hub с активированной Personal-лицензией:
+Windows — `C:\ProgramData\Unity\Unity_lic.ulf`, macOS — `/Library/Application Support/Unity/Unity_lic.ulf`.
+Открыть блокнотом и вставить текст целиком. Без секретов сборка останавливается на первом шаге с понятной ошибкой.
+
 ## Что не коммитить
 
 `Library/`, `Temp/`, `Obj/`, `Logs/`, `UserSettings/`, `*.csproj`, `*.sln` — это локальная генерация Unity. В `.gitignore` они уже закрыты.

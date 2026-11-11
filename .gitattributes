@@ -52,3 +52,6 @@
 *.mask text merge=unityyamlmerge eol=lf
 *.physicMaterial text merge=unityyamlmerge eol=lf
 *.physicsMaterial2D text merge=unityyamlmerge eol=lf
+
+# Baked game data (mesh, mocap database, glyph atlas)
+*.bytes binary

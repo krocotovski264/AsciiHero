@@ -20,7 +20,7 @@ namespace AsciiHero.Editor
             EditorApplication.delayCall += Ensure;
         }
 
-        static void Ensure()
+        public static void Ensure()
         {
             if (EditorApplication.isPlayingOrWillChangePlaymode)
                 return;
@@ -44,7 +44,11 @@ namespace AsciiHero.Editor
                 AssetDatabase.CreateFolder("Assets", "Settings");
 
             var renderer = ScriptableObject.CreateInstance<UniversalRendererData>();
+            renderer.intermediateTextureMode = IntermediateTextureMode.Auto;
             var pipeline = UniversalRenderPipelineAsset.Create(renderer);
+            pipeline.shadowDistance = 20;
+            pipeline.shadowCascadeCount = 1;
+            pipeline.maxAdditionalLightsCount = 8;
             AssetDatabase.CreateAsset(pipeline, PipelinePath);
             AssetDatabase.AddObjectToAsset(renderer, pipeline);
             AssetDatabase.SaveAssets();
@@ -83,6 +87,23 @@ namespace AsciiHero.Editor
                 PlayerSettings.productName = "AsciiHero";
             if (PlayerSettings.colorSpace != ColorSpace.Linear)
                 PlayerSettings.colorSpace = ColorSpace.Linear;
+
+            // phone: landscape only, Android 7+, 64-bit IL2CPP (required by Google Play and by 64-bit-only phones)
+            if (PlayerSettings.defaultInterfaceOrientation != UIOrientation.AutoRotation)
+                PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;
+            PlayerSettings.allowedAutorotateToPortrait = false;
+            PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;
+            PlayerSettings.allowedAutorotateToLandscapeLeft = true;
+            PlayerSettings.allowedAutorotateToLandscapeRight = true;
+            var android = UnityEditor.Build.NamedBuildTarget.Android;
+            if (PlayerSettings.GetApplicationIdentifier(android) != "com.asciihero.game")
+                PlayerSettings.SetApplicationIdentifier(android, "com.asciihero.game");
+            if (PlayerSettings.GetScriptingBackend(android) != ScriptingImplementation.IL2CPP)
+                PlayerSettings.SetScriptingBackend(android, ScriptingImplementation.IL2CPP);
+            if (PlayerSettings.Android.targetArchitectures != AndroidArchitecture.ARM64)
+                PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
+            if (PlayerSettings.Android.minSdkVersion < AndroidSdkVersions.AndroidApiLevel24)
+                PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel24;
 
             var assets = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/ProjectSettings.asset");
             if (assets == null || assets.Length == 0)

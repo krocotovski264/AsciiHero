@@ -1,0 +1,204 @@
+{
+ "fps": 30,
+ "frames": 9945,
+ "clips": [
+  {
+   "name": "Walk",
+   "start": 648,
+   "end": 685,
+   "loop": true,
+   "mirror": false,
+   "speed": 1.033,
+   "yaw": 2.6
+  },
+  {
+   "name": "Jog",
+   "start": 7678,
+   "end": 7700,
+   "loop": true,
+   "mirror": false,
+   "speed": 2.798,
+   "yaw": -2.7
+  },
+  {
+   "name": "Sprint",
+   "start": 2192,
+   "end": 2211,
+   "loop": true,
+   "mirror": false,
+   "speed": 3.374,
+   "yaw": 2.1
+  },
+  {
+   "name": "WalkLeanL",
+   "start": 1523,
+   "end": 1549,
+   "loop": true,
+   "mirror": false,
+   "speed": 1.378,
+   "yaw": 70.9
+  },
+  {
+   "name": "WalkLeanR",
+   "start": 1523,
+   "end": 1549,
+   "loop": true,
+   "mirror": true,
+   "speed": 1.378,
+   "yaw": -70.9
+  },
+  {
+   "name": "JogLeanL",
+   "start": 1914,
+   "end": 1937,
+   "loop": true,
+   "mirror": false,
+   "speed": 2.239,
+   "yaw": 22.7
+  },
+  {
+   "name": "JogLeanR",
+   "start": 1914,
+   "end": 1937,
+   "loop": true,
+   "mirror": true,
+   "speed": 2.239,
+   "yaw": -22.7
+  },
+  {
+   "name": "SprintLeanR",
+   "start": 7433,
+   "end": 7451,
+   "loop": true,
+   "mirror": false,
+   "speed": 3.237,
+   "yaw": -18.5
+  },
+  {
+   "name": "SprintLeanL",
+   "start": 7433,
+   "end": 7451,
+   "loop": true,
+   "mirror": true,
+   "speed": 3.237,
+   "yaw": 18.5
+  },
+  {
+   "name": "Idle",
+   "start": 9019,
+   "end": 9064,
+   "loop": true,
+   "mirror": false,
+   "speed": 0.022,
+   "yaw": -2.3
+  },
+  {
+   "name": "IdleBreaker",
+   "start": 9380,
+   "end": 9529,
+   "loop": false,
+   "mirror": false,
+   "speed": 0.134,
+   "yaw": -2.6
+  },
+  {
+   "name": "Turn90L",
+   "start": 4439,
+   "end": 4496,
+   "loop": false,
+   "mirror": false,
+   "speed": 0.086,
+   "yaw": 95.3
+  },
+  {
+   "name": "Turn90R",
+   "start": 4439,
+   "end": 4496,
+   "loop": false,
+   "mirror": true,
+   "speed": 0.086,
+   "yaw": -95.3
+  },
+  {
+   "name": "Turn180L",
+   "start": 4439,
+   "end": 4551,
+   "loop": false,
+   "mirror": false,
+   "speed": 0.078,
+   "yaw": 177.3
+  },
+  {
+   "name": "Turn180R",
+   "start": 4439,
+   "end": 4551,
+   "loop": false,
+   "mirror": true,
+   "speed": 0.078,
+   "yaw": -177.3
+  },
+  {
+   "name": "WalkStop",
+   "start": 7075,
+   "end": 7130,
+   "loop": false,
+   "mirror": false,
+   "speed": 0.442,
+   "yaw": -6.5
+  },
+  {
+   "name": "JogStop",
+   "start": 7064,
+   "end": 7130,
+   "loop": false,
+   "mirror": false,
+   "speed": 0.755,
+   "yaw": -6.4
+  },
+  {
+   "name": "SprintStop",
+   "start": 7054,
+   "end": 7130,
+   "loop": false,
+   "mirror": false,
+   "speed": 1.065,
+   "yaw": -4.8
+  },
+  {
+   "name": "WalkStart",
+   "start": 7383,
+   "end": 7412,
+   "loop": false,
+   "mirror": false,
+   "speed": 0.711,
+   "yaw": 20.3
+  },
+  {
+   "name": "RunStart",
+   "start": 7313,
+   "end": 7349,
+   "loop": false,
+   "mirror": false,
+   "speed": 1.228,
+   "yaw": 3.9
+  },
+  {
+   "name": "RunPivot180R",
+   "start": 7449,
+   "end": 7480,
+   "loop": false,
+   "mirror": false,
+   "speed": 1.792,
+   "yaw": -197.8
+  },
+  {
+   "name": "RunPivot180L",
+   "start": 7449,
+   "end": 7480,
+   "loop": false,
+   "mirror": true,
+   "speed": 1.792,
+   "yaw": 197.8
+  }
+ ]
+}
