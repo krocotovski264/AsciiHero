@@ -1,6 +1,6 @@
 # Builds the Android APK from Unity/ on GitHub's servers (game-ci, Unity version from ProjectVersion.txt).
 # Needs three repository secrets: UNITY_LICENSE (contents of Unity_lic.ulf), UNITY_EMAIL, UNITY_PASSWORD.
-# The APK appears under Actions -> run -> Artifacts -> AsciiHero-apk.
+# The APK is published to Releases (tag latest-apk) as a plain file, and kept as a run artifact too.
 name: Android APK
 
 on:
@@ -19,6 +19,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    permissions:
+      contents: write
     steps:
       - name: Check Unity license secrets
         env:
@@ -78,3 +80,17 @@ jobs:
           name: AsciiHero-apk
           path: build/Android
           retention-days: 14
+
+      # The APK itself, no zip: Releases -> "Последняя сборка APK" -> AsciiHero.apk
+      - name: Publish APK to Releases
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK=$(find build/Android -name '*.apk' | head -n 1)
+          cp "$APK" AsciiHero.apk
+          gh release delete latest-apk --cleanup-tag --yes || true
+          gh release create latest-apk AsciiHero.apk \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "Последняя сборка APK" \
+            --notes "Сборка №${GITHUB_RUN_NUMBER} из ветки ${GITHUB_REF_NAME}, коммит ${GITHUB_SHA::7}. Файл заменяется при каждой новой сборке."

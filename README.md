@@ -65,7 +65,7 @@ git lfs pull
 ## APK через GitHub Actions
 
 `.github/workflows/android.yml` собирает APK на серверах GitHub при каждом пуше в `main` или `unity-port`
-(и вручную: Actions → Android APK → Run workflow). Готовый файл — в запуске, раздел **Artifacts → AsciiHero-apk**.
+(и вручную: Actions → Android APK → Run workflow). Готовый `AsciiHero.apk` без архива лежит в **Releases → «Последняя сборка APK»** и заменяется при каждой сборке.
 
 Один раз нужно добавить секреты репозитория (Settings → Secrets and variables → Actions → New repository secret):
 
