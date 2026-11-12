@@ -11,6 +11,7 @@ import { MM_META, MM_B64 } from './data_mm.js';
 
 let DB = null;
 const LN2 = Math.log(2);
+export const RUN_SPEED = 3.0;
 export async function loadMocap() {
   if (DB) return;
   const bin = Uint8Array.from(atob(MM_B64), c => c.charCodeAt(0));
@@ -125,12 +126,17 @@ export function locomotion(A, dt, dir, mag, lockPos, myPos, collide) {
   if (!S.init) { S.x = myPos.x; S.z = myPos.z; S.h = A.heading; S.init = true; }
   // desired velocity / facing
   let speed = 0;
-  if (dir) speed = mag < 0.3 ? 0 : (lockPos ? 0.7 + 0.9 * clamp((mag - 0.3) / 0.6, 0, 1) : 1.0 + 1.9 * clamp((mag - 0.3) / 0.62, 0, 1) ** 1.3);
+  if (dir) {
+    // inside the stick ring: turn on the spot -> stroll -> brisk walk; finger pulled past the ring: run
+    const walk = mag < 0.22 ? 0 : 0.75 + 0.65 * clamp((mag - 0.22) / 0.78, 0, 1);
+    speed = mag <= 1 ? walk : 1.4 + (RUN_SPEED - 1.4) * clamp(mag - 1, 0, 1);
+    if (lockPos) speed = Math.min(speed, 1.7);
+  }
   const vgx = dir ? dir[0] * speed : 0, vgz = dir ? dir[1] * speed : 0;
   let hGoal = S.h;
   if (lockPos) hGoal = Math.atan2(lockPos.x - S.x, lockPos.z - S.z);
   else if (dir) hGoal = Math.atan2(dir[0], dir[1]);
-  const HV = 0.24, HR = 0.18;
+  const HV = 0.13, HR = 0.085;   // snappy: velocity and facing reach the stick in ~0.25 s
   // advance the simulation
   [S.x, S.vx, S.ax] = springChar(S.x, S.vx, S.ax, vgx, HV, dt);
   [S.z, S.vz, S.az] = springChar(S.z, S.vz, S.az, vgz, HV, dt);
@@ -138,7 +144,7 @@ export function locomotion(A, dt, dir, mag, lockPos, myPos, collide) {
   if (collide) { const p = { x: S.x, z: S.z }; collide(p); S.x = p.x; S.z = p.z; }
   // keep the simulation close to the character
   const dxs = S.x - myPos.x, dzs = S.z - myPos.z, dl = Math.hypot(dxs, dzs);
-  if (dl > 0.35) { S.x = myPos.x + dxs / dl * 0.35; S.z = myPos.z + dzs / dl * 0.35; }
+  if (dl > 0.25) { S.x = myPos.x + dxs / dl * 0.25; S.z = myPos.z + dzs / dl * 0.25; }
 
   // ---- query: current pose features + predicted trajectory relative to the character ----
   const q = A.query, f0 = Math.floor(A.frame), NF = DB.NF;
@@ -162,7 +168,7 @@ export function locomotion(A, dt, dir, mag, lockPos, myPos, collide) {
   if (!!dir !== !!A.lastDir) force = true;
   A.lastDir = dir ? [dir[0], dir[1]] : null;
   if (A.searchT <= 0 || force) {
-    A.searchT = 0.1;
+    A.searchT = 0.07;
     const cur = costAt(q, f0);
     const [best, bc] = search(q, f0 - 3, f0 + 12);
     if (best >= 0 && (bc < cur - 0.05 || force && A.frame + 1 >= DB.RANGE_END[f0])) transition(A, best);
@@ -184,9 +190,9 @@ export function locomotion(A, dt, dir, mag, lockPos, myPos, collide) {
   const fx = Math.sin(A.heading), fz = Math.cos(A.heading), lx = Math.cos(A.heading), lz = -Math.sin(A.heading);
   let dx = (fx * fwd + lx * lat) * dt, dz = (fz * fwd + lz * lat) * dt;
   // synchronise the character with the simulation (small, smooth corrections)
-  const k = 1 - Math.exp(-dt * LN2 / 0.15);
+  const k = 1 - Math.exp(-dt * LN2 / 0.05);    // the body follows the controller tightly (responsive)
   dx += (S.x - (myPos.x + dx)) * k; dz += (S.z - (myPos.z + dz)) * k;
-  A.heading += wrap(S.h - A.heading) * (1 - Math.exp(-dt * LN2 / 0.12));
+  A.heading += wrap(S.h - A.heading) * (1 - Math.exp(-dt * LN2 / 0.05));
   A.speed = Math.hypot(fwd, lat);
   A.label = labelFor(fwd, lat, yr, dir);
   return [dx, dz];
@@ -225,8 +231,29 @@ export function animateActor(A, t, dt = 1 / 60) {
   }
   H.root.position.set(A.rootPos.x + A.ro[0], A.rootPos.y + A.ro[1], A.rootPos.z + A.ro[2]);
   H.root.updateMatrixWorld(true);
+  relaxArms(A);
   footIK(A, dt);
   const wp = A.char.group.userData.weapon; if (wp && wp.userData.orb) { wp.userData.orb.rotation.y = t * 1.4; const s = 1 + 0.08 * Math.sin(t * 3); wp.userData.orb.scale.set(0.8 * s, 1.2 * s, 0.8 * s); }
+}
+
+// ---------- arms ----------
+// The mocap actors hold their arms away from the body (marker suits). Bring a hanging arm back to the torso:
+// the sideways angle of the upper arm is limited softly, the forward/back swing is untouched.
+const ARM_MAX = 0.2, ARM_SOFT = 0.2;
+function relaxArms(A) {
+  const H = A.H, g = A.char.group, weapon = A.char.cfgWeapon || 'none';
+  const gq = g.getWorldQuaternion(new THREE.Quaternion()), gi = gq.clone().invert();
+  for (const s of ['L', 'R']) {
+    if (s === 'L' && weapon === 'shield') continue;
+    const up = H.bone('upperarm01.' + s), el = H.bone('lowerarm01.' + s); if (!up || !el) continue;
+    const dW = P(el).sub(P(up)).normalize(), d = dW.clone().applyQuaternion(gi);
+    if (d.y > -0.2) continue;                       // raised arm: leave it
+    const sign = s === 'L' ? 1 : -1, o = d.x * sign, r = Math.hypot(o, d.y), abd = Math.atan2(o, -d.y);
+    if (abd <= ARM_MAX) continue;
+    const a2 = ARM_MAX + (abd - ARM_MAX) * ARM_SOFT;
+    const d2 = new THREE.Vector3(Math.sin(a2) * r * sign, -Math.cos(a2) * r, d.z).normalize().applyQuaternion(gq);
+    rotateWorld(up, new THREE.Quaternion().setFromUnitVectors(dW, d2));
+  }
 }
 
 // ---------- foot IK ----------

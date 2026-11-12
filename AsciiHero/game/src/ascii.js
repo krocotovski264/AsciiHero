@@ -174,6 +174,7 @@ function sampleSurface(geom, cw, ch) {
     a3.fromBufferAttribute(P, ia); b3.fromBufferAttribute(P, ib); c3.fromBufferAttribute(P, ic);
     const area3 = b3.clone().sub(a3).cross(c3.clone().sub(a3)).length() / 2;
     const det = (ub - ua) * (vc - va) - (uc - ua) * (vb - va), areaUV = Math.abs(det) / 2;
+    if (!(area3 > 1e-10)) continue;                                  // degenerate triangle
     if (areaUV < area3 * 0.6 || areaUV > area3 * 4) {
       // seam, pole or squeezed mapping: scatter points by real area instead, so no bald patches appear
       const want = area3 / (cw * ch); let k = Math.floor(want); if (Math.random() < want - k) k++;

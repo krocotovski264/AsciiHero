@@ -80,6 +80,7 @@ namespace AsciiHero
                 Vector2 a = U[ia], b = U[ib], c = U[ic];
                 float area3 = Vector3.Cross(P[ib] - P[ia], P[ic] - P[ia]).magnitude / 2;
                 float det = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y), areaUV = Mathf.Abs(det) / 2;
+                if (!(area3 > 1e-10f)) continue;                               // degenerate triangle (was the source of NaN bounds)
                 if (areaUV < area3 * 0.6f || areaUV > area3 * 4f)
                 {
                     // seam, pole or squeezed mapping: scatter points by real area instead, so no bald patches appear

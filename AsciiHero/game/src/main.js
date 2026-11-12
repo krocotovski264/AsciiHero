@@ -247,7 +247,7 @@ function leaveWorld() {
   syncUI(); resize();
 }
 // joystick
-const stickEl = $('stick'), knob = $('knob'); const stick = { x: 0, y: 0, id: null };
+const stickEl = $('stick'), knob = $('knob'); const stick = { x: 0, y: 0, id: null, run: 0 };
 function stickMove(e) {
   const r = stickEl.getBoundingClientRect(), R = r.width / 2;
   let dx = e.clientX - (r.left + R), dy = e.clientY - (r.top + R);
@@ -255,10 +255,12 @@ function stickMove(e) {
   if (l > max) { dx *= max / l; dy *= max / l; }
   knob.style.transform = `translate(${dx}px,${dy}px)`;
   stick.x = dx / max; stick.y = dy / max;
+  // run: finger pulled past the ring by about 1 cm or more (1 cm ~ 63 CSS px on a phone)
+  stick.run = Math.max(0, Math.min(1, (l - max - 38) / 34));
 }
 stickEl.addEventListener('pointerdown', e => { stick.id = e.pointerId; stickEl.setPointerCapture(e.pointerId); stickMove(e); e.preventDefault(); });
 stickEl.addEventListener('pointermove', e => { if (e.pointerId === stick.id) stickMove(e); });
-const stickUp = e => { if (e.pointerId !== stick.id) return; stick.id = null; stick.x = stick.y = 0; knob.style.transform = ''; };
+const stickUp = e => { if (e.pointerId !== stick.id) return; stick.id = null; stick.x = stick.y = 0; stick.run = 0; knob.style.transform = ''; };
 stickEl.addEventListener('pointerup', stickUp); stickEl.addEventListener('pointercancel', stickUp);
 const keys = {};
 addEventListener('keydown', e => { keys[e.code] = true; }); addEventListener('keyup', e => { keys[e.code] = false; });
@@ -287,6 +289,7 @@ function worldUpdate(dt, t) {
   if (keys.KeyW || keys.ArrowUp) iy = -1; if (keys.KeyS || keys.ArrowDown) iy = 1;
   if (keys.KeyA || keys.ArrowLeft) ix = -1; if (keys.KeyD || keys.ArrowRight) ix = 1;
   let mag = Math.min(1, Math.hypot(ix, iy)); if (mag < 0.12) mag = 0;
+  if (mag > 0.85) mag = 1 + Math.max(stick.run, keys.ShiftLeft || keys.ShiftRight ? 1 : 0); else if (stick.run > 0) mag = 1 + stick.run;
   let dir = null;
   if (mag > 0) {
     const ux = ix / Math.hypot(ix, iy), uy = iy / Math.hypot(ix, iy);
