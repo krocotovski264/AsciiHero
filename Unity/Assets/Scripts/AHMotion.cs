@@ -39,6 +39,7 @@ namespace AsciiHero
         public float heading, speed, frame, cost; float searchT, idleT, idleBreakAt;
         public string label = "idle";
         public bool noLock;
+        float narrow = 1;
         /// when set, the Animator Controller (Tools -> Patch Project Locomotion) plays the clips and this class
         /// only runs the controller, root motion sync, weapon masks and foot IK
         public AnimatorDriver driver;
@@ -194,7 +195,8 @@ namespace AsciiHero
                 searchT = 0.07f;
                 float cur = CostAt(query, f0), bc;
                 int best = Search(query, f0 - 3, f0 + 12, out bc);
-                if (best >= 0 && (bc < cur - 0.05f || (force && atEnd))) Transition(best);
+                // a jump must beat the current clip clearly, otherwise the pose flickers between clips
+                if (best >= 0 && (bc < cur * 0.7f - 0.05f || (force && atEnd))) Transition(best);
                 cost = Mathf.Min(cur, bc);
             }
             // ---- idle breaker ----
@@ -218,6 +220,7 @@ namespace AsciiHero
             dx += (S.x - (myPos.x + dx)) * kk; dz += (S.z - (myPos.y + dz)) * kk;
             heading += Wrap(S.h - heading) * (1 - Mathf.Exp(-dt * LN2 / 0.05f));
             speed = Mathf.Sqrt(fwd * fwd + lat * lat);
+            narrow = 1 - Mathf.Clamp01(Mathf.Abs(lat) / 0.5f);
             label = LabelFor(fwd, lat, yr, dir.HasValue);
             return new Vector2(dx, dz);
         }
@@ -235,6 +238,7 @@ namespace AsciiHero
             dx += (S.x - (myPos.x + dx)) * kk; dz += (S.z - (myPos.y + dz)) * kk;
             heading += Wrap(S.h - heading) * (1 - Mathf.Exp(-dt * LN2 / 0.05f));
             speed = Mathf.Sqrt(fwd * fwd + lat * lat);
+            narrow = 1 - Mathf.Clamp01(Mathf.Abs(lat) / 0.5f);
             label = driver.StateLabel();
             return new Vector2(dx, dz);
         }
@@ -309,7 +313,6 @@ namespace AsciiHero
                 if (s == "L" && ch.cfg.weapon == "shield") continue;
                 Transform up = H.Bone("upperarm01." + s), el = H.Bone("lowerarm01." + s); if (up == null || el == null) continue;
                 Vector3 dW = (el.position - up.position).normalized, d = gi * dW;
-                if (d.y > -0.2f) continue;
                 float sign = s == "L" ? -1f : 1f;       // Unity: the left side is -X
                 float o = d.x * sign, r = Mathf.Sqrt(o * o + d.y * d.y), abd = Mathf.Atan2(o, -d.y);
                 if (abd <= ARM_MAX) continue;
@@ -342,6 +345,17 @@ namespace AsciiHero
                 if (F.rel > 0 && dxl * dxl + dzl * dzl > 0.16f * 0.16f) { F.locked = false; F.rel = 0; }
                 Vector3 target = ap;
                 if (F.rel > 0) { target.x += dxl * F.rel; target.z += dzl * F.rel; }
+                else if (narrow > 0)
+                {
+                    // feet under the hips: the mocap stance is wider than a relaxed one (not while side-stepping)
+                    Transform g = ch.go.transform; Quaternion gi = Quaternion.Inverse(g.rotation);
+                    Vector3 al = gi * (ap - g.position); float lim = Mathf.Abs((gi * (hp - g.position)).x), ax = Mathf.Abs(al.x);
+                    if (ax > lim)
+                    {
+                        float nx = Mathf.Sign(al.x) * (lim + (ax - lim) * 0.3f); al.x += (nx - al.x) * narrow;
+                        Vector3 w = g.rotation * al + g.position; target.x = w.x; target.z = w.z;
+                    }
+                }
                 target.y = Mathf.Max(target.y, groundAnkle);
                 float l1 = Vector3.Distance(kp, hp), l2 = Vector3.Distance(ap, kp), over = Vector3.Distance(target, hp) - (l1 + l2) * 0.99f;
                 if (F.rel > 0.5f && over > 0) drop = Mathf.Max(drop, over);

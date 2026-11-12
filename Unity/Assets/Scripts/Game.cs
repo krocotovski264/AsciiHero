@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.9.4 · Unity";
+        public const string VERSION = "beta 0.9.5 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -102,6 +102,7 @@ namespace AsciiHero
         {
             loadT0 = Time.realtimeSinceStartup;
             Application.targetFrameRate = 60;
+            QualitySettings.skinWeights = SkinWeights.FourBones;   // mobile quality levels default to 2 bones, which breaks this 163-bone rig
             Screen.sleepTimeout = SleepTimeout.NeverSleep;
             Screen.autorotateToPortrait = false; Screen.autorotateToPortraitUpsideDown = false;
             Screen.autorotateToLandscapeLeft = true; Screen.autorotateToLandscapeRight = true;
@@ -366,7 +367,9 @@ namespace AsciiHero
             foreach (var p in InputHub.active.Values)
             {
                 if (!p.began) continue;
-                if (world && stickRect.Contains(p.pos) && stickId == int.MinValue && (p.pos - stickCenter).magnitude < stickR * 1.25f) { p.owner = "stick"; stickId = p.id; }
+                // floating stick: its centre appears under the finger anywhere in the left part of the screen
+                if (world && stickId == int.MinValue && !InUi(p.pos) && p.pos.x < Screen.width * 0.45f && p.pos.y > Screen.height * 0.22f)
+                { p.owner = "stick"; stickId = p.id; stickCenter = ClampStickCenter(p.pos); }
                 else if (!world && sliderRect.Contains(p.pos)) p.owner = "slider";
                 else if (InUi(p.pos)) p.owner = "ui";
                 else
@@ -392,9 +395,9 @@ namespace AsciiHero
             Pointer sp; if (stickId != int.MinValue && InputHub.active.TryGetValue(stickId, out sp))
             {
                 Vector2 d = sp.pos - stickCenter; float max = stickR * 0.78f;
-                // run: finger pulled past the ring by about 1 cm (starts at 0.6 cm, full at 1.15 cm)
-                float cm = Screen.dpi > 0 ? Screen.dpi / 2.54f : 63f * k;
-                stickRun = Mathf.Clamp01((d.magnitude - max - 0.6f * cm) / (0.55f * cm));
+                // run: finger pulled past the ring (starts 0.25 cm beyond it, full at 0.7 cm)
+                float cm = StickCm();
+                stickRun = Mathf.Clamp01((d.magnitude - max - 0.25f * cm) / (0.45f * cm));
                 if (d.magnitude > max) d = d.normalized * max;
                 stick = d / max;
             }
@@ -433,6 +436,14 @@ namespace AsciiHero
             }
         }
 
+        float StickCm() { return Screen.dpi > 0 ? Screen.dpi / 2.54f : 63f * k; }
+        // keep the centre far enough from the screen edges that a full run pull (ring + 0.7 cm) fits in every direction, also downwards
+        Vector2 ClampStickCenter(Vector2 p)
+        {
+            float r = Mathf.Max(62 * k, 1f), reach = r * 0.78f + 0.95f * StickCm();
+            return new Vector2(Mathf.Max(p.x, safe.x + reach), Mathf.Min(p.y, safe.yMax - reach));
+        }
+
         static Vector3 Mirror(Vector3 v) { return new Vector3(-v.x, v.y, v.z); }
 
         void WorldUpdate(float dt)
@@ -440,7 +451,7 @@ namespace AsciiHero
             float ix = stick.x, iy = stick.y;
             if (InputHub.Key("W")) iy = -1; if (InputHub.Key("S")) iy = 1;
             if (InputHub.Key("A")) ix = -1; if (InputHub.Key("D")) ix = 1;
-            float l = Mathf.Sqrt(ix * ix + iy * iy), mag = Mathf.Min(1, l); if (mag < 0.12f) mag = 0;
+            float l = Mathf.Sqrt(ix * ix + iy * iy), mag = Mathf.Min(1, l / 0.8f); if (mag < 0.12f) mag = 0;   // 80 % of the ring = full walk
             float runIn = Mathf.Max(stickRun, InputHub.Key("Run") ? 1f : 0f);
             if (mag > 0.85f || (mag > 0 && runIn > 0)) mag = 1 + runIn;
             Vector2? dir = null;
@@ -757,8 +768,7 @@ namespace AsciiHero
             }
             // joystick
             stickR = 62 * k;
-            stickCenter = new Vector2(safe.x + 26 * k + stickR, safe.yMax - 22 * k - stickR);
-            stickRect = new Rect(stickCenter.x - stickR * 1.6f, stickCenter.y - stickR * 1.6f, stickR * 3.2f, stickR * 3.2f);
+            if (stickId == int.MinValue) stickCenter = ClampStickCenter(new Vector2(0, Screen.height));   // resting place: lowest spot that still leaves room to run
             var old = GUI.color;
             GUI.color = new Color(0.93f, 0.74f, 0.33f, 0.55f);
             GUI.DrawTexture(new Rect(stickCenter.x - stickR, stickCenter.y - stickR, stickR * 2, stickR * 2), texRing);

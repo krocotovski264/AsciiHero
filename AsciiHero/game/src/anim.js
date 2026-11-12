@@ -12,6 +12,7 @@ import { MM_META, MM_B64 } from './data_mm.js';
 let DB = null;
 const LN2 = Math.log(2);
 export const RUN_SPEED = 3.0;
+let SWITCH_K = +(globalThis.process && process.env.SK || 0.7);   // a jump must beat the current clip clearly, otherwise poses flicker
 export async function loadMocap() {
   if (DB) return;
   const bin = Uint8Array.from(atob(MM_B64), c => c.charCodeAt(0));
@@ -171,7 +172,7 @@ export function locomotion(A, dt, dir, mag, lockPos, myPos, collide) {
     A.searchT = 0.07;
     const cur = costAt(q, f0);
     const [best, bc] = search(q, f0 - 3, f0 + 12);
-    if (best >= 0 && (bc < cur - 0.05 || force && A.frame + 1 >= DB.RANGE_END[f0])) transition(A, best);
+    if (best >= 0 && (bc < cur * SWITCH_K - 0.05 || force && A.frame + 1 >= DB.RANGE_END[f0])) transition(A, best);
     A.cost = Math.min(cur, bc);
   }
   // ---- idle breaker ----
@@ -194,6 +195,7 @@ export function locomotion(A, dt, dir, mag, lockPos, myPos, collide) {
   dx += (S.x - (myPos.x + dx)) * k; dz += (S.z - (myPos.z + dz)) * k;
   A.heading += wrap(S.h - A.heading) * (1 - Math.exp(-dt * LN2 / 0.05));
   A.speed = Math.hypot(fwd, lat);
+  A.narrow = 1 - clamp(Math.abs(lat) / 0.5, 0, 1);
   A.label = labelFor(fwd, lat, yr, dir);
   return [dx, dz];
 }
@@ -247,7 +249,6 @@ function relaxArms(A) {
     if (s === 'L' && weapon === 'shield') continue;
     const up = H.bone('upperarm01.' + s), el = H.bone('lowerarm01.' + s); if (!up || !el) continue;
     const dW = P(el).sub(P(up)).normalize(), d = dW.clone().applyQuaternion(gi);
-    if (d.y > -0.2) continue;                       // raised arm: leave it
     const sign = s === 'L' ? 1 : -1, o = d.x * sign, r = Math.hypot(o, d.y), abd = Math.atan2(o, -d.y);
     if (abd <= ARM_MAX) continue;
     const a2 = ARM_MAX + (abd - ARM_MAX) * ARM_SOFT;
@@ -281,6 +282,12 @@ function footIK(A, dt) {
     if (F.rel > 0 && dxl * dxl + dzl * dzl > 0.16 * 0.16) { F.locked = false; F.rel = 0; }
     const target = ap.clone();
     if (F.rel > 0) { target.x += dxl * F.rel; target.z += dzl * F.rel; }
+    else if (A.narrow > 0) {
+      // feet under the hips: the mocap stance is wider than a relaxed one (not while side-stepping)
+      const gq = g.getWorldQuaternion(new THREE.Quaternion()), al = ap.clone().sub(g.position).applyQuaternion(gq.clone().invert());
+      const lim = Math.abs(hp.clone().sub(g.position).applyQuaternion(gq.clone().invert()).x), ax = Math.abs(al.x);
+      if (ax > lim) { const nx = Math.sign(al.x) * (lim + (ax - lim) * 0.3); al.x += (nx - al.x) * A.narrow; const w = al.applyQuaternion(gq).add(g.position); target.x = w.x; target.z = w.z; }
+    }
     target.y = Math.max(target.y, groundAnkle);
     const l1 = kp.distanceTo(hp), l2 = ap.distanceTo(kp), over = target.distanceTo(hp) - (l1 + l2) * 0.99;
     if (F.rel > 0.5 && over > 0) drop = Math.max(drop, over);
