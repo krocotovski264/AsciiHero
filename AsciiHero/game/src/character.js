@@ -62,7 +62,7 @@ export function buildCharacter(cfg, mats) {
   const scalpCut = i => Y(i) > eyeY + 0.045 - Math.max(0, -(Z(i) - headJ.z)) * 1.1;
 
   // body
-  addSkinned(h.partGeometry(0), 'SKIN');
+  addSkinned(h.partGeometry(0), cfg.shadow ? 'SHADOW' : 'SKIN');   // the hero is a shadow wearing armour
   addSkinned(h.partGeometry(1), 'EYE');
 
   const shell = (pred, t, mat, o = {}) => addSkinned(h.shell(pred, t, o), mat);
@@ -71,7 +71,7 @@ export function buildCharacter(cfg, mats) {
   const hooded = A === 'robe' || A === 'chain';
 
   // ---- hair ----
-  if (!helmet) {
+  if (!helmet && !cfg.shadow) {
     shell(i => R[i] === 'head' && scalpCut(i) && !(Math.abs(X(i)) > 0.068 && Y(i) < eyeY + 0.06 && Z(i) > headJ.z - 0.03), 0.011, 'HAIR', { smooth: 2 });
     if (cfg.sex === 'f' && !hooded) group.add(longHair(h, mats, skeleton, skinned));
     if (cfg.sex === 'm' && cfg.build >= 2) shell(i => R[i] === 'head' && Y(i) < eyeY - 0.045 && Z(i) > headJ.z + 0.0 && !(Y(i) < eyeY - 0.06 && Y(i) > eyeY - 0.075 && Math.abs(X(i)) < 0.028 && Z(i) > headJ.z + 0.07), 0.008, 'HAIR', { smooth: 1 });

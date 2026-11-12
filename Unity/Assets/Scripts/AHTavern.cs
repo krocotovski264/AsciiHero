@@ -48,12 +48,50 @@ namespace AsciiHero
         public static Color RGB(float r, float g, float b) { return new Color(r / 255f, g / 255f, b / 255f, 1); }
     }
 
-    public class Tavern
+    /// a place the hero can walk in: geometry, circle/box colliders and bounds
+    public class Location
     {
         public GameObject root;
         public List<Collider2> colliders = new List<Collider2>();
         public Rect bounds;  // xMin..xMax = x range, yMin..yMax = z range (Unity coordinates)
-        public Vector3 spawn, bartender;
+        public Vector3 spawn;
+        public virtual void Update(float t) { }
+        public virtual void Cutaway(Vector3 camOff) { }
+        public void SetActive(bool on) { root.SetActive(on); }
+        public Vector2 Collide(Vector2 p, float r)
+        {
+            for (int it = 0; it < 2; it++)
+                foreach (var c in colliders)
+                {
+                    if (c.circle)
+                    {
+                        float dx = p.x - c.x, dz = p.y - c.z, d = Mathf.Sqrt(dx * dx + dz * dz), mm = c.r + r;
+                        if (d < mm && d > 1e-6f) { p.x = c.x + dx / d * mm; p.y = c.z + dz / d * mm; }
+                    }
+                    else
+                    {
+                        float cx = Mathf.Clamp(p.x, c.minx, c.maxx), cz = Mathf.Clamp(p.y, c.minz, c.maxz);
+                        float dx = p.x - cx, dz = p.y - cz, d = Mathf.Sqrt(dx * dx + dz * dz);
+                        if (d < r)
+                        {
+                            if (d > 1e-6f) { p.x = cx + dx / d * r; p.y = cz + dz / d * r; }
+                            else
+                            {
+                                float[] o = { p.x - c.minx, c.maxx - p.x, p.y - c.minz, c.maxz - p.y };
+                                int k = 0; for (int i = 1; i < 4; i++) if (o[i] < o[k]) k = i;
+                                if (k == 0) p.x = c.minx - r; else if (k == 1) p.x = c.maxx + r; else if (k == 2) p.y = c.minz - r; else p.y = c.maxz + r;
+                            }
+                        }
+                    }
+                }
+            p.x = Mathf.Clamp(p.x, bounds.xMin, bounds.xMax); p.y = Mathf.Clamp(p.y, bounds.yMin, bounds.yMax);
+            return p;
+        }
+    }
+
+    public class Tavern : Location
+    {
+        public Vector3 bartender;
         class Wall { public GameObject tall, low; public Vector3 n; }
         readonly Dictionary<string, Wall> walls = new Dictionary<string, Wall>();
         class Flick { public Light l; public float baseI; public int kind; }
@@ -338,7 +376,7 @@ namespace AsciiHero
             bartender = MX(bx + 0.2f, 0, -3.25f);
         }
 
-        public void Update(float t)
+        public override void Update(float t)
         {
             foreach (var L in lights)
             {
@@ -355,42 +393,12 @@ namespace AsciiHero
         }
 
         /// hide the walls between the camera and the hero (camOff = camera offset from the target, Unity coords)
-        public void Cutaway(Vector3 camOff)
+        public override void Cutaway(Vector3 camOff)
         {
             var d = new Vector3(camOff.x, 0, camOff.z).normalized;
             foreach (var w in walls.Values) { bool near = Vector3.Dot(w.n, d) > 0.25f; w.tall.SetActive(!near); w.low.SetActive(near); }
         }
 
-        public Vector2 Collide(Vector2 p, float r)
-        {
-            for (int it = 0; it < 2; it++)
-                foreach (var c in colliders)
-                {
-                    if (c.circle)
-                    {
-                        float dx = p.x - c.x, dz = p.y - c.z, d = Mathf.Sqrt(dx * dx + dz * dz), mm = c.r + r;
-                        if (d < mm && d > 1e-6f) { p.x = c.x + dx / d * mm; p.y = c.z + dz / d * mm; }
-                    }
-                    else
-                    {
-                        float cx = Mathf.Clamp(p.x, c.minx, c.maxx), cz = Mathf.Clamp(p.y, c.minz, c.maxz);
-                        float dx = p.x - cx, dz = p.y - cz, d = Mathf.Sqrt(dx * dx + dz * dz);
-                        if (d < r)
-                        {
-                            if (d > 1e-6f) { p.x = cx + dx / d * r; p.y = cz + dz / d * r; }
-                            else
-                            {
-                                float[] o = { p.x - c.minx, c.maxx - p.x, p.y - c.minz, c.maxz - p.y };
-                                int k = 0; for (int i = 1; i < 4; i++) if (o[i] < o[k]) k = i;
-                                if (k == 0) p.x = c.minx - r; else if (k == 1) p.x = c.maxx + r; else if (k == 2) p.y = c.minz - r; else p.y = c.maxz + r;
-                            }
-                        }
-                    }
-                }
-            p.x = Mathf.Clamp(p.x, bounds.xMin, bounds.xMax); p.y = Mathf.Clamp(p.y, bounds.yMin, bounds.yMax);
-            return p;
-        }
 
-        public void SetActive(bool on) { root.SetActive(on); }
     }
 }

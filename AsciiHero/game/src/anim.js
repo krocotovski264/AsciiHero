@@ -76,6 +76,7 @@ export function makeActor(c) {
     outQ: Array.from({ length: nb }, () => new THREE.Quaternion()), ro: [0, 0, 0], con: [1, 1],
     feet: { L: { locked: false, pos: new THREE.Vector3(), rel: 0 }, R: { locked: false, pos: new THREE.Vector3(), rel: 0 } },
     query: new Float32Array(27), label: 'idle', cost: 0,
+    limbs: { head: true, armL: true, armR: true, legL: true, legR: true }, hopPh: 0, crawlPh: 0, vel: 0,
   };
   A.restAnkle = Math.min(localY(H, 'foot.L'), localY(H, 'foot.R'));
   if (DB) A.frame = startFrame();
@@ -132,6 +133,9 @@ export function locomotion(A, dt, dir, mag, lockPos, myPos, collide) {
     const walk = mag < 0.22 ? 0 : 0.75 + 0.65 * clamp((mag - 0.22) / 0.78, 0, 1);
     speed = mag <= 1 ? walk : 1.4 + (RUN_SPEED - 1.4) * clamp(mag - 1, 0, 1);
     if (lockPos) speed = Math.min(speed, 1.7);
+    const legs = (A.limbs.legL ? 1 : 0) + (A.limbs.legR ? 1 : 0), arms = (A.limbs.armL ? 1 : 0) + (A.limbs.armR ? 1 : 0);
+    if (legs === 1) speed = Math.min(speed, 1.15);                       // hopping on one leg
+    if (legs === 0) speed = Math.min(speed, arms === 2 ? 0.5 : arms === 1 ? 0.35 : 0.18);   // crawling
   }
   const vgx = dir ? dir[0] * speed : 0, vgz = dir ? dir[1] * speed : 0;
   let hGoal = S.h;
@@ -196,7 +200,8 @@ export function locomotion(A, dt, dir, mag, lockPos, myPos, collide) {
   A.heading += wrap(S.h - A.heading) * (1 - Math.exp(-dt * LN2 / 0.05));
   A.speed = Math.hypot(fwd, lat);
   A.narrow = 1 - clamp(Math.abs(lat) / 0.5, 0, 1);
-  A.label = labelFor(fwd, lat, yr, dir);
+  A.label = labelFor(fwd, lat, yr, dir) + injuryLabel(A);
+  A.vel = Math.hypot(dx, dz) / Math.max(dt, 1e-4);
   return [dx, dz];
 }
 function labelFor(fwd, lat, yr, dir) {
@@ -233,9 +238,72 @@ export function animateActor(A, t, dt = 1 / 60) {
   }
   H.root.position.set(A.rootPos.x + A.ro[0], A.rootPos.y + A.ro[1], A.rootPos.z + A.ro[2]);
   H.root.updateMatrixWorld(true);
-  relaxArms(A);
-  footIK(A, dt);
+  const legsN = (A.limbs.legL ? 1 : 0) + (A.limbs.legR ? 1 : 0);
+  if (legsN === 0) crawl(A, dt);
+  else {
+    if (legsN === 1) hopBody(A, dt);
+    armLean(A);
+    relaxArms(A);
+    footIK(A, dt);
+  }
   const wp = A.char.group.userData.weapon; if (wp && wp.userData.orb) { wp.userData.orb.rotation.y = t * 1.4; const s = 1 + 0.08 * Math.sin(t * 3); wp.userData.orb.scale.set(0.8 * s, 1.2 * s, 0.8 * s); }
+}
+
+// ---------- missing limbs ----------
+// The hero is a shadow in armour; limbs can be torn off. Bones of a missing limb are scaled to nothing, and the
+// rest of the body compensates procedurally on top of the matched mocap pose:
+//   one arm   - the torso tilts towards the remaining arm
+//   one leg   - hopping: the body rises while the remaining foot is in the air, arms go out for balance
+//   no legs   - crawling: prone, pulled along by whichever arms are left
+export const LIMB_BONE = { head: 'head', armL: 'upperarm01.L', armR: 'upperarm01.R', legL: 'upperleg01.L', legR: 'upperleg01.R' };
+export function setLimbs(A, limbs) {
+  Object.assign(A.limbs, limbs);
+  for (const k in LIMB_BONE) {
+    const b = A.H.bone(LIMB_BONE[k]); if (!b) continue; const on = !!A.limbs[k];
+    b.scale.setScalar(on ? 1 : 1e-4);
+    b.traverse(o => { if (o.isMesh) o.visible = on; });      // rigid gear on that limb (weapon, shield, plume)
+  }
+  A.feet.L.locked = A.feet.R.locked = false; A.feet.L.rel = A.feet.R.rel = 0;
+}
+function injuryLabel(A) {
+  const L = A.limbs, miss = []; if (!L.head) miss.push('головы'); if (!L.armL) miss.push('л.руки'); if (!L.armR) miss.push('п.руки'); if (!L.legL) miss.push('л.ноги'); if (!L.legR) miss.push('п.ноги');
+  if (!miss.length) return '';
+  const legs = (L.legL ? 1 : 0) + (L.legR ? 1 : 0);
+  return ' · ' + (legs === 0 ? 'ползком' : legs === 1 ? 'на одной ноге' : 'без') + (legs === 2 ? ' ' + miss.join(', ') : '');
+}
+const groupQ = A => A.char.group.getWorldQuaternion(new THREE.Quaternion());
+function aimBone(H, a, b, dirW) {
+  const ba = H.bone(a), bb = H.bone(b); if (!ba || !bb) return;
+  rotateWorld(ba, new THREE.Quaternion().setFromUnitVectors(P(bb).sub(P(ba)).normalize(), dirW.clone().normalize()));
+}
+function armLean(A) {
+  const L = A.limbs; if (L.armL === L.armR) return;
+  const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(groupQ(A));
+  rotateWorld(A.H.bone('spine03'), new THREE.Quaternion().setFromAxisAngle(fwd, L.armL ? -0.08 : 0.08));
+}
+function hopBody(A, dt) {
+  const H = A.H, moving = A.vel > 0.15, side = A.limbs.legL ? 1 : -1;
+  A.hopPh = moving ? (A.hopPh + dt * Math.PI * 2 * (1.7 + 0.5 * A.vel)) % (Math.PI * 2) : 0;
+  A.hopH = moving ? 0.10 * Math.max(0, Math.sin(A.hopPh)) : 0;
+  H.root.position.y += A.hopH; H.root.position.x += side * 0.05;      // weight over the remaining foot
+  H.root.updateMatrixWorld(true);
+}
+function crawl(A, dt) {
+  const H = A.H, gq = groupQ(A), L = A.limbs;
+  A.crawlPh = (A.crawlPh + dt * A.vel * Math.PI * 2 / 0.5) % (Math.PI * 2);
+  const ph = A.crawlPh, X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0);
+  H.root.position.set(A.rootPos.x, 0.23 + 0.015 * Math.sin(ph * 2), A.rootPos.z);
+  H.root.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(Y, 0.13 * Math.sin(ph))).premultiply(new THREE.Quaternion().setFromAxisAngle(X, 1.2));
+  H.root.updateMatrixWorld(true);
+  const right = X.clone().applyQuaternion(gq);
+  for (const n of ['neck01', 'head']) if (H.bone(n)) rotateWorld(H.bone(n), new THREE.Quaternion().setFromAxisAngle(right, -0.48));   // look ahead
+  const W = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(gq);
+  for (const [s, sg, on, off] of [['L', 1, L.armL, 0], ['R', -1, L.armR, Math.PI]]) {
+    if (!on) continue;
+    const r = (Math.sin(ph + off) + 1) / 2;                 // 1 = reaching forward, 0 = pulled back under the chest
+    aimBone(H, 'upperarm01.' + s, 'lowerarm01.' + s, W(sg * (0.45 - 0.15 * r), -0.55 + 0.3 * r, 0.2 + 0.8 * r));
+    aimBone(H, 'lowerarm01.' + s, 'wrist.' + s, W(-sg * 0.1, -0.9 + 0.4 * r, -0.1 + 0.95 * r));
+  }
 }
 
 // ---------- arms ----------
@@ -247,11 +315,13 @@ function relaxArms(A) {
   const gq = g.getWorldQuaternion(new THREE.Quaternion()), gi = gq.clone().invert();
   for (const s of ['L', 'R']) {
     if (s === 'L' && weapon === 'shield') continue;
+    if (!A.limbs[s === 'L' ? 'armL' : 'armR']) continue;
     const up = H.bone('upperarm01.' + s), el = H.bone('lowerarm01.' + s); if (!up || !el) continue;
     const dW = P(el).sub(P(up)).normalize(), d = dW.clone().applyQuaternion(gi);
     const sign = s === 'L' ? 1 : -1, o = d.x * sign, r = Math.hypot(o, d.y), abd = Math.atan2(o, -d.y);
-    if (abd <= ARM_MAX) continue;
-    const a2 = ARM_MAX + (abd - ARM_MAX) * ARM_SOFT;
+    const oneLeg = A.limbs.legL !== A.limbs.legR;
+    if (!oneLeg && abd <= ARM_MAX) continue;
+    const a2 = oneLeg ? Math.max(abd, 0.55 + 0.12 * Math.sin(A.hopPh)) : ARM_MAX + (abd - ARM_MAX) * ARM_SOFT;   // one leg: arms out for balance
     const d2 = new THREE.Vector3(Math.sin(a2) * r * sign, -Math.cos(a2) * r, d.z).normalize().applyQuaternion(gq);
     rotateWorld(up, new THREE.Quaternion().setFromUnitVectors(dW, d2));
   }
@@ -269,7 +339,9 @@ function footIK(A, dt) {
   const scaleY = g.scale.y, groundAnkle = g.position.y + A.restAnkle * scaleY;
   const moving = !A.noLock && A.speed > 0.08;
   const info = {}; let drop = 0;
+  const oneLeg = A.limbs.legL !== A.limbs.legR;
   for (const s of ['L', 'R']) {
+    if (!A.limbs[s === 'L' ? 'legL' : 'legR']) { info[s] = null; continue; }
     const hip = H.bone('upperleg01.' + s), knee = H.bone('lowerleg01.' + s), foot = H.bone('foot.' + s), toe = H.bone('toe3-1.' + s);
     const hp = P(hip), kp = P(knee), ap = P(foot);
     const F = A.feet[s], c = A.con[s === 'L' ? 0 : 1];
@@ -288,6 +360,12 @@ function footIK(A, dt) {
       const lim = Math.abs(hp.clone().sub(g.position).applyQuaternion(gq.clone().invert()).x), ax = Math.abs(al.x);
       if (ax > lim) { const nx = Math.sign(al.x) * (lim + (ax - lim) * 0.3); al.x += (nx - al.x) * A.narrow; const w = al.applyQuaternion(gq).add(g.position); target.x = w.x; target.z = w.z; }
     }
+    if (oneLeg) {
+      // hopping: the foot stays under the body, swings forward in the air and back on the ground
+      const gq = groupQ(A), sg = s === 'L' ? 1 : -1, mv = A.vel > 0.15 ? 1 : 0;
+      const w = new THREE.Vector3(sg * 0.03, 0, -0.13 * Math.cos(A.hopPh) * mv).applyQuaternion(gq).add(g.position);
+      target.set(w.x, groundAnkle + 0.55 * (A.hopH || 0) * scaleY, w.z); F.locked = false; F.rel = 0;
+    }
     target.y = Math.max(target.y, groundAnkle);
     const l1 = kp.distanceTo(hp), l2 = ap.distanceTo(kp), over = target.distanceTo(hp) - (l1 + l2) * 0.99;
     if (F.rel > 0.5 && over > 0) drop = Math.max(drop, over);
@@ -295,6 +373,7 @@ function footIK(A, dt) {
   }
   if (drop > 0) { H.root.position.y -= Math.min(drop, 0.05) / scaleY; H.root.updateMatrixWorld(true); }
   for (const s of ['L', 'R']) {
+    if (!info[s]) continue;
     const { hip, knee, foot, toe, target, l1, l2 } = info[s];
     const footQ = foot.getWorldQuaternion(new THREE.Quaternion());
     const hp = P(hip), kp = P(knee), ap = P(foot);

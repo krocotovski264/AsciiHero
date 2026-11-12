@@ -8,11 +8,13 @@ namespace AsciiHero
     {
         public const int SKIN = 0, HAIR = 1, LINEN = 2, PANTS = 3, LEATHER = 4, CHAIN = 5, PLATE = 6, STEEL = 7, WOOD = 8, GOLD = 9,
             GLOW = 10, EYE = 11, DARK = 12, RED = 13, ROBE = 14, ROBED = 15, STONE = 16, LEATHER2 = 17, HAIR2 = 18,
-            PLANK = 19, BEAM = 20, PLASTER = 21, HEARTH = 22, FIRE = 23, MOON = 24, GLASS = 25, GLASS2 = 26, GLASS3 = 27, FLOOR = 28;
+            PLANK = 19, BEAM = 20, PLASTER = 21, HEARTH = 22, FIRE = 23, MOON = 24, GLASS = 25, GLASS2 = 26, GLASS3 = 27, FLOOR = 28,
+            SHADOW = 29, GROUND = 30, LEAF = 31, ROCK = 32;
         // material id -> glyph ramp (same table as the web build)
         public static readonly int[] RAMP = {
             0, 1, 2, 2, 3, 4, 5, 6, 7, 8, 9, 9, 10, 2, 2, 2, 11, 3, 1,
-            7, 7, 2, 11, 9, 9, 6, 6, 6, 11 };
+            7, 7, 2, 11, 9, 9, 6, 6, 6, 11,
+            13, 11, 1, 11 };
     }
 
     public class MatDef
@@ -54,6 +56,10 @@ namespace AsciiHero
             { "GLASS", new MatDef(MatId.GLASS, 0x3a7a3a, 0.15f, 0.3f, 0x0a200a) },
             { "GLASS2", new MatDef(MatId.GLASS2, 0x7a3a18, 0.15f, 0.3f, 0x200a04) },
             { "GLASS3", new MatDef(MatId.GLASS3, 0x6a6aa8, 0.15f, 0.3f, 0x101028) },
+            { "SHADOW", new MatDef(MatId.SHADOW, 0x07050d, 1, 0, 0, true) },     // the hero's body: living darkness
+            { "GROUND", new MatDef(MatId.GROUND, 0x1c3319, 1, 0, 0, true) },
+            { "LEAF", new MatDef(MatId.LEAF, 0x2f6b2f, 1, 0, 0, true) },
+            { "ROCK", new MatDef(MatId.ROCK, 0x6c6c72, 1, 0, 0, true) },
             { "STONE", new MatDef(MatId.STONE, 0xffffff, 0.95f, 0, 0, true) },
         };
 
@@ -81,6 +87,8 @@ namespace AsciiHero
                 m.SetFloat("_AsciiRow", d.id < MatId.RAMP.Length ? MatId.RAMP[d.id] : 0);
                 m.SetFloat("_AsciiActor", actor ? 1 : 0);
                 bool big = kv.Key == "FLOOR" || kv.Key == "PLASTER" || kv.Key == "PLANK" || kv.Key == "HEARTH" || kv.Key == "STONE" || kv.Key == "BEAM";
+                m.SetFloat("_GlyphSmoke", kv.Key == "SHADOW" ? 1 : 0);
+                if (kv.Key == "GROUND") m.SetVector("_GlyphCell", new Vector4(0.11f, 0.18f, 0, 0)); else
                 m.SetVector("_GlyphCell", actor ? new Vector4(0.017f, 0.028f, 0, 0) : big ? new Vector4(0.06f, 0.1f, 0, 0) : new Vector4(0.034f, 0.056f, 0, 0));
                 map[kv.Key] = m;
             }

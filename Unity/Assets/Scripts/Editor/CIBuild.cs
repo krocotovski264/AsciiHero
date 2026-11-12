@@ -44,6 +44,16 @@ namespace AsciiHero.Editor
                 if (!string.IsNullOrEmpty(version) && int.TryParse(version, out vc) && vc > 0) PlayerSettings.Android.bundleVersionCode = vc;
 
                 EditorUserBuildSettings.buildAppBundle = false;
+                // Always sign with the same test key (Unity/ci/test.keystore). Unity's default debug key is generated
+                // per machine, so every CI build had a different signature and Android refused to update the app.
+                string ks = Path.GetFullPath("ci/test.keystore");
+                if (File.Exists(ks))
+                {
+                    PlayerSettings.Android.useCustomKeystore = true;
+                    PlayerSettings.Android.keystoreName = ks; PlayerSettings.Android.keystorePass = "asciihero";
+                    PlayerSettings.Android.keyaliasName = "test"; PlayerSettings.Android.keyaliasPass = "asciihero";
+                }
+                else Debug.LogWarning("[CIBuild] ci/test.keystore not found: the APK gets a machine-specific debug signature");
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
                 var options = new BuildPlayerOptions
                 {

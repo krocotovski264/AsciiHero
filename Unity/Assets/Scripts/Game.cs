@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.9.5 · Unity";
+        public const string VERSION = "beta 0.10 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -43,7 +43,10 @@ namespace AsciiHero
         Camera display, sceneCam; AsciiRenderer ascii;
         Mats mats, actorMats;
         Character hero; MotionActor player;
-        bool world; Tavern tavern; Character bartenderChar; MotionActor bartender;
+        bool world; Tavern tavern; Field field; Location loc; Character bartenderChar; MotionActor bartender;
+        // integrity instead of a health bar: five limbs (head, armL, armR, legL, legR), each worth 20 %
+        int hp = 100; readonly bool[] limbs = { true, true, true, true, true }; float respawnT; Vector3 heroTrail;
+        int LimbCount() { int n = 0; foreach (var b in limbs) if (b) n++; return n; }
         GameObject editorRoot, worldLightsRoot; Light key, rim, fill, heroLight;
         GameObject floor;
         bool rebuildPending;
@@ -222,15 +225,55 @@ namespace AsciiHero
             return m;
         }
 
-        void SetupWorld()
+        void Damage(int pct)
         {
-            tavern = Tavern.Build(mats);
-            GlyphLayer.Build(tavern.root);
+            if (hp <= 0 || !ready) return;
+            hp = Mathf.Max(0, hp - pct);
+            string lost = "";
+            while (LimbCount() > Mathf.CeilToInt(hp / 20f))
+            {
+                var have = new List<int>(); for (int l = 0; l < 5; l++) if (limbs[l]) have.Add(l);
+                int pick = have[Random.Range(0, have.Count)]; limbs[pick] = false;
+                lost += (lost.Length > 0 ? ", " : "") + Character.LIMB_NAME[pick];
+            }
+            player.SetLimbs(limbs);
+            if (hp <= 0) { ShowToast("Доспех разрушен — тень рассеялась"); respawnT = 1.8f; }
+            else ShowToast("Урон −" + pct + "% · целостность " + hp + "%" + (lost.Length > 0 ? "\nОторвано: " + lost : ""));
+        }
+        void RestoreBody() { hp = 100; for (int l = 0; l < 5; l++) limbs[l] = true; if (player != null) player.SetLimbs(limbs); }
+        void Pickups()
+        {
+            if (field == null || loc != field || hp <= 0) return;
+            foreach (var p in field.piles)
+            {
+                if ((new Vector2(pos.x - p.pos.x, pos.z - p.pos.z)).magnitude > 0.95f) continue;
+                string got = "";
+                for (int l = 0; l < 5; l++)
+                    if (!limbs[l] && p.Take(l)) { limbs[l] = true; hp = Mathf.Min(100, hp + 20); got += (got.Length > 0 ? ", " : "") + Character.LIMB_NAME[l]; }
+                if (got.Length > 0) { player.SetLimbs(limbs); ShowToast("Подобрано: " + got + "\nЦелостность " + hp + "%"); }
+            }
+        }
+
+        void SetupWorldLights()
+        {
             worldLightsRoot = new GameObject("WorldLights");
             var hl = new GameObject("HeroLight"); hl.transform.SetParent(worldLightsRoot.transform, false);
             heroLight = hl.AddComponent<Light>(); heroLight.type = LightType.Point; heroLight.color = Mats.Hex(0xffe6c8); heroLight.intensity = 1.6f; heroLight.range = 4.2f; heroLight.renderMode = LightRenderMode.ForcePixel;
             var moon = DirLight("Moon", worldLightsRoot.transform, Mats.Hex(0x8aa6ff), 0.3f, true);
             moon.transform.rotation = Quaternion.LookRotation(new Vector3(1f, -7.5f, 7.5f));
+        }
+        void SetupField()
+        {
+            if (worldLightsRoot == null) SetupWorldLights();
+            field = Field.Build(mats);
+            GlyphLayer.Build(field.root);
+            Debug.Log("Поле построено, символов на сцене: " + GlyphLayer.count);
+        }
+        void SetupWorld()
+        {
+            tavern = Tavern.Build(mats);
+            GlyphLayer.Build(tavern.root);
+            if (worldLightsRoot == null) SetupWorldLights();
             bartenderChar = Character.Build(new CharConfig { sex = 'm', build = 3, height = 178, armor = "cloth", weapon = "none" }, actorMats, "Bartender");
             bartenderChar.go.transform.position = tavern.bartender;
             GlyphLayer.Build(bartenderChar.go);
@@ -278,9 +321,11 @@ namespace AsciiHero
         void Rebuild()
         {
             if (hero != null) Destroy(hero.go);
-            hero = Character.Build(cfg, actorMats, "Hero");
-            GlyphLayer.Build(hero.go);
+            var hc = cfg.Clone(); hc.shadow = true;       // the hero is a shadow wearing armour
+            hero = Character.Build(hc, actorMats, "Hero");
+            hero.glyphs = GlyphLayer.Build(hero.go, Character.LimbOfBone());
             player = new MotionActor(hero);
+            player.SetLimbs(limbs);
             if (useAnimator && locoCtrl != null)
             {
                 player.driver = AnimatorDriver.Attach(hero.go, locoCtrl);
@@ -290,24 +335,31 @@ namespace AsciiHero
         }
 
         // ---------- modes ----------
-        void EnterWorld()
+        void EnterWorld(bool toField = false)
         {
             SaveCfg();
-            if (tavern == null) SetupWorld();
-            world = true;
-            tavern.SetActive(true); worldLightsRoot.SetActive(true); bartenderChar.go.SetActive(true); editorRoot.SetActive(false);
-            pos = tavern.spawn; player.heading = Mathf.PI; player.ResetSim(); player.noLock = false;
+            try { if (toField) { if (field == null) SetupField(); } else if (tavern == null) SetupWorld(); }
+            catch (System.Exception e) { Debug.LogException(e); return; }
+            world = true; loc = toField ? (Location)field : tavern;
+            if (tavern != null) { tavern.SetActive(!toField); bartenderChar.go.SetActive(!toField); }
+            if (field != null) field.SetActive(toField);
+            worldLightsRoot.SetActive(true); editorRoot.SetActive(false);
+            pos = loc.spawn; heroTrail = pos; player.heading = Mathf.PI; player.ResetSim(); player.noLock = false;
             hero.go.transform.position = pos; hero.go.transform.rotation = Quaternion.Euler(0, 180, 0);
             camTgt = new Vector3(pos.x, 0.6f, pos.z);
             sceneCam.fieldOfView = 30; ascii.exposure = 1.3f; ascii.actorBoost = 1;
-            SetAmbient(Mats.Hex(0x50465a) * 0.45f, Mats.Hex(0x342b32) * 0.45f, Mats.Hex(0x18100a) * 0.45f);
+            if (toField) SetAmbient(Mats.Hex(0x8fa4d8) * 0.55f, Mats.Hex(0x4a5a58) * 0.55f, Mats.Hex(0x1a2414) * 0.55f);
+            else SetAmbient(Mats.Hex(0x50465a) * 0.45f, Mats.Hex(0x342b32) * 0.45f, Mats.Hex(0x18100a) * 0.45f);
             SetShadowDistance(20);
-            ShowToast("Трактир «Пьяный дракон»\nСтик — шаг, палец за край — бег · свайп — камера");
+            ShowToast(toField ? "Тестовое поле\nКучи брони возвращают оторванные части" : "Трактир «Пьяный дракон»\nСтик — шаг, палец за край — бег · свайп — камера");
         }
         void LeaveWorld()
         {
             world = false;
-            tavern.SetActive(false); worldLightsRoot.SetActive(false); bartenderChar.go.SetActive(false); editorRoot.SetActive(true);
+            if (tavern != null) { tavern.SetActive(false); bartenderChar.go.SetActive(false); }
+            if (field != null) field.SetActive(false);
+            worldLightsRoot.SetActive(false); editorRoot.SetActive(true);
+            Shader.SetGlobalVector("_AsciiHeroA", new Vector4(0, -99, 0, 0)); Shader.SetGlobalVector("_AsciiHeroB", new Vector4(0, -99, 0, 0));
             hero.go.transform.position = Vector3.zero; hero.go.transform.rotation = Quaternion.identity;
             player.speed = 0; player.heading = 0; player.ResetSim(); lockOn = false;
             sceneCam.fieldOfView = 36; ascii.exposure = 1; ascii.actorBoost = 0;
@@ -462,22 +514,29 @@ namespace AsciiHero
                 dir = new Vector2(-(ux * cs + uy * sn), -ux * sn + uy * cs);
             }
             Vector2? lockPos = null;
-            if (lockOn) { var lp = lockFixed ?? bartenderChar.go.transform.position; lockPos = new Vector2(lp.x, lp.z); }
-            var dd = player.Locomotion(dt, dir, mag, lockPos, new Vector2(pos.x, pos.z), p => tavern.Collide(p, 0.27f));
-            var np = tavern.Collide(new Vector2(pos.x + dd.x, pos.z + dd.y), 0.27f);
+            if (lockOn) { var lp = lockFixed ?? (loc == tavern ? bartenderChar.go.transform.position : loc.spawn); lockPos = new Vector2(lp.x, lp.z); }
+            var dd = player.Locomotion(dt, dir, mag, lockPos, new Vector2(pos.x, pos.z), p => loc.Collide(p, 0.27f));
+            var np = loc.Collide(new Vector2(pos.x + dd.x, pos.z + dd.y), 0.27f);
             pos = new Vector3(np.x, 0, np.y);
             hero.go.transform.position = pos;
             hero.go.transform.rotation = Quaternion.Euler(0, player.heading * Mathf.Rad2Deg, 0);
-            tavern.Update(tNow);
+            loc.Update(tNow); Pickups();
+            if (respawnT > 0) { respawnT -= dt; if (respawnT <= 0) { RestoreBody(); pos = loc.spawn; player.ResetSim(); } }
+            // grass: the hero and a point trailing behind him push the blades aside
+            heroTrail = Vector3.Lerp(heroTrail, pos, Mathf.Min(1, dt * 2.2f));
+            Shader.SetGlobalVector("_AsciiHeroA", new Vector4(pos.x, 0, pos.z, 0)); Shader.SetGlobalVector("_AsciiHeroB", new Vector4(heroTrail.x, 0, heroTrail.z, 0));
             labelT -= dt; if (labelT <= 0) { labelT = 0.25f; animLabel = player.label; }
-            var bp = bartenderChar.go.transform.position;
-            bartender.Locomotion(dt, null, 0, null, new Vector2(bp.x, bp.z), null); bartender.heading = 0; bartender.noLock = true;
-            bartender.Animate(tNow, dt);
+            if (loc == tavern)
+            {
+                var bp = bartenderChar.go.transform.position;
+                bartender.Locomotion(dt, null, 0, null, new Vector2(bp.x, bp.z), null); bartender.heading = 0; bartender.noLock = true;
+                bartender.Animate(tNow, dt);
+            }
             // camera
             isoYaw += (isoYawT - isoYaw) * Mathf.Min(1, dt * 12); isoPitch += (isoPitchT - isoPitch) * Mathf.Min(1, dt * 12);
             Vector3 off = Mirror(new Vector3(Mathf.Sin(isoYaw) * Mathf.Cos(isoPitch), Mathf.Sin(isoPitch), Mathf.Cos(isoYaw) * Mathf.Cos(isoPitch)) * ISO_DIST);
             { var d = new Vector3(off.x, 0, off.z).normalized; heroLight.transform.position = new Vector3(pos.x + d.x * 1.3f - d.z * 0.5f, 2.3f, pos.z + d.z * 1.3f + d.x * 0.5f); }
-            tavern.Cutaway(off);
+            loc.Cutaway(off);
             camTgt = Vector3.Lerp(camTgt, new Vector3(pos.x, 0.6f, pos.z), Mathf.Min(1, dt * 5));
             sceneCam.transform.position = camTgt + off; sceneCam.transform.LookAt(camTgt);
         }
@@ -668,7 +727,9 @@ namespace AsciiHero
             if (Button(new Rect(bx - 90 * k, by, 90 * k, bh), "Скрыть")) consoleOpen = false;
             if (Button(new Rect(bx - 200 * k, by, 104 * k, bh), "Копировать")) { GUIUtility.systemCopyBuffer = LogHub.AllText(); ShowToast("Лог скопирован"); }
             if (ready && ascii != null && Button(new Rect(bx - 330 * k, by, 124 * k, bh), ascii.plain ? "Вернуть ASCII" : "Без ASCII", ascii.plain)) ascii.plain = !ascii.plain;
-            GUI.Label(new Rect(panel.x + 8 * k, by + 2 * k, panel.width - 350 * k, bh), "Лог · ошибок: " + LogHub.errors + " · " + LogHub.FilePath, sSmall);
+            if (ready && world && Button(new Rect(bx - 440 * k, by, 104 * k, bh), "Урон −10%")) Damage(10);
+            if (ready && Button(new Rect(bx - 540 * k, by, 94 * k, bh), "Починить")) RestoreBody();
+            GUI.Label(new Rect(panel.x + 8 * k, by + 2 * k, panel.width - 560 * k, bh), "Лог · ошибок: " + LogHub.errors + " · " + LogHub.FilePath, sSmall);
             var st = new GUIStyle(sSmall) { wordWrap = true, richText = false, fontSize = Mathf.Max(8, Mathf.RoundToInt(9.5f * k)) };
             if (mono != null) st.font = mono;
             float lineH = st.lineHeight + 1, y = panel.yMax - 6 * k, x = panel.x + 8 * k, w = panel.width - 16 * k;
@@ -745,24 +806,27 @@ namespace AsciiHero
                 }
             }
             float bw2 = (cw - 6 * k) / 2;
-            if (Button(new Rect(x0, bottom, bw2, 32 * k), "СЛУЧАЙНО")) Randomize();
-            if (Button(new Rect(x0 + bw2 + 6 * k, bottom, bw2, 32 * k), "В ТРАКТИР ▶", true)) EnterWorld();
+            float bw3 = (cw - 12 * k) / 3;
+            if (Button(new Rect(x0, bottom, bw3, 32 * k), "СЛУЧАЙНО")) Randomize();
+            if (Button(new Rect(x0 + bw3 + 6 * k, bottom, bw3, 32 * k), "ТРАКТИР ▶", true)) EnterWorld(false);
+            if (Button(new Rect(x0 + (bw3 + 6 * k) * 2, bottom, bw3, 32 * k), "ПОЛЕ ▶", true)) EnterWorld(true);
         }
 
         void WorldUI(float W, float H, float L, float T)
         {
-            GUI.Label(new Rect(L, T, 360 * k, 22 * k), "«ПЬЯНЫЙ ДРАКОН»", sTitle);
-            GUI.Label(new Rect(L, T + 20 * k, 360 * k, 14 * k), "трактир · " + VERSION, sSmall);
+            GUI.Label(new Rect(L, T, 360 * k, 22 * k), loc == field ? "ТЕСТОВОЕ ПОЛЕ" : "«ПЬЯНЫЙ ДРАКОН»", sTitle);
+            GUI.Label(new Rect(L, T + 20 * k, 360 * k, 14 * k), (loc == field ? "трава · кучи брони · " : "трактир · ") + VERSION, sSmall);
             int si = cfg.sex == 'f' ? 1 : 0;
-            GUI.Label(new Rect(L, T + 38 * k, 420 * k, 50 * k), "<b>" + SEXNAME[si] + "</b> · " + cfg.height + " см\nСтик — шаг, палец за край — бег · свайп — камера\nАнимация: " + animLabel, sBadge);
+            GUI.Label(new Rect(L, T + 38 * k, 420 * k, 50 * k), "<b>" + SEXNAME[si] + "</b> · " + cfg.height + " см\nСтик — шаг, палец за край — бег · свайп — камера\nЦелостность: " + hp + "% · " + animLabel, sBadge);
             float R = safe.xMax - 10 * k;
             if (Button(new Rect(R - 96 * k, T, 96 * k, 28 * k), "← ГЕРОЙ")) { LeaveWorld(); return; }
             if (Button(new Rect(R - 200 * k, T + 32 * k, 200 * k, 26 * k), useAnimator ? "АНИМ: ANIMATOR" : "АНИМ: MM", useAnimator)) ToggleAnimMode();
             if (Button(new Rect(R - 200 * k, T + 62 * k, 200 * k, 26 * k), ascii.surfaceGlyphs ? "Aa: НА МОДЕЛЯХ" : "Aa: СЕТКОЙ", ascii.surfaceGlyphs)) ToggleGlyphMode();
+            if (Button(new Rect(R - 304 * k, T, 96 * k, 28 * k), "УРОН −10%")) Damage(10);
             if (Button(new Rect(R - 200 * k, T, 96 * k, 28 * k), "ЦЕЛЬ", lockOn))
             {
                 lockOn = !lockOn; lockFixed = null;
-                if (lockOn && Vector3.Distance(bartenderChar.go.transform.position, pos) > 10)
+                if (lockOn && loc == tavern && Vector3.Distance(bartenderChar.go.transform.position, pos) > 10)
                     lockFixed = new Vector3(pos.x + Mathf.Sin(player.heading) * 20, 0, pos.z + Mathf.Cos(player.heading) * 20);
                 ShowToast(lockOn ? "Фиксация на цели: трактирщик\nСтик — стрейф 8 направлений" : "Свободное движение");
             }

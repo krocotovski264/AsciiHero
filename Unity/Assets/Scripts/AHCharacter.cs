@@ -10,6 +10,7 @@ namespace AsciiHero
     {
         public char sex = 'm'; public int build = 1; public float height = 178f;
         public string armor = "leather"; public string weapon = "sword";
+        public bool shadow;   // the hero: a body of living darkness inside the armour
         public CharConfig Clone() { return (CharConfig)MemberwiseClone(); }
     }
 
@@ -37,6 +38,19 @@ namespace AsciiHero
         public Human human;
         public CharConfig cfg;
         public Transform weapon, orb;
+        public List<Renderer> glyphs = new List<Renderer>();   // skinned glyph renderers (limb hiding)
+        public static readonly string[] LIMBS = { "head", "armL", "armR", "legL", "legR" };
+        public static readonly string[] LIMB_NAME = { "голова", "левая рука", "правая рука", "левая нога", "правая нога" };
+        public static readonly string[] LIMB_BONE = { "head", "upperarm01.L", "upperarm01.R", "upperleg01.L", "upperleg01.R" };
+        /// bone index -> limb number 1..5 (0 = body)
+        public static int[] LimbOfBone()
+        {
+            HumanDB.Load(); int nb = HumanDB.bones.Length; var r = new int[nb];
+            for (int i = 0; i < nb; i++)
+                for (int b = i; b >= 0 && r[i] == 0; b = HumanDB.parents[b])
+                    for (int l = 0; l < 5; l++) if (HumanDB.bones[b] == LIMB_BONE[l]) { r[i] = l + 1; break; }
+            return r;
+        }
         public float baseHeight;
         Mats mats;
 
@@ -74,7 +88,7 @@ namespace AsciiHero
             Func<int, bool> isFace = i => R[i] == Region.Head && Z(i) > headJ.z + 0.035f && Y(i) < eyeY + 0.035f && Mathf.Abs(X(i)) < 0.075f;
             Func<int, bool> scalpCut = i => Y(i) > eyeY + 0.045f - Mathf.Max(0, -(Z(i) - headJ.z)) * 1.1f;
 
-            AddSkinned(h.PartMesh(0), "SKIN", "Body");
+            AddSkinned(h.PartMesh(0), cfg.shadow ? "SHADOW" : "SKIN", "Body");
             AddSkinned(h.PartMesh(1), "EYE", "Eyes");
 
             Action<Func<int, bool>, float, string, int, float> shell = (pred, t, mat, smooth, reinf) =>
@@ -83,7 +97,7 @@ namespace AsciiHero
             string A = cfg.armor; bool helmet = A == "plate", hooded = A == "robe" || A == "chain";
 
             // ---- hair ----
-            if (!helmet)
+            if (!helmet && !cfg.shadow)
             {
                 shell(i => R[i] == Region.Head && scalpCut(i) && !(Mathf.Abs(X(i)) > 0.068f && Y(i) < eyeY + 0.06f && Z(i) > headJ.z - 0.03f), 0.011f, "HAIR", 2, 0);
                 if (cfg.sex == 'f' && !hooded) LongHair();

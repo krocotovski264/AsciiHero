@@ -3,8 +3,9 @@ import { loadHuman, MAT } from './human.js';
 import { buildCharacter, ARMORS, WEAPONS, BUILDS } from './character.js';
 import { AsciiRenderer, makeMaterials, buildGlyphLayer, GLYPH, GLYPH_STATS } from './ascii.js';
 import { buildTavern } from './tavern.js';
+import { buildField, LIMBS, LIMB_NAME } from './field.js';
 import { applyPose } from './pose.js';
-import { makeActor, animateActor, locomotion, loadMocap } from './anim.js';
+import { makeActor, animateActor, locomotion, loadMocap, setLimbs } from './anim.js';
 
 const $ = id => document.getElementById(id);
 const DEF = { sex: 'm', height: 180, build: 1, armor: 'chain', weapon: 'shield' };
@@ -63,7 +64,9 @@ $('rand').onclick = () => {
   cfg.build = Math.floor(Math.random() * 4); cfg.armor = r(ARMORS).id; cfg.weapon = r(WEAPONS).id; setCfg('sex', cfg.sex);
 };
 function toast(t) { const el = $('toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toast._t); toast._t = setTimeout(() => el.classList.remove('show'), 2600); }
-$('done').onclick = () => { try { localStorage.setItem('ascii_hero3d', JSON.stringify(cfg)); } catch (e) {} enterWorld(); };
+$('done').onclick = () => { try { localStorage.setItem('ascii_hero3d', JSON.stringify(cfg)); } catch (e) {} enterWorld('tavern'); };
+$('field').onclick = () => { try { localStorage.setItem('ascii_hero3d', JSON.stringify(cfg)); } catch (e) {} enterWorld('field'); };
+$('dmg').onclick = () => damage(10);
 $('back').onclick = () => leaveWorld();
 // where the characters live: on the models (surface glyphs) or on a screen grid (beta 0.8)
 try { const gm = localStorage.getItem('ascii_hero_gmode'); if (gm !== null) GLYPH.uMode.value = +gm; } catch (e) {}
@@ -73,7 +76,7 @@ syncGMode();
 $('lock').onclick = () => {
   lockOn = !lockOn; $('lock').classList.toggle('on', lockOn);
   lockFixed = null;
-  if (lockOn && bartender && bartender.char.group.position.distanceTo(new THREE.Vector3(pos.x, 0, pos.z)) > 10) {
+  if (lockOn && bartender && loc === tavern && bartender.char.group.position.distanceTo(new THREE.Vector3(pos.x, 0, pos.z)) > 10) {
     lockFixed = new THREE.Vector3(pos.x + Math.sin(player.heading) * 20, 0, pos.z + Math.cos(player.heading) * 20);
   }
   toast(lockOn ? 'Фиксация на цели: трактирщик\nСтик — стрейф 8 направлений' : 'Свободное движение');
@@ -135,11 +138,12 @@ function rebuild() {
     scene.remove(char.group);
     char.group.traverse(o => { if (o.geometry) o.geometry.dispose(); });
   }
-  char = buildCharacter(cfg, actorMats);
+  char = buildCharacter(Object.assign({ shadow: true }, cfg), actorMats);
   buildGlyphLayer(char.group);
   scene.add(char.group);
   char.cfgWeapon = cfg.weapon;
   player = makeActor(char);
+  setLimbs(player, body.limbs);
   applyHeight();
   if (mode === 'world') placePlayerInWorld();
 }
@@ -192,9 +196,32 @@ const rot = document.getElementById('rotate'); if (rot) document.getElementById(
 window.addEventListener('resize', resize); new ResizeObserver(resize).observe($('view'));
 
 // ---------- world (tavern) ----------
-let mode = 'editor', tavern = null, bartender = null;
+let mode = 'editor', tavern = null, bartender = null, field = null, loc = null;
+// integrity instead of a health bar: five limbs, each worth 20 %
+const body = { hp: 100, limbs: { head: true, armL: true, armR: true, legL: true, legR: true } };
+const limbCount = () => LIMBS.filter(l => body.limbs[l]).length;
+function damage(pct) {
+  if (body.hp <= 0) return;
+  body.hp = Math.max(0, body.hp - pct);
+  const lost = [];
+  while (limbCount() > Math.ceil(body.hp / 20)) { const have = LIMBS.filter(l => body.limbs[l]); const l = have[Math.floor(Math.random() * have.length)]; body.limbs[l] = false; lost.push(LIMB_NAME[l]); }
+  if (player) setLimbs(player, body.limbs);
+  if (body.hp <= 0) { toast('Доспех разрушен — тень рассеялась'); setTimeout(() => { restoreBody(); if (loc) { pos.copy(loc.spawn); player.sim.init = false; } }, 1800); }
+  else toast('Урон −' + pct + '% · целостность ' + body.hp + '%' + (lost.length ? '\nОторвано: ' + lost.join(', ') : ''));
+}
+function restoreBody() { body.hp = 100; for (const l of LIMBS) body.limbs[l] = true; if (player) setLimbs(player, body.limbs); }
+function pickups() {
+  if (!loc || !loc.piles || body.hp <= 0) return;
+  for (const p of loc.piles) {
+    if (Math.hypot(pos.x - p.x, pos.z - p.z) > 0.95) continue;
+    const got = [];
+    for (const l of LIMBS) if (!body.limbs[l] && loc.take(p, l)) { body.limbs[l] = true; body.hp = Math.min(100, body.hp + 20); got.push(LIMB_NAME[l]); }
+    if (got.length) { setLimbs(player, body.limbs); toast('Подобрано: ' + got.join(', ') + '\nЦелостность ' + body.hp + '%'); }
+  }
+}
 const worldLights = new THREE.Group();
 const pos = new THREE.Vector3(), camPos = new THREE.Vector3(), camTgt = new THREE.Vector3();
+let moonLight = null;
 let heading = 0, heroLight = null, lockOn = false, lockFixed = null, labelT = 0;
 // Diablo-like isometric camera: fixed diagonal yaw, steep pitch, narrow FOV
 const ISO = { yaw: Math.PI / 4, pitch: 0.86, dist: 7.6, fov: 30, yawT: Math.PI / 4, pitchT: 0.86 };
@@ -210,15 +237,16 @@ function setupWorldLights() {
   moon.castShadow = true; moon.shadow.mapSize.set(1024, 1024);
   Object.assign(moon.shadow.camera, { left: -7, right: 7, top: 7, bottom: -7, near: 1, far: 20 });
   moon.shadow.bias = -0.0008; moon.shadow.normalBias = 0.02;
-  worldLights.add(moon); worldLights.add(moon.target);
+  worldLights.add(moon); worldLights.add(moon.target); moonLight = moon;
 }
 function placePlayerInWorld() {
   if (!char) return;
   char.group.position.copy(pos); char.group.rotation.y = heading;
 }
-function enterWorld() {
-  if (!tavern) {
-    tavern = buildTavern(mats); setupWorldLights(); buildGlyphLayer(tavern.group);
+function enterWorld(which = 'tavern') {
+  if (which === 'field' && !field) { if (!heroLight) setupWorldLights(); field = buildField(mats); buildGlyphLayer(field.group); }
+  if (!tavern && which === 'tavern') {
+    tavern = buildTavern(mats); if (!heroLight) setupWorldLights(); buildGlyphLayer(tavern.group);
     const bt = buildCharacter({ sex: 'm', build: 3, height: 178, armor: 'cloth', weapon: 'none' }, actorMats);
     bt.cfgWeapon = 'none';
     const s = 1.78 / bt.height; bt.group.scale.set(1 + (s - 1) * 0.45, s, 1 + (s - 1) * 0.45);
@@ -227,19 +255,21 @@ function enterWorld() {
     tavern.colliders.push({ x: tavern.bartender.x, z: tavern.bartender.z, r: 0.3 });
   }
   mode = 'world'; document.body.classList.add('world');
-  scene.add(tavern.group); scene.add(worldLights); scene.add(bartender.char.group);
+  loc = which === 'field' ? field : tavern;
+  scene.add(loc.group); scene.add(worldLights); if (loc === tavern) scene.add(bartender.char.group);
   floor.visible = false; editorLights.forEach(l => l.visible = false);
-  pos.copy(tavern.spawn); heading = Math.PI; player.heading = Math.PI; player.sim.init = false; player.noLock = false; placePlayerInWorld();
+  pos.copy(loc.spawn); heading = Math.PI; player.heading = Math.PI; player.sim.init = false; player.noLock = false; placePlayerInWorld();
   camTgt.set(pos.x, 0.6, pos.z); camPos.copy(camTgt).add(ISO_OFF);
   camera.fov = ISO_FOV; camera.updateProjectionMatrix(); AR.asciiMat.uniforms.exposure.value = 1.3; AR.asciiMat.uniforms.actorBoost.value = 1;
-  $('title').innerHTML = '🍺 «ПЬЯНЫЙ ДРАКОН»<small>трактир</small>';
+  $('title').innerHTML = loc === field ? '🌾 ТЕСТОВОЕ ПОЛЕ<small>трава · кучи брони</small>' : '🍺 «ПЬЯНЫЙ ДРАКОН»<small>трактир</small>';
   $('badge').innerHTML = `<b>${sexName[cfg.sex]}</b> · ${cfg.height} см\nСтик — движение · свайп — камера`;
   $('hint').style.opacity = 0;
   resize();
 }
 function leaveWorld() {
   mode = 'editor'; document.body.classList.remove('world');
-  scene.remove(tavern.group); scene.remove(worldLights); scene.remove(bartender.char.group);
+  scene.remove(loc.group); scene.remove(worldLights); if (bartender) scene.remove(bartender.char.group);
+  GLYPH.uHeroA.value.set(0, -99, 0); GLYPH.uHeroB.value.set(0, -99, 0);
   floor.visible = true; editorLights.forEach(l => l.visible = true);
   char.group.position.set(0, 0, 0); char.group.rotation.y = 0; player.speed = 0; player.heading = 0; player.sim.init = false; lockOn = false; $('lock').classList.remove('on');
   camera.fov = 36; camera.updateProjectionMatrix(); AR.asciiMat.uniforms.exposure.value = 1.0; AR.asciiMat.uniforms.actorBoost.value = 0;
@@ -265,7 +295,7 @@ stickEl.addEventListener('pointerup', stickUp); stickEl.addEventListener('pointe
 const keys = {};
 addEventListener('keydown', e => { keys[e.code] = true; }); addEventListener('keyup', e => { keys[e.code] = false; });
 function collide(p, r) {
-  const T = tavern;
+  const T = loc;
   for (let it = 0; it < 2; it++) for (const c of T.colliders) {
     if (c.r !== undefined) {
       const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz), m = c.r + r;
@@ -297,21 +327,22 @@ function worldUpdate(dt, t) {
     dir = [ux * cs + uy * sn, -ux * sn + uy * cs];
   }
   // stick: light push = turn on the spot, more = walk -> jog -> sprint (blend tree)
-  const lockPos = lockOn ? (lockFixed || bartender.char.group.position) : null;
+  const lockPos = lockOn ? (lockFixed || (loc === tavern ? bartender.char.group.position : loc.spawn)) : null;
   const [ddx, ddz] = locomotion(player, dt, dir, mag, lockPos, pos, p => collide(p, 0.27));
   pos.x += ddx; pos.z += ddz;
   collide(pos, 0.27);
   heading = player.heading;
   char.group.position.set(pos.x, 0, pos.z);
   char.group.rotation.y = heading;
-  tavern.update(t);
-  labelT -= dt; if (labelT <= 0) { labelT = 0.25; $('badge').innerHTML = `<b>${sexName[cfg.sex]}</b> · ${cfg.height} см\nСтик — движение · свайп — камера\nАнимация: ${player.label}`; }
-  locomotion(bartender, dt, null, 0, null, { x: bartender.char.group.position.x, z: bartender.char.group.position.z }); bartender.heading = 0; bartender.noLock = true;
-  animateActor(bartender, t, dt);
+  loc.update(t); pickups();
+  GLYPH.uHeroA.value.set(pos.x, 0, pos.z); GLYPH.uHeroB.value.lerp(GLYPH.uHeroA.value, Math.min(1, dt * 2.2));
+  if (moonLight) { moonLight.position.set(pos.x + 1, 7.5, pos.z - 7.5); moonLight.target.position.set(pos.x, 0, pos.z); }
+  labelT -= dt; if (labelT <= 0) { labelT = 0.25; $('badge').innerHTML = `<b>${sexName[cfg.sex]}</b> · ${cfg.height} см\nСтик — движение · свайп — камера\nЦелостность: ${body.hp}% · ${player.label}`; }
+  if (loc === tavern) { locomotion(bartender, dt, null, 0, null, { x: bartender.char.group.position.x, z: bartender.char.group.position.z }); bartender.heading = 0; bartender.noLock = true; animateActor(bartender, t, dt); }
   // follow camera
   { const d = ISO_OFF.clone().setY(0).normalize(); heroLight.position.set(pos.x + d.x * 1.3 - d.z * 0.5, 2.3, pos.z + d.z * 1.3 + d.x * 0.5); }
   ISO.yaw += (ISO.yawT - ISO.yaw) * Math.min(1, dt * 12); ISO.pitch += (ISO.pitchT - ISO.pitch) * Math.min(1, dt * 12); updIso();
-  tavern.cutaway(ISO_OFF);
+  loc.cutaway(ISO_OFF);
   camTgt.lerp(new THREE.Vector3(pos.x, 0.6, pos.z), Math.min(1, dt * 5));
   const want = camTgt.clone().add(ISO_OFF);
   camPos.copy(want);
@@ -348,7 +379,7 @@ function frame(now) {
   if (fpsAcc > 1) { $('fps').textContent = Math.round(fpsN / fpsAcc) + ' fps · ' + (GLYPH.uMode.value > 0.5 ? GLYPH_STATS.count + ' симв.' : AR.cols + '×' + AR.rows); fpsAcc = 0; fpsN = 0; }
   requestAnimationFrame(frame);
 }
-window.__dbg = { cam, setCfg, enterWorld, leaveWorld, stick, get pos() { return pos; }, get player() { return player; }, get auto() { return autoRotate; }, set auto(v) { autoRotate = v; }, AR };
+window.__dbg = { damage, body, get loc() { return loc; }, cam, setCfg, enterWorld, leaveWorld, stick, get pos() { return pos; }, get player() { return player; }, get auto() { return autoRotate; }, set auto(v) { autoRotate = v; }, AR };
 (async () => {
   try {
     await loadHuman(); await loadMocap();

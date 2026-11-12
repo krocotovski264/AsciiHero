@@ -14,7 +14,7 @@ Shader "AsciiHero/Lit"
         _AsciiId ("ASCII id (id/255)", Float) = 0
         _AsciiRow ("Glyph ramp row", Float) = 0
         _AsciiActor ("Actor boost", Float) = 0
-        _GlyphFill ("Base fill", Float) = 0.06
+        _GlyphSmoke ("Smoke body", Float) = 0
         _GlyphCell ("Glyph cell (m)", Vector) = (0.03, 0.05, 0, 0)
         [Enum(UnityEngine.Rendering.CullMode)] _Cull ("Cull", Float) = 2
     }
@@ -34,7 +34,7 @@ Shader "AsciiHero/Lit"
             float _Cull;
             float _AsciiRow;
             float _AsciiActor;
-            float _GlyphFill;
+            float _GlyphSmoke;
             float4 _GlyphCell;
         CBUFFER_END
         TEXTURE2D(_MainTex); SAMPLER(sampler_MainTex);

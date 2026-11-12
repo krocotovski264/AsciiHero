@@ -16,13 +16,15 @@ const RAMPS = [
   " .*+oO0@@@@@@@@@",   // 9 glow
   " ......:::::::::",   // 10 dark
   " ..,,::;;-~=+x%#",   // 11 stone
-  "|-/\\_^<>        ",   // 12 edges
+  "|-/\\_^<>        ",   // 12 edges (also grass blades: | / \ _)
+  " .'`,:;~^*+sS$&@",   // 13 smoke (the shadow body)
 ];
 const MAT_RAMP = {
   [MAT.SKIN]: 0, [MAT.HAIR]: 1, [MAT.LINEN]: 2, [MAT.PANTS]: 2, [MAT.LEATHER]: 3, [MAT.LEATHER2]: 3, [MAT.CHAIN]: 4,
   [MAT.PLATE]: 5, [MAT.STEEL]: 6, [MAT.WOOD]: 7, [MAT.GOLD]: 8, [MAT.GLOW]: 9, [MAT.EYE]: 9, [MAT.DARK]: 10,
   [MAT.RED]: 2, [MAT.ROBE]: 2, [MAT.ROBED]: 2, [MAT.STONE]: 11, 18: 1,
   19: 7, 20: 7, 28: 11, 21: 2, 22: 11, 23: 9, 24: 9, 25: 6, 26: 6, 27: 6,
+  29: 13, 30: 11, 31: 1, 32: 11,
 };
 export const MATERIAL_DEFS = {
   SKIN: { id: MAT.SKIN, color: 0xe0a882, rough: 0.6, metal: 0 },
@@ -53,6 +55,10 @@ export const MATERIAL_DEFS = {
   GLASS: { id: 25, color: 0x3a7a3a, emissive: 0x0a200a, rough: 0.15, metal: 0.3 },
   GLASS2: { id: 26, color: 0x7a3a18, emissive: 0x200a04, rough: 0.15, metal: 0.3 },
   GLASS3: { id: 27, color: 0x6a6aa8, emissive: 0x101028, rough: 0.15, metal: 0.3 },
+  SHADOW: { id: 29, color: 0x07050d, rough: 1, metal: 0, lambert: true, smoke: true },   // the hero's body: living darkness
+  GROUND: { id: 30, color: 0x1c3319, rough: 1, metal: 0, lambert: true },
+  LEAF: { id: 31, color: 0x2f6b2f, rough: 1, metal: 0, lambert: true },
+  ROCK: { id: 32, color: 0x6c6c72, rough: 1, metal: 0, lambert: true },
   STONE: { id: MAT.STONE, color: 0xffffff, rough: 0.95, metal: 0, lambert: true },
 };
 
@@ -63,13 +69,15 @@ export const MATERIAL_DEFS = {
 export const GLYPH = {
   tGlyph: { value: null }, uRows: { value: RAMPS.length }, uExposure: { value: 1 }, uMode: { value: 1 },
   tLit: { value: null }, tDepth: { value: null }, uNear: { value: 0.05 }, uFar: { value: 30 }, uDepthRef: { value: 4 }, uEps: { value: 0.008 },
-  uScale: { value: 1.5 }, uMinGlyph: { value: 5 },
+  uScale: { value: 1.5 }, uMinGlyph: { value: 5 }, uTime: { value: 0 },
+  uHeroA: { value: new THREE.Vector3(0, -99, 0) }, uHeroB: { value: new THREE.Vector3(0, -99, 0) },
 };
 let ATLAS = null;
 export function glyphAtlas() { if (!ATLAS) { ATLAS = buildAtlas(); GLYPH.tGlyph.value = ATLAS; } return ATLAS; }
 // glyph cell (width, height) in metres per material family
 const CELL_ACTOR = new THREE.Vector2(0.017, 0.028), CELL_PROP = new THREE.Vector2(0.034, 0.056), CELL_BIG = new THREE.Vector2(0.06, 0.1);
-const BIG = new Set(['FLOOR', 'PLASTER', 'PLANK', 'HEARTH', 'STONE', 'BEAM']);
+const CELL_GROUND = new THREE.Vector2(0.11, 0.18);
+const BIG = new Set(['FLOOR', 'PLASTER', 'PLANK', 'HEARTH', 'STONE', 'BEAM', 'GROUND']);
 
 // planar / cylindrical glyph coordinates for rigid props (object space, metres)
 export function addGlyphUV(root) {
@@ -105,16 +113,20 @@ attribute vec3 anormal;
 attribute float aseed;
 uniform sampler2D tLit, tDepth;
 uniform vec2 uCell;
-uniform float uRow, uActor, uExposure, uNear, uFar, uDepthRef, uEps, uScale, uMinGlyph;
+uniform float uRow, uActor, uExposure, uNear, uFar, uDepthRef, uEps, uScale, uMinGlyph, uSmoke, uTime;
 varying vec2 vLocal;
 varying vec3 vCol;
 varying float vGi;
 void main() {
   vec3 transformed = anchor;
   vec3 objectNormal = anormal;
+  // smoke: each glyph of the shadow body keeps drifting off the surface and upwards, fading as it goes
+  float ph = fract(uTime * 0.45 + aseed * 7.31);
+  if (uSmoke > 0.5) transformed += objectNormal * (0.004 + 0.05 * ph * ph) + vec3(0.0, 0.11 * ph * ph, 0.0);
   #include <skinbase_vertex>
   #include <skinnormal_vertex>
   #include <skinning_vertex>
+  bool gone = length(objectNormal) < 0.3;      // torn-off limb: its bones are scaled to nothing
   vec4 mv = modelViewMatrix * vec4(transformed, 1.0);
   vec3 nV = normalize(normalMatrix * objectNormal);
   vec3 toCam = normalize(-mv.xyz);
@@ -123,7 +135,7 @@ void main() {
   // visible only if this surface point is what the camera sees there (not a back face, not under armour)
   float sceneZ = -perspectiveDepthToViewZ(texture2D(tDepth, suv).x, uNear, uFar);
   float myZ = -mv.z;
-  bool vis = dot(nV, toCam) > -0.05 && myZ <= sceneZ + uEps + 0.002 * myZ && all(greaterThanEqual(suv, vec2(0.0))) && all(lessThanEqual(suv, vec2(1.0)));
+  bool vis = !gone && dot(nV, toCam) > -0.05 && myZ <= sceneZ + uEps + 0.002 * myZ && all(greaterThanEqual(suv, vec2(0.0))) && all(lessThanEqual(suv, vec2(1.0)));
   vec3 col = pow(max(texture2D(tLit, suv).rgb, 0.0), vec3(1.0 / 2.2));
   float lum = dot(col, vec3(0.299, 0.587, 0.114));
   float depthK = clamp(1.0 - (myZ - uDepthRef) * 0.09, 0.5, 1.2);          // nearer = brighter
@@ -132,6 +144,10 @@ void main() {
   float gi = uMinGlyph + floor(clamp(pow(lum, 0.85) + (aseed - 0.5) * 0.09, 0.0, 1.0) * (15.99 - uMinGlyph));
   float m = max(max(col.r, col.g), col.b);
   vCol = (uRow > 8.5 && uRow < 9.5) ? col * 1.3 + 0.15 : (col / max(m, 1e-3)) * (0.10 + 0.95 * lum);
+  if (uSmoke > 0.5) {
+    gi = floor(mix(15.0, uMinGlyph, ph));
+    vCol = mix(vec3(0.42, 0.27, 0.80), vec3(0.10, 0.06, 0.24), ph) * (1.0 - ph * 0.8) * (0.75 + 0.25 * depthK);
+  }
   vGi = gi;
   vLocal = position.xy + 0.5;
   mv.xy += position.xy * uCell * uScale;     // upright character in the view plane, never skewed; slight overlap
@@ -149,11 +165,11 @@ void main() {
   gl_FragColor = vec4(vCol * mk, 1.0);
 }`;
 const GMAT = new Map();
-function glyphMaterial(row, cell, actor) {
-  const key = row + ':' + cell.x + ':' + actor;
+function glyphMaterial(row, cell, actor, smoke = 0) {
+  const key = row + ':' + cell.x + ':' + actor + ':' + smoke;
   if (GMAT.has(key)) return GMAT.get(key);
   const m = new THREE.ShaderMaterial({
-    uniforms: Object.assign({}, GLYPH, { uRow: { value: row }, uCell: { value: cell }, uActor: { value: actor } }),
+    uniforms: Object.assign({}, GLYPH, { uRow: { value: row }, uCell: { value: cell }, uActor: { value: actor }, uSmoke: { value: smoke } }),
     vertexShader: GLYPH_VS, fragmentShader: GLYPH_FS,
     depthTest: false, depthWrite: false, transparent: false, side: THREE.DoubleSide,
     blending: THREE.CustomBlending, blendEquation: THREE.MaxEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
@@ -229,7 +245,7 @@ function makeGlyphs(mesh) {
     ig.setAttribute('skinWeight', new THREE.InstancedBufferAttribute(new Float32Array(S.sw), 4));
   }
   ig.instanceCount = S.n;
-  const gm = glyphMaterial(info.row, info.cell, info.actor);
+  const gm = glyphMaterial(info.row, info.cell, info.actor, info.smoke);
   const o = skinned ? new THREE.SkinnedMesh(ig, gm) : new THREE.Mesh(ig, gm);
   if (skinned) o.bind(mesh.skeleton, mesh.bindMatrix);
   o.frustumCulled = false; o.castShadow = false; o.receiveShadow = false;
@@ -238,6 +254,63 @@ function makeGlyphs(mesh) {
   GLYPH_STATS.count += S.n;
 }
 export const GLYPH_STATS = { count: 0 };
+
+// ---------- grass ----------
+// One character per blade: | upright, / or \ when it leans across the screen, _ when it is trodden flat.
+// Blades sway in the wind and are pushed aside by the hero (uHeroA) and by a point trailing behind (uHeroB),
+// so the grass parts in front of the feet and closes again a moment later.
+const GRASS_VS = `
+#include <common>
+#include <packing>
+attribute vec3 anchor;
+attribute float aseed;
+uniform sampler2D tLit, tDepth;
+uniform vec3 uHeroA, uHeroB;
+uniform float uExposure, uNear, uFar, uDepthRef, uTime;
+varying vec2 vLocal;
+varying vec3 vCol;
+varying float vGi;
+void main() {
+  float h = 0.11 + 0.15 * aseed;
+  vec2 wind = vec2(sin(uTime * 1.1 + anchor.x * 0.9 + anchor.z * 0.6), cos(uTime * 0.8 + anchor.z * 1.1 + aseed * 6.0)) * 0.13;
+  vec2 dA = anchor.xz - uHeroA.xz, dB = anchor.xz - uHeroB.xz;
+  float pa = smoothstep(0.75, 0.12, length(dA)), pb = smoothstep(0.6, 0.1, length(dB)) * 0.75;
+  vec2 lean = wind + normalize(dA + 1e-4) * pa * 0.95 + normalize(dB + 1e-4) * pb * 0.6;
+  float ll = length(lean); if (ll > 0.96) { lean *= 0.96 / ll; ll = 0.96; }
+  float push = max(pa, pb);
+  vec3 tip = anchor + vec3(lean.x, sqrt(1.0 - ll * ll), lean.y) * h;
+  vec4 mv = modelViewMatrix * vec4((anchor + tip) * 0.5, 1.0);
+  vec4 bclip = projectionMatrix * modelViewMatrix * vec4(anchor, 1.0);
+  vec2 suv = bclip.xy / bclip.w * 0.5 + 0.5;
+  float sceneZ = -perspectiveDepthToViewZ(texture2D(tDepth, suv).x, uNear, uFar);
+  float myZ = -mv.z;
+  bool vis = myZ <= sceneZ + 0.3 && all(greaterThanEqual(suv, vec2(0.0))) && all(lessThanEqual(suv, vec2(1.0)));
+  float lv = (modelViewMatrix * vec4(lean.x, 0.0, lean.y, 0.0)).x;
+  vGi = push > 0.8 ? 4.0 : (lv > 0.2 ? 2.0 : (lv < -0.2 ? 3.0 : 0.0));
+  vec3 lit = pow(max(texture2D(tLit, suv).rgb, 0.0), vec3(1.0 / 2.2));
+  float lum = clamp(dot(lit, vec3(0.299, 0.587, 0.114)) * 2.6 * uExposure, 0.0, 1.0);
+  float depthK = clamp(1.0 - (myZ - uDepthRef) * 0.09, 0.5, 1.2);
+  vec3 green = mix(vec3(0.16, 0.50, 0.24), vec3(0.50, 0.78, 0.36), fract(aseed * 13.7));
+  vCol = (green * (0.22 + 0.95 * lum) + lit * 0.5) * depthK * (1.0 - 0.35 * push);
+  vLocal = position.xy + 0.5;
+  mv.xy += position.xy * vec2(h * 0.66, h * 1.1);
+  gl_Position = vis ? projectionMatrix * mv : vec4(2.0, 2.0, 2.0, 1.0);
+}`;
+export function makeGrass(points, seeds) {
+  const ig = new THREE.InstancedBufferGeometry();
+  ig.setAttribute('position', QUAD_POS); ig.setIndex(QUAD_IDX);
+  ig.setAttribute('anchor', new THREE.InstancedBufferAttribute(points, 3));
+  ig.setAttribute('aseed', new THREE.InstancedBufferAttribute(seeds, 1));
+  ig.instanceCount = seeds.length;
+  const m = new THREE.ShaderMaterial({
+    uniforms: Object.assign({}, GLYPH, { uRow: { value: 12 } }),
+    vertexShader: GRASS_VS, fragmentShader: GLYPH_FS, depthTest: false, depthWrite: false, side: THREE.DoubleSide,
+    blending: THREE.CustomBlending, blendEquation: THREE.MaxEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+  });
+  const o = new THREE.Mesh(ig, m); o.frustumCulled = false; o.layers.set(1); o.userData.isGlyph = true;
+  GLYPH_STATS.count += seeds.length;
+  return o;
+}
 /** build the character layer for every mesh under root (once per mesh) */
 export function buildGlyphLayer(root) {
   root.updateMatrixWorld(true);
@@ -254,7 +327,7 @@ export function makeMaterials(envMap, actor = false) {
     const id = (MAT_RAMP[d.id] !== undefined ? d.id : 0) + 1 + (actor ? 128 : 0);
     m.userData.matId = id;
     const row = MAT_RAMP[d.id] !== undefined ? MAT_RAMP[d.id] : 0;
-    m.userData.glyph = { row, actor: actor ? 1 : 0, cell: actor ? CELL_ACTOR : BIG.has(k) ? CELL_BIG : CELL_PROP };
+    m.userData.glyph = { row, actor: actor ? 1 : 0, cell: actor ? CELL_ACTOR : k === 'GROUND' ? CELL_GROUND : BIG.has(k) ? CELL_BIG : CELL_PROP, smoke: d.smoke ? 1 : 0 };
     m.onBeforeCompile = (sh) => {
       sh.fragmentShader = sh.fragmentShader.replace(/}\s*$/, `  gl_FragColor.a = ${(id / 255).toFixed(6)};\n}`);
     };
@@ -425,7 +498,7 @@ export class AsciiRenderer {
     this.asciiMat.uniforms.time.value = t;
     r.setClearColor(0x000000, 0);
     let src;
-    GLYPH.uExposure.value = this.asciiMat.uniforms.exposure.value;
+    GLYPH.uExposure.value = this.asciiMat.uniforms.exposure.value; GLYPH.uTime.value = t;
     if (GLYPH.uMode.value > 0.5) {
       // 1) lit scene (layer 0) at half resolution with depth  2) the characters (layer 1) at full resolution
       GLYPH.uNear.value = camera.near; GLYPH.uFar.value = camera.far; GLYPH.uDepthRef.value = this.depthRef;

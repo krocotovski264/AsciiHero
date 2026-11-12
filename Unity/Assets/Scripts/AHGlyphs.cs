@@ -12,21 +12,24 @@ namespace AsciiHero
         public static int count;
         static readonly Dictionary<string, Material> MATS = new Dictionary<string, Material>();
 
-        static Material GlyphMaterial(float row, Vector4 cell, float actor)
+        static Material GlyphMaterial(float row, Vector4 cell, float actor, float smoke)
         {
-            string key = row + ":" + cell.x + ":" + actor;
+            string key = row + ":" + cell.x + ":" + actor + ":" + smoke;
             Material m;
             if (MATS.TryGetValue(key, out m)) return m;
             var sh = Shader.Find("AsciiHero/Glyph");
             if (sh == null) { Debug.LogError("AsciiHero/Glyph shader not found"); return null; }
             m = new Material(sh) { name = "Glyph " + key };
-            m.SetFloat("_AsciiRow", row); m.SetFloat("_AsciiActor", actor); m.SetVector("_GlyphCell", cell);
+            m.SetFloat("_AsciiRow", row); m.SetFloat("_AsciiActor", actor); m.SetVector("_GlyphCell", cell); m.SetFloat("_GlyphSmoke", smoke);
             MATS[key] = m; return m;
         }
 
         /// add the character layer to every renderer under root (once per renderer)
-        public static void Build(GameObject root)
+        /// limbOfBone (optional): bone index -> limb number 1..5 (0 = body); stored per glyph so torn-off limbs can be hidden.
+        /// Returns the created skinned glyph renderers.
+        public static List<Renderer> Build(GameObject root, int[] limbOfBone = null)
         {
+            var made = new List<Renderer>();
             var list = new List<Renderer>(root.GetComponentsInChildren<Renderer>(true));
             foreach (var r in list)
             {
@@ -35,9 +38,9 @@ namespace AsciiHero
                 var smr = r as SkinnedMeshRenderer;
                 Mesh src = smr != null ? smr.sharedMesh : (r.GetComponent<MeshFilter>() != null ? r.GetComponent<MeshFilter>().sharedMesh : null);
                 if (src == null) continue;
-                var gm = GlyphMaterial(mat.GetFloat("_AsciiRow"), mat.GetVector("_GlyphCell"), mat.GetFloat("_AsciiActor"));
-                if (gm == null) return;
-                var mesh = Sample(src, mat.GetVector("_GlyphCell"), smr != null);
+                var gm = GlyphMaterial(mat.GetFloat("_AsciiRow"), mat.GetVector("_GlyphCell"), mat.GetFloat("_AsciiActor"), mat.HasProperty("_GlyphSmoke") ? mat.GetFloat("_GlyphSmoke") : 0);
+                if (gm == null) return made;
+                var mesh = Sample(src, mat.GetVector("_GlyphCell"), smr != null, limbOfBone);
                 if (mesh == null) continue;
                 var go = new GameObject("Glyphs"); go.layer = LAYER;
                 if (smr != null)
@@ -49,6 +52,7 @@ namespace AsciiHero
                     g.sharedMesh = mesh; g.bones = smr.bones; g.rootBone = smr.rootBone; g.sharedMaterial = gm;
                     g.updateWhenOffscreen = true;
                     g.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; g.receiveShadows = false;
+                    made.Add(g);
                     // keep the pair together (visibility, destruction)
                     new GameObject("Glyphs").transform.SetParent(r.transform, false);
                 }
@@ -60,10 +64,34 @@ namespace AsciiHero
                     g.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; g.receiveShadows = false;
                 }
             }
+            return made;
+        }
+
+        /// grass blades: one glyph quad per point (positions in the parent's local space)
+        public static GameObject MakeGrass(List<Vector3> pts, List<float> seedList, Transform parent)
+        {
+            var sh = Shader.Find("AsciiHero/Grass"); if (sh == null) { Debug.LogError("AsciiHero/Grass shader not found"); return null; }
+            var verts = new List<Vector3>(pts.Count * 4); var corners = new List<Vector2>(pts.Count * 4); var seeds = new List<Vector2>(pts.Count * 4); var tris = new List<int>(pts.Count * 6);
+            Vector2[] C = { new Vector2(-0.5f, -0.5f), new Vector2(0.5f, -0.5f), new Vector2(0.5f, 0.5f), new Vector2(-0.5f, 0.5f) };
+            for (int i = 0; i < pts.Count; i++)
+            {
+                int o = verts.Count;
+                for (int k = 0; k < 4; k++) { verts.Add(pts[i]); corners.Add(C[k]); seeds.Add(new Vector2(seedList[i], 0)); }
+                tris.Add(o); tris.Add(o + 2); tris.Add(o + 1); tris.Add(o); tris.Add(o + 3); tris.Add(o + 2);
+            }
+            var m = new Mesh { name = "grass", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+            m.SetVertices(verts); m.SetUVs(0, corners); m.SetUVs(1, seeds); m.SetTriangles(tris, 0);
+            m.RecalculateBounds(); var b = m.bounds; b.Expand(2f); m.bounds = b;
+            var go = new GameObject("Grass"); go.layer = LAYER; go.transform.SetParent(parent, false);
+            go.AddComponent<MeshFilter>().sharedMesh = m;
+            var r = go.AddComponent<MeshRenderer>(); r.sharedMaterial = new Material(sh);
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; r.receiveShadows = false;
+            count += pts.Count;
+            return go;
         }
 
         // rows of points: one per glyph cell centre of the surface coordinates
-        static Mesh Sample(Mesh src, Vector4 cell, bool skinned)
+        static Mesh Sample(Mesh src, Vector4 cell, bool skinned, int[] limbOfBone)
         {
             var P = src.vertices; var N = src.normals; var U = new List<Vector2>(); src.GetUVs(1, U);
             if (U.Count != P.Length || N == null || N.Length != P.Length) return null;
@@ -117,10 +145,11 @@ namespace AsciiHero
                             Add(acc, BW[ia], wa); Add(acc, BW[ib], wb); Add(acc, BW[ic], wc);
                             bw = Top4(acc);
                         }
+                        float limb = skinned && limbOfBone != null && bw.boneIndex0 < limbOfBone.Length ? limbOfBone[bw.boneIndex0] : 0;
                         int o = verts.Count;
                         for (int k = 0; k < 4; k++)
                         {
-                            verts.Add(p); nors.Add(n); corners.Add(CORNER[k]); seeds.Add(new Vector2(seed, 0));
+                            verts.Add(p); nors.Add(n); corners.Add(CORNER[k]); seeds.Add(new Vector2(seed, limb));
                             if (skinned) bws.Add(bw);
                         }
                         tris.Add(o); tris.Add(o + 2); tris.Add(o + 1); tris.Add(o); tris.Add(o + 3); tris.Add(o + 2);

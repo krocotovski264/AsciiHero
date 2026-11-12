@@ -84,7 +84,8 @@
   }
   body.world #stick{display:block}
   body.world #auto, body.world #reset{display:none}
-  #back,#lock{display:none}
+  #back,#lock,#dmg{display:none}
+  body.world #dmg{display:inline-block}
   body.world #back, body.world #lock{display:inline-block}
 
 </style>
@@ -95,6 +96,7 @@
     <div class="title" id="title">⚔ СОЗДАНИЕ ГЕРОЯ<small>beta 0.4</small></div>
     <div class="hbtns">
       <button class="ib on" id="gmode" title="Где живут символы">Aa на моделях</button>
+      <button class="ib" id="dmg">Урон −10%</button>
       <button class="ib" id="lock">🎯 Цель</button>
       <button class="ib" id="back">← Герой</button>
       <button class="ib on" id="auto" title="Авто-вращение">⟲ авто</button>
@@ -127,7 +129,7 @@
       </section>
       <section class="tab" id="tab-armor"><div class="opts" id="armors"></div></section>
       <section class="tab" id="tab-weapon"><div class="opts" id="weapons"></div></section>
-      <footer><button id="rand">[ СЛУЧАЙНО ]</button><button id="done">В ТРАКТИР ►</button></footer>
+      <footer><button id="rand">СЛУЧАЙНО</button><button id="done">ТРАКТИР ►</button><button id="field">ПОЛЕ ►</button></footer>
     </div>
   </div>
 </div>

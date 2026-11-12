@@ -45,12 +45,12 @@ namespace AsciiHero
             for (int i = 0; i < MatId.RAMP.Length && i + 1 < 32; i++) rampMap[i + 1] = MatId.RAMP[i];
             asciiMat.SetFloatArray("_RampMap", rampMap);
             asciiMat.SetTexture("_Atlas", atlas);
-            asciiMat.SetFloat("_NRows", 13);
+            asciiMat.SetFloat("_NRows", 14);
             asciiMat.SetFloat("_EdgeK", 1);
             asciiMat.SetFloat("_Linear", linear ? 1 : 0);
             finalMat.SetFloat("_Linear", linear ? 1 : 0);
             Shader.SetGlobalTexture("_AsciiAtlas", atlas);
-            Shader.SetGlobalFloat("_AsciiRows", 13);
+            Shader.SetGlobalFloat("_AsciiRows", 14);
             Shader.SetGlobalFloat("_AsciiLinear", linear ? 1 : 0);
 
             Setup(cam, -3, true);
@@ -114,6 +114,7 @@ namespace AsciiHero
             int c = Mathf.Max(8, Mathf.FloorToInt(w / cw)), r = Mathf.Max(8, Mathf.FloorToInt(h / chh));
             Shader.SetGlobalFloat("_AsciiExposure", exposure);
             Shader.SetGlobalFloat("_AsciiDepthRef", depthRef);
+            Shader.SetGlobalFloat("_AsciiTime", Time.time);
             if (plain)
             {
                 if (!builtPlain) { builtPlain = true; cam.targetTexture = null; ndCam.enabled = false; glyphCam.enabled = false; cam.depth = 1; Debug.Log("ASCII выключен: обычная 3D-картинка"); }

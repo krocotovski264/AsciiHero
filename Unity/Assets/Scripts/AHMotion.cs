@@ -149,6 +149,9 @@ namespace AsciiHero
                 float walk = mag < 0.22f ? 0 : 0.75f + 0.65f * Mathf.Clamp01((mag - 0.22f) / 0.78f);
                 spd = mag <= 1 ? walk : 1.4f + (maxSpeed - 1.4f) * Mathf.Clamp01(mag - 1);
                 if (lockPos.HasValue) spd = Mathf.Min(spd, 1.7f);
+                int legsC = Legs, armsC = (limbs[1] ? 1 : 0) + (limbs[2] ? 1 : 0);
+                if (legsC == 1) spd = Mathf.Min(spd, 1.15f);                                        // hopping on one leg
+                if (legsC == 0) spd = Mathf.Min(spd, armsC == 2 ? 0.5f : armsC == 1 ? 0.35f : 0.18f);   // crawling
             }
             float vgx = dir.HasValue ? dir.Value.x * spd : 0, vgz = dir.HasValue ? dir.Value.y * spd : 0;
             float hGoal = S.h;
@@ -221,7 +224,8 @@ namespace AsciiHero
             heading += Wrap(S.h - heading) * (1 - Mathf.Exp(-dt * LN2 / 0.05f));
             speed = Mathf.Sqrt(fwd * fwd + lat * lat);
             narrow = 1 - Mathf.Clamp01(Mathf.Abs(lat) / 0.5f);
-            label = LabelFor(fwd, lat, yr, dir.HasValue);
+            label = LabelFor(fwd, lat, yr, dir.HasValue) + InjuryLabel();
+            vel = Mathf.Sqrt(dx * dx + dz * dz) / Mathf.Max(dt, 1e-4f);
             return new Vector2(dx, dz);
         }
 
@@ -239,7 +243,8 @@ namespace AsciiHero
             heading += Wrap(S.h - heading) * (1 - Mathf.Exp(-dt * LN2 / 0.05f));
             speed = Mathf.Sqrt(fwd * fwd + lat * lat);
             narrow = 1 - Mathf.Clamp01(Mathf.Abs(lat) / 0.5f);
-            label = driver.StateLabel();
+            label = driver.StateLabel() + InjuryLabel();
+            vel = Mathf.Sqrt(dx * dx + dz * dz) / Mathf.Max(dt, 1e-4f);
             return new Vector2(dx, dz);
         }
 
@@ -266,7 +271,7 @@ namespace AsciiHero
                 for (int k = 0; k < nb; k++)
                     if (map[k] >= 0 && mask[k] > 0) B[map[k]].localRotation = Quaternion.Slerp(B[map[k]].localRotation, baseQ[map[k]], mask[k]);
                 H.root.localPosition = rootPos + ro;
-                RelaxArms(); FootIK(dt);
+                Injuries(dt);
                 Orb(t);
                 return;
             }
@@ -281,7 +286,7 @@ namespace AsciiHero
                 B[map[k]].localRotation = q;
             }
             H.root.localPosition = rootPos + ro;
-            RelaxArms(); FootIK(dt);
+            Injuries(dt);
             Orb(t);
         }
         void Orb(float t)
@@ -300,6 +305,88 @@ namespace AsciiHero
             if (frame + 1 >= MotionDB.RANGE_END[Mathf.FloorToInt(frame)]) Transition(StartFrame());
         }
 
+        // ---------- missing limbs ----------
+        // The hero is a shadow in armour; limbs can be torn off. Bones of a missing limb are scaled to nothing and the
+        // rest of the body compensates on top of the matched mocap pose:
+        //   one arm - the torso tilts towards the remaining arm
+        //   one leg - hopping: the body rises while the remaining foot is in the air, arms go out for balance
+        //   no legs - crawling: prone, pulled along by whichever arms are left
+        public readonly bool[] limbs = { true, true, true, true, true };   // head, armL, armR, legL, legR
+        float hopPh, hopH, crawlPh, vel;
+        int Legs { get { return (limbs[3] ? 1 : 0) + (limbs[4] ? 1 : 0); } }
+        readonly float[] gone = new float[6];
+        MaterialPropertyBlock mpb;
+
+        public void SetLimbs(bool[] present)
+        {
+            for (int l = 0; l < 5; l++)
+            {
+                limbs[l] = present[l]; gone[l + 1] = present[l] ? 0 : 1;
+                var b = H.Bone(Character.LIMB_BONE[l]); if (b == null) continue;
+                b.localScale = present[l] ? Vector3.one : Vector3.one * 1e-4f;
+                foreach (var r in b.GetComponentsInChildren<Renderer>(true)) r.enabled = present[l];   // rigid gear on that limb
+            }
+            if (mpb == null) mpb = new MaterialPropertyBlock();
+            mpb.SetFloatArray("_LimbGone", gone);
+            foreach (var r in ch.glyphs) if (r != null) r.SetPropertyBlock(mpb);
+            feet[0].locked = feet[1].locked = false; feet[0].rel = feet[1].rel = 0;
+        }
+        string InjuryLabel()
+        {
+            bool any = false; for (int l = 0; l < 5; l++) if (!limbs[l]) any = true;
+            if (!any) return "";
+            if (Legs == 0) return " · ползком";
+            if (Legs == 1) return " · на одной ноге";
+            string m = ""; string[] nm = { "головы", "л.руки", "п.руки" };
+            for (int l = 0; l < 3; l++) if (!limbs[l]) m += (m.Length > 0 ? ", " : "") + nm[l];
+            return " · без " + m;
+        }
+        void Injuries(float dt)
+        {
+            if (Legs == 0) { Crawl(dt); return; }
+            if (Legs == 1) HopBody(dt);
+            ArmLean();
+            RelaxArms();
+            FootIK(dt);
+        }
+        void Aim(string a, string b, Vector3 dirW)
+        {
+            Transform ba = H.Bone(a), bb = H.Bone(b); if (ba == null || bb == null) return;
+            ba.rotation = Quaternion.FromToRotation((bb.position - ba.position).normalized, dirW.normalized) * ba.rotation;
+        }
+        void ArmLean()
+        {
+            if (limbs[1] == limbs[2]) return;
+            var sp = H.Bone("spine03"); if (sp == null) return;
+            Vector3 fwd = ch.go.transform.rotation * Vector3.forward;
+            sp.rotation = Quaternion.AngleAxis((limbs[1] ? 0.08f : -0.08f) * Mathf.Rad2Deg, fwd) * sp.rotation;
+        }
+        void HopBody(float dt)
+        {
+            bool moving = vel > 0.15f; float side = limbs[3] ? -1f : 1f;      // Unity: left is -X
+            hopPh = moving ? (hopPh + dt * Mathf.PI * 2 * (1.7f + 0.5f * vel)) % (Mathf.PI * 2) : 0;
+            hopH = moving ? 0.10f * Mathf.Max(0, Mathf.Sin(hopPh)) : 0;
+            var p = H.root.localPosition; p.y += hopH; p.x += side * 0.05f; H.root.localPosition = p;   // weight over the remaining foot
+        }
+        void Crawl(float dt)
+        {
+            Quaternion gq = ch.go.transform.rotation;
+            crawlPh = (crawlPh + dt * vel * Mathf.PI * 2 / 0.5f) % (Mathf.PI * 2);
+            float ph = crawlPh;
+            H.root.localPosition = new Vector3(rootPos.x, 0.23f + 0.015f * Mathf.Sin(ph * 2), rootPos.z);
+            H.root.localRotation = Quaternion.AngleAxis(1.2f * Mathf.Rad2Deg, Vector3.right) * Quaternion.AngleAxis(-0.13f * Mathf.Sin(ph) * Mathf.Rad2Deg, Vector3.up) * H.root.localRotation;
+            Vector3 right = gq * Vector3.right;
+            foreach (var n in new[] { "neck01", "head" }) { var b = H.Bone(n); if (b != null) b.rotation = Quaternion.AngleAxis(-0.48f * Mathf.Rad2Deg, right) * b.rotation; }   // look ahead
+            for (int si = 0; si < 2; si++)
+            {
+                if (!limbs[1 + si]) continue;
+                string s = SIDES[si]; float sg = si == 0 ? -1f : 1f;
+                float r = (Mathf.Sin(ph + (si == 0 ? 0 : Mathf.PI)) + 1) / 2;       // 1 = reaching forward, 0 = pulled back under the chest
+                Aim("upperarm01." + s, "lowerarm01." + s, gq * new Vector3(sg * (0.45f - 0.15f * r), -0.55f + 0.3f * r, 0.2f + 0.8f * r));
+                Aim("lowerarm01." + s, "wrist." + s, gq * new Vector3(-sg * 0.1f, -0.9f + 0.4f * r, -0.1f + 0.95f * r));
+            }
+        }
+
         // ---------- arms ----------
         // The mocap actors hold their arms away from the body. Bring a hanging arm back to the torso: the sideways
         // angle of the upper arm is limited softly, the forward/back swing is untouched.
@@ -311,12 +398,14 @@ namespace AsciiHero
             {
                 string s = SIDES[si];
                 if (s == "L" && ch.cfg.weapon == "shield") continue;
+                if (!limbs[si == 0 ? 1 : 2]) continue;
                 Transform up = H.Bone("upperarm01." + s), el = H.Bone("lowerarm01." + s); if (up == null || el == null) continue;
                 Vector3 dW = (el.position - up.position).normalized, d = gi * dW;
                 float sign = s == "L" ? -1f : 1f;       // Unity: the left side is -X
                 float o = d.x * sign, r = Mathf.Sqrt(o * o + d.y * d.y), abd = Mathf.Atan2(o, -d.y);
-                if (abd <= ARM_MAX) continue;
-                float a2 = ARM_MAX + (abd - ARM_MAX) * ARM_SOFT;
+                bool oneLeg = limbs[3] != limbs[4];
+                if (!oneLeg && abd <= ARM_MAX) continue;
+                float a2 = oneLeg ? Mathf.Max(abd, 0.55f + 0.12f * Mathf.Sin(hopPh)) : ARM_MAX + (abd - ARM_MAX) * ARM_SOFT;   // one leg: arms out for balance
                 Vector3 d2 = gq * new Vector3(Mathf.Sin(a2) * r * sign, -Mathf.Cos(a2) * r, d.z).normalized;
                 up.rotation = Quaternion.FromToRotation(dW, d2) * up.rotation;
             }
@@ -333,9 +422,12 @@ namespace AsciiHero
             float scaleY = model.lossyScale.y, groundAnkle = model.position.y + restAnkle * scaleY;
             bool moving = !noLock && speed > 0.08f;
             float drop = 0;
+            bool hopping = limbs[3] != limbs[4];
             for (int si = 0; si < 2; si++)
             {
                 string s = SIDES[si];
+                legs[si] = new LegInfo();
+                if (!limbs[3 + si]) continue;
                 Transform hip = H.Bone("upperleg01." + s), knee = H.Bone("lowerleg01." + s), foot = H.Bone("foot." + s), toe = H.Bone("toe3-1." + s);
                 Vector3 hp = hip.position, kp = knee.position, ap = foot.position;
                 var F = feet[si]; float cc = con[si];
@@ -356,6 +448,13 @@ namespace AsciiHero
                         Vector3 w = g.rotation * al + g.position; target.x = w.x; target.z = w.z;
                     }
                 }
+                if (hopping)
+                {
+                    // hopping: the foot stays under the body, swings forward in the air and back on the ground
+                    Transform g = ch.go.transform; float sg = si == 0 ? -1f : 1f, mv = vel > 0.15f ? 1f : 0f;
+                    Vector3 w = g.rotation * new Vector3(sg * 0.03f, 0, -0.13f * Mathf.Cos(hopPh) * mv) + g.position;
+                    target = new Vector3(w.x, groundAnkle + 0.55f * hopH * scaleY, w.z); F.locked = false; F.rel = 0;
+                }
                 target.y = Mathf.Max(target.y, groundAnkle);
                 float l1 = Vector3.Distance(kp, hp), l2 = Vector3.Distance(ap, kp), over = Vector3.Distance(target, hp) - (l1 + l2) * 0.99f;
                 if (F.rel > 0.5f && over > 0) drop = Mathf.Max(drop, over);
@@ -364,7 +463,7 @@ namespace AsciiHero
             if (drop > 0) { var lp = H.root.localPosition; lp.y -= Mathf.Min(drop, 0.05f) / scaleY; H.root.localPosition = lp; }
             for (int si = 0; si < 2; si++)
             {
-                var L = legs[si];
+                var L = legs[si]; if (L.hip == null) continue;
                 Quaternion footQ = L.foot.rotation;
                 Vector3 hp = L.hip.position, kp = L.knee.position, ap = L.foot.position;
                 if ((ap - L.target).sqrMagnitude < 1e-7f) continue;

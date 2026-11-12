@@ -8,6 +8,7 @@ Shader "AsciiHero/Glyph"
     {
         _AsciiRow ("Glyph ramp row", Float) = 0
         _AsciiActor ("Actor boost", Float) = 0
+        _GlyphSmoke ("Smoke body", Float) = 0
         _GlyphCell ("Glyph size (m)", Vector) = (0.017, 0.028, 0, 0)
     }
     SubShader
@@ -29,12 +30,14 @@ Shader "AsciiHero/Glyph"
             CBUFFER_START(UnityPerMaterial)
                 float _AsciiRow;
                 float _AsciiActor;
+                float _GlyphSmoke;
                 float4 _GlyphCell;
             CBUFFER_END
             TEXTURE2D(_AsciiAtlas); SAMPLER(sampler_AsciiAtlas);
             TEXTURE2D(_AsciiLitTex); SAMPLER(sampler_AsciiLitTex);
             TEXTURE2D(_AsciiNDTex); SAMPLER(sampler_AsciiNDTex);
-            float _AsciiRows, _AsciiExposure, _AsciiLinear, _AsciiDepthRef;
+            float _AsciiRows, _AsciiExposure, _AsciiLinear, _AsciiDepthRef, _AsciiTime;
+            float _LimbGone[6];   // per renderer: 1 = this limb is torn off (index from seed.y)
             #define GLYPH_SCALE 1.5
             #define MIN_GLYPH 5.0
 
@@ -44,7 +47,13 @@ Shader "AsciiHero/Glyph"
             Varyings vert (Attributes i)
             {
                 Varyings o;
-                float3 pWS = TransformObjectToWorld(i.positionOS.xyz);
+                // smoke: each glyph of the shadow body keeps drifting off the surface and upwards, fading as it goes
+                float ph = frac(_AsciiTime * 0.45 + i.seed.x * 7.31);
+                float3 pOS = i.positionOS.xyz;
+                if (_GlyphSmoke > 0.5) pOS += i.normalOS * (0.004 + 0.05 * ph * ph);
+                float3 pWS = TransformObjectToWorld(pOS);
+                if (_GlyphSmoke > 0.5) pWS.y += 0.11 * ph * ph;
+                bool gone = _LimbGone[(int)(i.seed.y + 0.5)] > 0.5 || dot(i.normalOS, i.normalOS) < 0.09;
                 float3 pVS = TransformWorldToView(pWS);
                 float3 nVS = normalize(TransformWorldToViewDir(TransformObjectToWorldNormal(i.normalOS), true));
                 float3 toCam = normalize(-pVS);
@@ -55,7 +64,7 @@ Shader "AsciiHero/Glyph"
                 float sceneZ = nd.b > 1e-4 ? nd.b * 12.0 : 1e5;
                 float myZ = -pVS.z;
                 bool inside = all(suv >= 0.0) && all(suv <= 1.0);
-                bool vis = dot(nVS, toCam) > -0.05 && myZ <= sceneZ + 0.008 + 0.0035 * myZ && inside;
+                bool vis = !gone && dot(nVS, toCam) > -0.05 && myZ <= sceneZ + 0.008 + 0.0035 * myZ && inside;
                 float3 lit = SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, sampler_AsciiLitTex, suv, 0).rgb;
                 float3 col = _AsciiLinear > 0.5 ? pow(max(lit, 0.0), 1.0 / 2.2) : max(lit, 0.0);
                 float lum = dot(col, float3(0.299, 0.587, 0.114));
@@ -65,6 +74,11 @@ Shader "AsciiHero/Glyph"
                 float gi = MIN_GLYPH + floor(saturate(pow(lum, 0.85) + (i.seed.x - 0.5) * 0.09) * (15.99 - MIN_GLYPH));
                 float m = max(max(col.r, col.g), col.b);
                 o.col = (_AsciiRow > 8.5 && _AsciiRow < 9.5) ? col * 1.3 + 0.15 : (col / max(m, 1e-3)) * (0.10 + 0.95 * lum);
+                if (_GlyphSmoke > 0.5)
+                {
+                    gi = floor(lerp(15.0, MIN_GLYPH, ph));
+                    o.col = lerp(float3(0.42, 0.27, 0.80), float3(0.10, 0.06, 0.24), ph) * (1.0 - ph * 0.8) * (0.75 + 0.25 * depthK);
+                }
                 o.gi = gi;
                 o.local = i.corner + 0.5;
                 pVS.xy += i.corner * _GlyphCell.xy * GLYPH_SCALE;   // upright character in the view plane, slight overlap

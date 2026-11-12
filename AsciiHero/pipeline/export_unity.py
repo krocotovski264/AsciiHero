@@ -32,7 +32,7 @@ with open(OUT+'mm.bytes','wb') as f:
     for k in ('q','ro','rm','con','f','valid','idleB'): f.write(ms(meta[k]))
 # ---------- glyph atlas (same ramps as the web version) ----------
 RAMPS = [" .,:;-=+icoaex%@"," .`',;~^/\\|()%&$"," .,:;-=+*xX#%&@@"," .,:;!|ilI%&#$@@"," .,:co8oO0Q8@&#@"," .-=+*^#H%MWM@@@",
- " .-=|+#H/\\%@@@@@"," .:|!lI1][}{#%&@"," .:*o$O&%#@@@@@@"," .*+oO0@@@@@@@@@"," ......:::::::::"," ..,,::;;-~=+x%#","|-/\\_^<>        "]
+ " .-=|+#H/\\%@@@@@"," .:|!lI1][}{#%&@"," .:*o$O&%#@@@@@@"," .*+oO0@@@@@@@@@"," ......:::::::::"," ..,,::;;-~=+x%#","|-/\\_^<>        "," .'`,:;~^*+sS$&@"]
 gw,gh=24,40; img=Image.new('L',(gw*16,gh*len(RAMPS)),0); d=ImageDraw.Draw(img)
 font=ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf',30)
 for ri,r in enumerate(RAMPS):
