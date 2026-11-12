@@ -42,7 +42,7 @@ namespace AsciiHero
         /// when set, the Animator Controller (Tools -> Patch Project Locomotion) plays the clips and this class
         /// only runs the controller, root motion sync, weapon masks and foot IK
         public AnimatorDriver driver;
-        public float maxSpeed = 2.9f;
+        public float maxSpeed = 3.0f;
         struct Sim { public float x, z, vx, vz, ax, az, h, w; public bool init; }
         Sim S; bool hadDir; Vector2 lastDir;
         Quaternion[] off, outQ, tmpQ; Vector3 offRO, ro; float[] con = { 1, 1 };
@@ -142,18 +142,24 @@ namespace AsciiHero
         {
             if (!S.init) { S.x = myPos.x; S.z = myPos.y; S.h = heading; S.init = true; }
             float spd = 0;
-            if (dir.HasValue) spd = mag < 0.3f ? 0 : (lockPos.HasValue ? 0.7f + 0.9f * Mathf.Clamp01((mag - 0.3f) / 0.6f) : 1.0f + (maxSpeed - 1.0f) * Mathf.Pow(Mathf.Clamp01((mag - 0.3f) / 0.62f), 1.3f));
+            if (dir.HasValue)
+            {
+                // mag 0..1: stick inside the ring (turn on the spot -> stroll -> brisk walk); 1..2: finger pulled past the ring (run)
+                float walk = mag < 0.22f ? 0 : 0.75f + 0.65f * Mathf.Clamp01((mag - 0.22f) / 0.78f);
+                spd = mag <= 1 ? walk : 1.4f + (maxSpeed - 1.4f) * Mathf.Clamp01(mag - 1);
+                if (lockPos.HasValue) spd = Mathf.Min(spd, 1.7f);
+            }
             float vgx = dir.HasValue ? dir.Value.x * spd : 0, vgz = dir.HasValue ? dir.Value.y * spd : 0;
             float hGoal = S.h;
             if (lockPos.HasValue) hGoal = Mathf.Atan2(lockPos.Value.x - S.x, lockPos.Value.y - S.z);
             else if (dir.HasValue) hGoal = Mathf.Atan2(dir.Value.x, dir.Value.y);
-            const float HV = 0.24f, HR = 0.18f;
+            const float HV = 0.13f, HR = 0.085f;   // snappy: velocity and facing reach the stick in ~0.25 s
             SpringChar(ref S.x, ref S.vx, ref S.ax, vgx, HV, dt);
             SpringChar(ref S.z, ref S.vz, ref S.az, vgz, HV, dt);
             SpringAng(ref S.h, ref S.w, hGoal, HR, dt);
             if (collide != null) { var p = collide(new Vector2(S.x, S.z)); S.x = p.x; S.z = p.y; }
             float dxs = S.x - myPos.x, dzs = S.z - myPos.y, dl = Mathf.Sqrt(dxs * dxs + dzs * dzs);
-            if (dl > 0.35f) { S.x = myPos.x + dxs / dl * 0.35f; S.z = myPos.y + dzs / dl * 0.35f; }
+            if (dl > 0.25f) { S.x = myPos.x + dxs / dl * 0.25f; S.z = myPos.y + dzs / dl * 0.25f; }
 
             if (driver != null) return AnimatorLocomotion(dt, dir, mag, spd, vgx, vgz, hGoal, myPos);
 
@@ -185,7 +191,7 @@ namespace AsciiHero
             hadDir = dir.HasValue; if (dir.HasValue) lastDir = dir.Value;
             if (searchT <= 0 || force)
             {
-                searchT = 0.1f;
+                searchT = 0.07f;
                 float cur = CostAt(query, f0), bc;
                 int best = Search(query, f0 - 3, f0 + 12, out bc);
                 if (best >= 0 && (bc < cur - 0.05f || (force && atEnd))) Transition(best);
@@ -208,9 +214,9 @@ namespace AsciiHero
             heading += yr * dt;
             float fx = Mathf.Sin(heading), fz = Mathf.Cos(heading), rxv = Mathf.Cos(heading), rzv = -Mathf.Sin(heading);
             float dx = (fx * fwd + rxv * lat) * dt, dz = (fz * fwd + rzv * lat) * dt;
-            float kk = 1 - Mathf.Exp(-dt * LN2 / 0.15f);
+            float kk = 1 - Mathf.Exp(-dt * LN2 / 0.05f);
             dx += (S.x - (myPos.x + dx)) * kk; dz += (S.z - (myPos.y + dz)) * kk;
-            heading += Wrap(S.h - heading) * (1 - Mathf.Exp(-dt * LN2 / 0.12f));
+            heading += Wrap(S.h - heading) * (1 - Mathf.Exp(-dt * LN2 / 0.05f));
             speed = Mathf.Sqrt(fwd * fwd + lat * lat);
             label = LabelFor(fwd, lat, yr, dir.HasValue);
             return new Vector2(dx, dz);
@@ -225,9 +231,9 @@ namespace AsciiHero
             heading += yr * dt;
             float fx = Mathf.Sin(heading), fz = Mathf.Cos(heading), rxv = Mathf.Cos(heading), rzv = -Mathf.Sin(heading);
             float dx = (fx * fwd + rxv * lat) * dt, dz = (fz * fwd + rzv * lat) * dt;
-            float kk = 1 - Mathf.Exp(-dt * LN2 / 0.15f);
+            float kk = 1 - Mathf.Exp(-dt * LN2 / 0.05f);
             dx += (S.x - (myPos.x + dx)) * kk; dz += (S.z - (myPos.y + dz)) * kk;
-            heading += Wrap(S.h - heading) * (1 - Mathf.Exp(-dt * LN2 / 0.12f));
+            heading += Wrap(S.h - heading) * (1 - Mathf.Exp(-dt * LN2 / 0.05f));
             speed = Mathf.Sqrt(fwd * fwd + lat * lat);
             label = driver.StateLabel();
             return new Vector2(dx, dz);
@@ -256,7 +262,7 @@ namespace AsciiHero
                 for (int k = 0; k < nb; k++)
                     if (map[k] >= 0 && mask[k] > 0) B[map[k]].localRotation = Quaternion.Slerp(B[map[k]].localRotation, baseQ[map[k]], mask[k]);
                 H.root.localPosition = rootPos + ro;
-                FootIK(dt);
+                RelaxArms(); FootIK(dt);
                 Orb(t);
                 return;
             }
@@ -271,7 +277,7 @@ namespace AsciiHero
                 B[map[k]].localRotation = q;
             }
             H.root.localPosition = rootPos + ro;
-            FootIK(dt);
+            RelaxArms(); FootIK(dt);
             Orb(t);
         }
         void Orb(float t)
@@ -288,6 +294,29 @@ namespace AsciiHero
         {
             frame = Mathf.Min(MotionDB.RANGE_END[Mathf.FloorToInt(frame)], frame + dt * MotionDB.fps);
             if (frame + 1 >= MotionDB.RANGE_END[Mathf.FloorToInt(frame)]) Transition(StartFrame());
+        }
+
+        // ---------- arms ----------
+        // The mocap actors hold their arms away from the body. Bring a hanging arm back to the torso: the sideways
+        // angle of the upper arm is limited softly, the forward/back swing is untouched.
+        const float ARM_MAX = 0.2f, ARM_SOFT = 0.2f;
+        void RelaxArms()
+        {
+            Quaternion gq = ch.go.transform.rotation, gi = Quaternion.Inverse(gq);
+            for (int si = 0; si < 2; si++)
+            {
+                string s = SIDES[si];
+                if (s == "L" && ch.cfg.weapon == "shield") continue;
+                Transform up = H.Bone("upperarm01." + s), el = H.Bone("lowerarm01." + s); if (up == null || el == null) continue;
+                Vector3 dW = (el.position - up.position).normalized, d = gi * dW;
+                if (d.y > -0.2f) continue;
+                float sign = s == "L" ? -1f : 1f;       // Unity: the left side is -X
+                float o = d.x * sign, r = Mathf.Sqrt(o * o + d.y * d.y), abd = Mathf.Atan2(o, -d.y);
+                if (abd <= ARM_MAX) continue;
+                float a2 = ARM_MAX + (abd - ARM_MAX) * ARM_SOFT;
+                Vector3 d2 = gq * new Vector3(Mathf.Sin(a2) * r * sign, -Mathf.Cos(a2) * r, d.z).normalized;
+                up.rotation = Quaternion.FromToRotation(dW, d2) * up.rotation;
+            }
         }
 
         // ---------- foot IK ----------

@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.9.3 · Unity";
+        public const string VERSION = "beta 0.9.4 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -65,7 +65,7 @@ namespace AsciiHero
         float k = 1; Rect safe; int tab; string toast; float toastT;
         readonly List<Rect> uiRects = new List<Rect>(); List<Rect> uiRectsPrev = new List<Rect>();
         readonly List<Vector2> taps = new List<Vector2>();
-        Rect sliderRect, stickRect; Vector2 stickCenter, stick; float stickR; int stickId = int.MinValue;
+        Rect sliderRect, stickRect; Vector2 stickCenter, stick; float stickR, stickRun; int stickId = int.MinValue;
         Texture2D texWhite, texDisc, texRing; GUIStyle sTitle, sSmall, sBtn, sBtnOn, sMono, sName, sDesc, sBadge, sToast;
         Font mono; float fpsAcc; int fpsN; string fpsText = "";
 
@@ -283,7 +283,7 @@ namespace AsciiHero
             if (useAnimator && locoCtrl != null)
             {
                 player.driver = AnimatorDriver.Attach(hero.go, locoCtrl);
-                player.maxSpeed = Mathf.Max(2.9f, player.driver.sprintSpeed);
+                player.maxSpeed = Mathf.Max(3.0f, player.driver.sprintSpeed);
             }
             if (world) { hero.go.transform.position = pos; hero.go.transform.rotation = Quaternion.Euler(0, player.heading * Mathf.Rad2Deg, 0); }
         }
@@ -301,7 +301,7 @@ namespace AsciiHero
             sceneCam.fieldOfView = 30; ascii.exposure = 1.3f; ascii.actorBoost = 1;
             SetAmbient(Mats.Hex(0x50465a) * 0.45f, Mats.Hex(0x342b32) * 0.45f, Mats.Hex(0x18100a) * 0.45f);
             SetShadowDistance(20);
-            ShowToast("Трактир «Пьяный дракон»\nСтик — движение · свайп — камера");
+            ShowToast("Трактир «Пьяный дракон»\nСтик — шаг, палец за край — бег · свайп — камера");
         }
         void LeaveWorld()
         {
@@ -383,7 +383,7 @@ namespace AsciiHero
             foreach (var p in InputHub.ended)
             {
                 if (p.owner == "ui" && (p.pos - p.start).magnitude < 40 * k) taps.Add(p.pos);
-                if (p.id == stickId) { stickId = int.MinValue; stick = Vector2.zero; }
+                if (p.id == stickId) { stickId = int.MinValue; stick = Vector2.zero; stickRun = 0; }
             }
             // slider
             foreach (var p in InputHub.active.Values)
@@ -392,6 +392,9 @@ namespace AsciiHero
             Pointer sp; if (stickId != int.MinValue && InputHub.active.TryGetValue(stickId, out sp))
             {
                 Vector2 d = sp.pos - stickCenter; float max = stickR * 0.78f;
+                // run: finger pulled past the ring by about 1 cm (starts at 0.6 cm, full at 1.15 cm)
+                float cm = Screen.dpi > 0 ? Screen.dpi / 2.54f : 63f * k;
+                stickRun = Mathf.Clamp01((d.magnitude - max - 0.6f * cm) / (0.55f * cm));
                 if (d.magnitude > max) d = d.normalized * max;
                 stick = d / max;
             }
@@ -438,6 +441,8 @@ namespace AsciiHero
             if (InputHub.Key("W")) iy = -1; if (InputHub.Key("S")) iy = 1;
             if (InputHub.Key("A")) ix = -1; if (InputHub.Key("D")) ix = 1;
             float l = Mathf.Sqrt(ix * ix + iy * iy), mag = Mathf.Min(1, l); if (mag < 0.12f) mag = 0;
+            float runIn = Mathf.Max(stickRun, InputHub.Key("Run") ? 1f : 0f);
+            if (mag > 0.85f || (mag > 0 && runIn > 0)) mag = 1 + runIn;
             Vector2? dir = null;
             if (mag > 0)
             {
@@ -738,7 +743,7 @@ namespace AsciiHero
             GUI.Label(new Rect(L, T, 360 * k, 22 * k), "«ПЬЯНЫЙ ДРАКОН»", sTitle);
             GUI.Label(new Rect(L, T + 20 * k, 360 * k, 14 * k), "трактир · " + VERSION, sSmall);
             int si = cfg.sex == 'f' ? 1 : 0;
-            GUI.Label(new Rect(L, T + 38 * k, 420 * k, 50 * k), "<b>" + SEXNAME[si] + "</b> · " + cfg.height + " см\nСтик — движение · свайп — камера\nАнимация: " + animLabel, sBadge);
+            GUI.Label(new Rect(L, T + 38 * k, 420 * k, 50 * k), "<b>" + SEXNAME[si] + "</b> · " + cfg.height + " см\nСтик — шаг, палец за край — бег · свайп — камера\nАнимация: " + animLabel, sBadge);
             float R = safe.xMax - 10 * k;
             if (Button(new Rect(R - 96 * k, T, 96 * k, 28 * k), "← ГЕРОЙ")) { LeaveWorld(); return; }
             if (Button(new Rect(R - 200 * k, T + 32 * k, 200 * k, 26 * k), useAnimator ? "АНИМ: ANIMATOR" : "АНИМ: MM", useAnimator)) ToggleAnimMode();
