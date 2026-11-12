@@ -138,6 +138,9 @@ export function makeActor(c) {
     limbs: { head: true, armL: true, armR: true, legL: true, legR: true }, hopPh: 0, crawlPh: 0, vel: 0,
   };
   A.restAnkle = Math.min(localY(H, 'foot.L'), localY(H, 'foot.R'));
+  // weapon / shield arms: remember the built pose of the whole arm chain relative to the body
+  const gqi = c.group.getWorldQuaternion(new THREE.Quaternion()).invert(); A.armRel = {};
+  for (const s of ['L', 'R']) for (const n of ARM_CHAIN) { const b = H.bone(n + '.' + s); if (b) A.armRel[n + '.' + s] = gqi.clone().multiply(b.getWorldQuaternion(new THREE.Quaternion())); }
   if (DB) A.frame = startFrame();
   return A;
 }
@@ -306,6 +309,7 @@ export function animateActor(A, t, dt = 1 / 60) {
   if (legsN === 0) crawl(A, dt);
   else {
     if (legsN === 1) hopBody(A, dt);
+    pinArms(A);
     armLean(A);
     relaxArms(A);
     footIK(A, dt);
@@ -370,6 +374,25 @@ function crawl(A, dt) {
   }
 }
 
+// ---------- weapon arms ----------
+// An arm that carries something keeps the pose it was built with, relative to the body: fully for the shield
+// (it stays in front of the body instead of following the mocap arm swing), mostly for a weapon.
+// The whole chain is set in world space, so the mocap collar bone cannot swing the arm out sideways.
+const ARM_CHAIN = ['upperarm01', 'upperarm02', 'lowerarm01', 'lowerarm02', 'wrist'];
+function pinArms(A) {
+  const weapon = A.char.cfgWeapon || 'none'; if (weapon === 'none') return;
+  const gq = groupQ(A), H = A.H;
+  for (const [s, w] of [['L', weapon === 'shield' ? 1 : 0], ['R', weapon === 'spear' || weapon === 'staff' ? 0.85 : 0.65]]) {
+    if (w <= 0 || !A.limbs[s === 'L' ? 'armL' : 'armR']) continue;
+    for (const n of ARM_CHAIN) {
+      const b = H.bone(n + '.' + s), rel = A.armRel[n + '.' + s]; if (!b || !rel) continue;
+      const cur = b.getWorldQuaternion(new THREE.Quaternion()), tgt = gq.clone().multiply(rel);
+      cur.slerp(tgt, w);
+      b.quaternion.copy(b.parent.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(cur)); b.updateMatrixWorld(true);
+    }
+  }
+}
+
 // ---------- arms ----------
 // The mocap actors hold their arms away from the body (marker suits). Bring a hanging arm back to the torso:
 // the sideways angle of the upper arm is limited softly, the forward/back swing is untouched.
@@ -379,6 +402,7 @@ function relaxArms(A) {
   const gq = g.getWorldQuaternion(new THREE.Quaternion()), gi = gq.clone().invert();
   for (const s of ['L', 'R']) {
     if (s === 'L' && weapon === 'shield') continue;
+    if (s === 'R' && weapon !== 'none') continue;
     if (!A.limbs[s === 'L' ? 'armL' : 'armR']) continue;
     const up = H.bone('upperarm01.' + s), el = H.bone('lowerarm01.' + s); if (!up || !el) continue;
     const dW = P(el).sub(P(up)).normalize(), d = dW.clone().applyQuaternion(gi);

@@ -80,6 +80,14 @@ namespace AsciiHero
             }
             query = new float[MotionDB.nf];
             restAnkle = Mathf.Min(LocalY("foot.L"), LocalY("foot.R"));
+            // weapon / shield arms: remember the built pose of the whole arm chain relative to the body
+            Quaternion gi0 = Quaternion.Inverse(c.go.transform.rotation);
+            for (int si = 0; si < 2; si++)
+                for (int j = 0; j < ARM_CHAIN.Length; j++)
+                {
+                    armBone[si, j] = H.Bone(ARM_CHAIN[j] + "." + SIDES[si]);
+                    if (armBone[si, j] != null) armRel[si, j] = gi0 * armBone[si, j].rotation;
+                }
             idleBreakAt = 9 + (float)RNG.NextDouble() * 5;
             frame = StartFrame();
         }
@@ -430,6 +438,7 @@ namespace AsciiHero
         {
             if (Legs == 0) { Crawl(dt); return; }
             if (Legs == 1) HopBody(dt);
+            PinArms();
             ArmLean();
             RelaxArms();
             FootIK(dt);
@@ -472,6 +481,28 @@ namespace AsciiHero
             }
         }
 
+        // ---------- weapon arms ----------
+        // An arm that carries something keeps the pose it was built with, relative to the body: fully for the shield
+        // (it stays in front of the body instead of following the mocap arm swing), mostly for a weapon.
+        // The whole chain is set in world space, so the mocap collar bone cannot swing the arm out sideways.
+        static readonly string[] ARM_CHAIN = { "upperarm01", "upperarm02", "lowerarm01", "lowerarm02", "wrist" };
+        readonly Transform[,] armBone = new Transform[2, 5]; readonly Quaternion[,] armRel = new Quaternion[2, 5];
+        void PinArms()
+        {
+            string W = ch.cfg.weapon; if (W == "none") return;
+            Quaternion gq = ch.go.transform.rotation;
+            for (int si = 0; si < 2; si++)
+            {
+                float w = si == 0 ? (W == "shield" ? 1f : 0f) : (W == "spear" || W == "staff" ? 0.85f : 0.65f);
+                if (w <= 0 || !limbs[1 + si]) continue;
+                for (int j = 0; j < ARM_CHAIN.Length; j++)
+                {
+                    var b = armBone[si, j]; if (b == null) continue;
+                    b.rotation = Quaternion.Slerp(b.rotation, gq * armRel[si, j], w);
+                }
+            }
+        }
+
         // ---------- arms ----------
         // The mocap actors hold their arms away from the body. Bring a hanging arm back to the torso: the sideways
         // angle of the upper arm is limited softly, the forward/back swing is untouched.
@@ -483,6 +514,7 @@ namespace AsciiHero
             {
                 string s = SIDES[si];
                 if (s == "L" && ch.cfg.weapon == "shield") continue;
+                if (s == "R" && ch.cfg.weapon != "none") continue;
                 if (!limbs[si == 0 ? 1 : 2]) continue;
                 Transform up = H.Bone("upperarm01." + s), el = H.Bone("lowerarm01." + s); if (up == null || el == null) continue;
                 Vector3 dW = (el.position - up.position).normalized, d = gi * dW;
