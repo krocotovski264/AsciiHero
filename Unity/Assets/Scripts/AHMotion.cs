@@ -43,6 +43,9 @@ namespace AsciiHero
         /// when set, the Animator Controller (Tools -> Patch Project Locomotion) plays the clips and this class
         /// only runs the controller, root motion sync, weapon masks and foot IK
         public AnimatorDriver driver;
+        /// false (default): phase-matched idle/walk/run loops; true: motion matching over the whole database
+        public bool useMM;
+        bool loopMode;
         public float maxSpeed = 3.0f;
         struct Sim { public float x, z, vx, vz, ax, az, h, w; public bool init; }
         Sim S; bool hadDir; Vector2 lastDir;
@@ -157,7 +160,7 @@ namespace AsciiHero
             float hGoal = S.h;
             if (lockPos.HasValue) hGoal = Mathf.Atan2(lockPos.Value.x - S.x, lockPos.Value.y - S.z);
             else if (dir.HasValue) hGoal = Mathf.Atan2(dir.Value.x, dir.Value.y);
-            const float HV = 0.13f, HR = 0.085f;   // snappy: velocity and facing reach the stick in ~0.25 s
+            const float HV = 0.15f, HR = 0.1f;   // snappy: velocity and facing reach the stick in ~0.25 s
             SpringChar(ref S.x, ref S.vx, ref S.ax, vgx, HV, dt);
             SpringChar(ref S.z, ref S.vz, ref S.az, vgz, HV, dt);
             SpringAng(ref S.h, ref S.w, hGoal, HR, dt);
@@ -166,6 +169,8 @@ namespace AsciiHero
             if (dl > 0.25f) { S.x = myPos.x + dxs / dl * 0.25f; S.z = myPos.y + dzs / dl * 0.25f; }
 
             if (driver != null) return AnimatorLocomotion(dt, dir, mag, spd, vgx, vgz, hGoal, myPos);
+            loopMode = !useMM && !lockPos.HasValue;
+            if (loopMode) return LoopLocomotion(dt, myPos);
 
             // ---- query: current pose features + predicted trajectory relative to the character ----
             int NF = MotionDB.nf; var mean = MotionDB.mean; var scale = MotionDB.scale;
@@ -275,10 +280,14 @@ namespace AsciiHero
                 Orb(t);
                 return;
             }
-            SamplePose(frame, outQ, ref ro, con);
-            float decay = Mathf.Exp(-dt * LN2 / 0.1f);
-            for (int k = 0; k < nb; k++) { off[k] = Quaternion.Slerp(off[k], Quaternion.identity, 1 - decay); outQ[k] = off[k] * outQ[k]; }
-            offRO *= decay; ro += offRO;
+            if (loopMode) LoopPose();
+            else
+            {
+                SamplePose(frame, outQ, ref ro, con);
+                float decay = Mathf.Exp(-dt * LN2 / 0.1f);
+                for (int k = 0; k < nb; k++) { off[k] = Quaternion.Slerp(off[k], Quaternion.identity, 1 - decay); outQ[k] = off[k] * outQ[k]; }
+                offRO *= decay; ro += offRO;
+            }
             for (int k = 0; k < nb; k++)
             {
                 if (map[k] < 0) continue;
@@ -303,6 +312,82 @@ namespace AsciiHero
         {
             frame = Mathf.Min(MotionDB.RANGE_END[Mathf.FloorToInt(frame)], frame + dt * MotionDB.fps);
             if (frame + 1 >= MotionDB.RANGE_END[Mathf.FloorToInt(frame)]) Transition(StartFrame());
+        }
+
+        // ---------- phase-matched loops (default locomotion) ----------
+        // The standard way games get smooth movement from a small set of clips: three clean cycles cut from the mocap
+        // (idle, walk, run) are aligned by foot contact and blended by speed with a shared phase. Game logic moves the
+        // body, the playback rate follows the real speed so the feet do not slide, and nothing jumps between clips.
+        class Loop { public int a, b, len, off; public float T, v, dx, dz, mx, mz; }
+        static Loop LIdle, LWalk, LRun;
+        static Loop Prep(int a, int b)
+        {
+            var L = new Loop { a = a, b = b, len = b - a }; L.T = L.len / (float)MotionDB.fps;
+            var RM = MotionDB.RM; var RO = MotionDB.RO; var CON = MotionDB.CON;
+            for (int f = a; f < b; f++) L.v += Mathf.Sqrt(RM[f * 3] * RM[f * 3] + RM[f * 3 + 1] * RM[f * 3 + 1]); L.v /= L.len;
+            // the pelvis offset drifts along a clip (up to half a metre in the run); keep only its cyclic part
+            L.dx = RO[b * 3] - RO[a * 3]; L.dz = RO[b * 3 + 2] - RO[a * 3 + 2];
+            for (int i = 0; i < L.len; i++) { L.mx += RO[(a + i) * 3] - L.dx * i / L.len; L.mz += RO[(a + i) * 3 + 2] - L.dz * i / L.len; }
+            L.mx /= L.len; L.mz /= L.len;
+            for (int i = 0; i < L.len; i++) { int f = a + i, p = a + (i + L.len - 1) % L.len; if (CON[p * 2] < 0.5f && CON[f * 2] >= 0.5f) { L.off = i; break; } }   // phase 0 = left foot lands
+            return L;
+        }
+        static void PrepLoops() { if (LIdle != null) return; LIdle = Prep(9019, 9064); LWalk = Prep(648, 685); LRun = Prep(7678, 7700); }
+        Quaternion[] lq, q2, q3; float phase, idlePh, wWalk, wRun;
+        readonly float[] c2 = new float[2], c3 = new float[2], cTmp = new float[2];
+        void SampleLoop(Loop L, float ph, Quaternion[] oq, ref Vector3 oro, float[] ocon)
+        {
+            int nb = MotionDB.nb; float pos = (Mathf.Repeat(ph, 1f) * L.len + L.off) % L.len, W = Mathf.Min(5f, L.len / 3f);
+            SamplePose(L.a + pos, oq, ref oro, ocon);
+            oro.x -= L.dx * pos / L.len + L.mx; oro.z -= L.dz * pos / L.len + L.mz;
+            if (pos > L.len - W)
+            {
+                // cross-fade the end of the cycle into its start: a seamless loop
+                float t = (pos - (L.len - W)) / W, u = t * t * (3 - 2 * t);
+                if (lq == null) lq = new Quaternion[nb];
+                Vector3 ro2 = Vector3.zero;
+                SamplePose(L.a + pos - L.len, lq, ref ro2, cTmp);
+                ro2.x -= L.dx * (pos - L.len) / L.len + L.mx; ro2.z -= L.dz * (pos - L.len) / L.len + L.mz;
+                for (int k = 0; k < nb; k++) oq[k] = Quaternion.Slerp(oq[k], lq[k], u);
+                oro = Vector3.Lerp(oro, ro2, u);
+                for (int j = 0; j < 2; j++) ocon[j] += (cTmp[j] - ocon[j]) * u;
+            }
+        }
+        static float Smooth01(float a, float b, float x) { float t = Mathf.Clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); }
+        Vector2 LoopLocomotion(float dt, Vector2 myPos)
+        {
+            PrepLoops();
+            float v = Mathf.Sqrt(S.vx * S.vx + S.vz * S.vz);
+            wRun = Smooth01(1.6f, 2.5f, v); wWalk = Smooth01(0.04f, 0.5f, v);
+            float T = Mathf.Lerp(LWalk.T, LRun.T, wRun), nat = Mathf.Lerp(LWalk.v, LRun.v, wRun);
+            phase = (phase + dt / T * Mathf.Clamp(v / nat, 0.55f, 1.5f)) % 1f;
+            idlePh = (idlePh + dt / LIdle.T) % 1f;
+            // the body is moved by the controller; facing follows it smoothly
+            float dx = S.x - myPos.x, dz = S.z - myPos.y;
+            heading += Wrap(S.h - heading) * (1 - Mathf.Exp(-dt * LN2 / 0.03f));
+            speed = v; narrow = 1; vel = Mathf.Sqrt(dx * dx + dz * dz) / Mathf.Max(dt, 1e-4f);
+            label = (v < 0.08f ? "idle" : v < 1.6f ? "walk " + v.ToString("0.0") + " m/s" : "run " + v.ToString("0.0") + " m/s") + InjuryLabel();
+            return new Vector2(dx, dz);
+        }
+        void LoopPose()
+        {
+            PrepLoops();
+            int nb = MotionDB.nb;
+            if (q2 == null) { q2 = new Quaternion[nb]; q3 = new Quaternion[nb]; }
+            SampleLoop(LIdle, idlePh, outQ, ref ro, con);
+            if (wWalk > 0.001f)
+            {
+                Vector3 ro2 = Vector3.zero, ro3 = Vector3.zero;
+                SampleLoop(LWalk, phase, q2, ref ro2, c2);
+                if (wRun > 0.001f)
+                {
+                    SampleLoop(LRun, phase, q3, ref ro3, c3);
+                    for (int k = 0; k < nb; k++) q2[k] = Quaternion.Slerp(q2[k], q3[k], wRun);
+                    ro2 = Vector3.Lerp(ro2, ro3, wRun); for (int j = 0; j < 2; j++) c2[j] += (c3[j] - c2[j]) * wRun;
+                }
+                for (int k = 0; k < nb; k++) outQ[k] = Quaternion.Slerp(outQ[k], q2[k], wWalk);
+                ro = Vector3.Lerp(ro, ro2, wWalk); for (int j = 0; j < 2; j++) con[j] += (c2[j] - con[j]) * wWalk;
+            }
         }
 
         // ---------- missing limbs ----------
@@ -390,7 +475,7 @@ namespace AsciiHero
         // ---------- arms ----------
         // The mocap actors hold their arms away from the body. Bring a hanging arm back to the torso: the sideways
         // angle of the upper arm is limited softly, the forward/back swing is untouched.
-        const float ARM_MAX = 0.2f, ARM_SOFT = 0.2f;
+        const float ARM_MAX = 0.13f, ARM_SOFT = 0.12f;
         void RelaxArms()
         {
             Quaternion gq = ch.go.transform.rotation, gi = Quaternion.Inverse(gq);
@@ -420,7 +505,7 @@ namespace AsciiHero
         {
             var model = ch.model;
             float scaleY = model.lossyScale.y, groundAnkle = model.position.y + restAnkle * scaleY;
-            bool moving = !noLock && speed > 0.08f;
+            bool moving = !noLock && !loopMode && speed > 0.08f;
             float drop = 0;
             bool hopping = limbs[3] != limbs[4];
             for (int si = 0; si < 2; si++)
@@ -444,7 +529,7 @@ namespace AsciiHero
                     Vector3 al = gi * (ap - g.position); float lim = Mathf.Abs((gi * (hp - g.position)).x), ax = Mathf.Abs(al.x);
                     if (ax > lim)
                     {
-                        float nx = Mathf.Sign(al.x) * (lim + (ax - lim) * 0.3f); al.x += (nx - al.x) * narrow;
+                        float nx = Mathf.Sign(al.x) * (lim + (ax - lim) * 0.1f); al.x += (nx - al.x) * narrow;
                         Vector3 w = g.rotation * al + g.position; target.x = w.x; target.z = w.z;
                     }
                 }

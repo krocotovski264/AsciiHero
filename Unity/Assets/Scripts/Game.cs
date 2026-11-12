@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.10 · Unity";
+        public const string VERSION = "beta 0.11 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -50,7 +50,9 @@ namespace AsciiHero
         GameObject editorRoot, worldLightsRoot; Light key, rim, fill, heroLight;
         GameObject floor;
         bool rebuildPending;
-        bool useAnimator; RuntimeAnimatorController locoCtrl;   // Animator Controller mode (Tools -> Patch Project Locomotion)
+        bool useAnimator; RuntimeAnimatorController locoCtrl;
+        int animMode;   // 0 = phase-matched loops (default), 1 = motion matching, 2 = Animator Controller
+        static readonly string[] ANIM_NAME = { "АНИМ: ПЛАВНАЯ", "АНИМ: MM", "АНИМ: ANIMATOR" };   // Animator Controller mode (Tools -> Patch Project Locomotion)
         float tNow;
 
         // editor camera (web coordinates; mirrored on X when applied)
@@ -135,8 +137,8 @@ namespace AsciiHero
             {
                 SetupEditorScene();
                 LoadCfg();
-                useAnimator = PlayerPrefs.GetInt("ascii_anim_mode", 0) == 1;
-                if (useAnimator) { locoCtrl = Resources.Load<RuntimeAnimatorController>("Locomotion"); if (locoCtrl == null) useAnimator = false; }
+                animMode = Mathf.Clamp(PlayerPrefs.GetInt("ascii_anim_mode2", 0), 0, 2); useAnimator = animMode == 2;
+                if (useAnimator) { locoCtrl = Resources.Load<RuntimeAnimatorController>("Locomotion"); if (locoCtrl == null) { useAnimator = false; animMode = 0; } }
             })) yield break;
             yield return null;
             if (!Step("Тело MakeHuman", HumanDB.Load)) yield break;
@@ -233,12 +235,47 @@ namespace AsciiHero
             while (LimbCount() > Mathf.CeilToInt(hp / 20f))
             {
                 var have = new List<int>(); for (int l = 0; l < 5; l++) if (limbs[l]) have.Add(l);
-                int pick = have[Random.Range(0, have.Count)]; limbs[pick] = false;
+                int pick = have[Random.Range(0, have.Count)]; SpawnDebris(pick); limbs[pick] = false;
                 lost += (lost.Length > 0 ? ", " : "") + Character.LIMB_NAME[pick];
             }
             player.SetLimbs(limbs);
             if (hp <= 0) { ShowToast("Доспех разрушен — тень рассеялась"); respawnT = 1.8f; }
             else ShowToast("Урон −" + pct + "% · целостность " + hp + "%" + (lost.Length > 0 ? "\nОторвано: " + lost : ""));
+        }
+        // a torn-off limb flies off, tumbles, lies for a moment and burns away
+        class Debris { public GameObject go; public Vector3 v, w; public float r, t; public List<Renderer> glyphs = new List<Renderer>(); public MaterialPropertyBlock mpb = new MaterialPropertyBlock(); }
+        readonly List<Debris> debris = new List<Debris>();
+        static readonly string[] DEBRIS_BONE = { "head", "lowerarm01.L", "lowerarm01.R", "lowerleg01.L", "lowerleg01.R" };
+        void SpawnDebris(int l)
+        {
+            if (hero == null || !world) return;
+            var b = hero.human.Bone(DEBRIS_BONE[l]); if (b == null) return;
+            Vector3 p = b.position;
+            Mesh m = l == 0 ? MeshGen.Sphere(0.13f, 10, 8) : l <= 2 ? MeshGen.Cylinder(0.04f, 0.05f, 0.6f, 8) : MeshGen.Cylinder(0.055f, 0.075f, 0.85f, 8);
+            var go = MeshGen.Obj(m, actorMats["PLATE"], null, p, Random.rotation, true, "Debris");
+            GlyphLayer.Build(go);
+            var d = new Debris { go = go, r = l == 0 ? 0.13f : 0.06f };
+            foreach (var r in go.GetComponentsInChildren<Renderer>(true)) if (r.gameObject.layer == GlyphLayer.LAYER) d.glyphs.Add(r);
+            Vector3 o = new Vector3(p.x - pos.x, 0, p.z - pos.z); if (o.sqrMagnitude < 1e-4f) o = new Vector3(Random.value - 0.5f, 0, Random.value - 0.5f); o.Normalize();
+            d.v = new Vector3(o.x * 1.6f, 2.6f + Random.value, o.z * 1.6f); d.w = new Vector3(Random.Range(-230f, 230f), Random.Range(0f, 230f), Random.Range(-230f, 230f));
+            debris.Add(d);
+        }
+        void UpdateDebris(float dt)
+        {
+            for (int i = debris.Count - 1; i >= 0; i--)
+            {
+                var d = debris[i]; d.t += dt; var tr = d.go.transform;
+                d.v.y -= 9.8f * dt; tr.position += d.v * dt; tr.Rotate(d.w * dt, Space.World);
+                if (tr.position.y < d.r)
+                {
+                    var q = tr.position; q.y = d.r; tr.position = q;
+                    if (d.v.y < 0) d.v.y *= -0.35f; d.v.x *= 0.6f; d.v.z *= 0.6f; d.w *= 0.5f;
+                    if (Mathf.Abs(d.v.y) < 0.4f) { d.v = Vector3.zero; d.w = Vector3.zero; }
+                }
+                d.mpb.SetFloat("_GlyphBurn", Mathf.Clamp01((d.t - 1.6f) / 3.2f));     // lies for a moment, then burns for about three seconds
+                foreach (var r in d.glyphs) if (r != null) r.SetPropertyBlock(d.mpb);
+                if (d.t > 5.2f) { Destroy(d.go); debris.RemoveAt(i); }
+            }
         }
         void RestoreBody() { hp = 100; for (int l = 0; l < 5; l++) limbs[l] = true; if (player != null) player.SetLimbs(limbs); }
         void Pickups()
@@ -325,6 +362,7 @@ namespace AsciiHero
             hero = Character.Build(hc, actorMats, "Hero");
             hero.glyphs = GlyphLayer.Build(hero.go, Character.LimbOfBone());
             player = new MotionActor(hero);
+            player.useMM = animMode == 1;
             player.SetLimbs(limbs);
             if (useAnimator && locoCtrl != null)
             {
@@ -520,7 +558,7 @@ namespace AsciiHero
             pos = new Vector3(np.x, 0, np.y);
             hero.go.transform.position = pos;
             hero.go.transform.rotation = Quaternion.Euler(0, player.heading * Mathf.Rad2Deg, 0);
-            loc.Update(tNow); Pickups();
+            loc.Update(tNow); Pickups(); UpdateDebris(dt);
             if (respawnT > 0) { respawnT -= dt; if (respawnT <= 0) { RestoreBody(); pos = loc.spawn; player.ResetSim(); } }
             // grass: the hero and a point trailing behind him push the blades aside
             heroTrail = Vector3.Lerp(heroTrail, pos, Mathf.Min(1, dt * 2.2f));
@@ -583,17 +621,18 @@ namespace AsciiHero
 
         void ToggleAnimMode()
         {
-            if (!useAnimator)
+            int next = (animMode + 1) % 3;
+            if (next == 2)
             {
                 locoCtrl = Resources.Load<RuntimeAnimatorController>("Locomotion");
-                if (locoCtrl == null) { ShowToast("Нет Animator Controller.\nВ редакторе: Tools → Patch Project Locomotion"); return; }
+                if (locoCtrl == null) next = 0;
             }
-            useAnimator = !useAnimator;
-            PlayerPrefs.SetInt("ascii_anim_mode", useAnimator ? 1 : 0); PlayerPrefs.Save();
+            animMode = next; useAnimator = animMode == 2;
+            PlayerPrefs.SetInt("ascii_anim_mode2", animMode); PlayerPrefs.Save();
             float h = player != null ? player.heading : 0;
             Rebuild();
             if (world) { player.heading = h; player.ResetSim(); player.noLock = false; }
-            ShowToast(useAnimator ? "Анимация: Animator Controller\n(Blend Tree, повороты, старты/стопы, пивот)" : "Анимация: Motion Matching");
+            ShowToast(animMode == 0 ? "Анимация: плавная\n(циклы шага и бега, смешанные по скорости)" : animMode == 1 ? "Анимация: Motion Matching" : "Анимация: Animator Controller");
         }
 
         // ---------- UI ----------
@@ -757,7 +796,7 @@ namespace AsciiHero
             // view buttons
             if (Button(new Rect(vr.xMax - 128 * k, T, 58 * k, 24 * k), "АВТО", autoRotate)) autoRotate = !autoRotate;
             if (Button(new Rect(vr.xMax - 66 * k, T, 58 * k, 24 * k), "СБРОС")) cam = CAM0;
-            if (Button(new Rect(vr.xMax - 128 * k, T + 28 * k, 120 * k, 24 * k), useAnimator ? "АНИМ: ANIMATOR" : "АНИМ: MM", useAnimator)) ToggleAnimMode();
+            if (Button(new Rect(vr.xMax - 128 * k, T + 28 * k, 120 * k, 24 * k), ANIM_NAME[animMode], animMode != 0)) ToggleAnimMode();
             if (Button(new Rect(vr.xMax - 128 * k, T + 56 * k, 120 * k, 24 * k), ascii.surfaceGlyphs ? "Aa: НА МОДЕЛЯХ" : "Aa: СЕТКОЙ", ascii.surfaceGlyphs)) ToggleGlyphMode();
 
             // panel
@@ -820,7 +859,7 @@ namespace AsciiHero
             GUI.Label(new Rect(L, T + 38 * k, 420 * k, 50 * k), "<b>" + SEXNAME[si] + "</b> · " + cfg.height + " см\nСтик — шаг, палец за край — бег · свайп — камера\nЦелостность: " + hp + "% · " + animLabel, sBadge);
             float R = safe.xMax - 10 * k;
             if (Button(new Rect(R - 96 * k, T, 96 * k, 28 * k), "← ГЕРОЙ")) { LeaveWorld(); return; }
-            if (Button(new Rect(R - 200 * k, T + 32 * k, 200 * k, 26 * k), useAnimator ? "АНИМ: ANIMATOR" : "АНИМ: MM", useAnimator)) ToggleAnimMode();
+            if (Button(new Rect(R - 200 * k, T + 32 * k, 200 * k, 26 * k), ANIM_NAME[animMode], animMode != 0)) ToggleAnimMode();
             if (Button(new Rect(R - 200 * k, T + 62 * k, 200 * k, 26 * k), ascii.surfaceGlyphs ? "Aa: НА МОДЕЛЯХ" : "Aa: СЕТКОЙ", ascii.surfaceGlyphs)) ToggleGlyphMode();
             if (Button(new Rect(R - 304 * k, T, 96 * k, 28 * k), "УРОН −10%")) Damage(10);
             if (Button(new Rect(R - 200 * k, T, 96 * k, 28 * k), "ЦЕЛЬ", lockOn))

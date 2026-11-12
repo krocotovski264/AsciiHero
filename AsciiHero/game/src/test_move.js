@@ -31,11 +31,11 @@ const scen = JSON.parse(process.argv[2] || '[]');
       feet += loc(P('foot.L')).x - loc(P('foot.R')).x;
       for (const [k, b] of [['w', 'wrist.R'], ['a', 'foot.L'], ['h', 'head']]) {
         const h = hist[k]; h.push(loc(P(b))); if (h.length > 3) h.shift();
-        if (h.length === 3) jit[k] += h[2].clone().sub(h[1]).sub(h[1].clone().sub(h[0])).length();
+        if (h.length === 3) { const j = h[2].clone().sub(h[1]).sub(h[1].clone().sub(h[0])).length(); jit[k] += j; if (k === 'h' && j > (jit.mx || 0)) { jit.mx = j; jit.ph = A.phase; } }
       }
     }
     const f = x => (x / n).toFixed(1);
     console.log(name.padEnd(12), 'v', f(sp), '| trans/s', (trans / secs).toFixed(1), '| armAbd L', f(abdL), 'R', f(abdR), 'max', abdMax.toFixed(0),
-      '| feetX cm', f(feet * 100), '| jitter mm wrist', f(jit.w * 1000), 'foot', f(jit.a * 1000), 'head', f(jit.h * 1000), '|', A.label);
+      '| feetX cm', f(feet * 100), '| jitter mm wrist', f(jit.w * 1000), 'foot', f(jit.a * 1000), 'head', f(jit.h * 1000), '| head max', ((jit.mx||0)*1000).toFixed(1), 'at phase', (jit.ph||0).toFixed(2), '|', A.label);
   }
 })();

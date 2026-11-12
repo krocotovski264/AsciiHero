@@ -46,6 +46,7 @@ export async function loadMocap() {
   }
   for (const [a, b] of M.ranges) for (let f = a; f < b; f++) { RANGE_END[f] = b - 1; RANGE_END[f + n] = b - 1 + n; }
   DB = { n: N2, nb, NF, Q, RO, RM, CON, F, VALID, IDLEB, RANGE_END, bones: M.bones, fps: M.fps };
+  for (const k in LOOPS) prepLoop(LOOPS[k]);
 }
 export const clipNames = () => [];
 
@@ -62,6 +63,64 @@ function springChar(x, v, a, vGoal, h, dt) {        // returns [x, v, a] ; criti
 function springAng(x, v, goal, h, dt) {
   const y = damp(h) / 2, j0 = wrap(x - goal), j1 = v + j0 * y, e = Math.exp(-y * dt);
   return [e * (j0 + j1 * dt) + goal, e * (v - j1 * y * dt)];
+}
+
+// ---------- phase-matched loops (default locomotion) ----------
+// The standard way games get smooth movement from a small set of clips: three clean cycles cut from the mocap
+// (idle, walk, run) are aligned by foot contact and blended by speed with a shared phase. Game logic moves the body,
+// the playback rate follows the real speed so the feet do not slide, and nothing ever jumps between clips.
+const LOOPS = { idle: { a: 9019, b: 9064 }, walk: { a: 648, b: 685 }, run: { a: 7678, b: 7700 } };
+function prepLoop(L) {
+  L.len = L.b - L.a; L.T = L.len / DB.fps; L.off = 0;
+  let v = 0; for (let f = L.a; f < L.b; f++) v += Math.hypot(DB.RM[f * 3], DB.RM[f * 3 + 1]); L.v = v / L.len;
+  // the pelvis offset drifts along a clip (up to half a metre in the run); keep only its cyclic part, or the body jumps at every wrap
+  L.dx = DB.RO[L.b * 3] - DB.RO[L.a * 3]; L.dz = DB.RO[L.b * 3 + 2] - DB.RO[L.a * 3 + 2]; L.mx = 0; L.mz = 0;
+  for (let i = 0; i < L.len; i++) { L.mx += DB.RO[(L.a + i) * 3] - L.dx * i / L.len; L.mz += DB.RO[(L.a + i) * 3 + 2] - L.dz * i / L.len; }
+  L.mx /= L.len; L.mz /= L.len;
+  for (let i = 0; i < L.len; i++) { const f = L.a + i, p = L.a + (i + L.len - 1) % L.len; if (DB.CON[p * 2] < 0.5 && DB.CON[f * 2] >= 0.5) { L.off = i; break; } }   // phase 0 = left foot lands
+}
+const _lq = [], _lq2 = [];
+function sampleLoop(L, phase, outQ, outRO, outCon) {
+  const pos = ((phase % 1 + 1) % 1 * L.len + L.off) % L.len, nb = DB.nb, W = Math.min(5, L.len / 3);
+  samplePose(L.a + pos, outQ, outRO, outCon);
+  outRO[0] -= L.dx * pos / L.len + L.mx; outRO[2] -= L.dz * pos / L.len + L.mz;
+  if (pos > L.len - W) {                       // cross-fade the end of the cycle into its start: a seamless loop
+    const t = (pos - (L.len - W)) / W, u = t * t * (3 - 2 * t);
+    if (!_lq.length) for (let k = 0; k < nb; k++) _lq.push(new THREE.Quaternion());
+    const ro2 = [0, 0, 0], c2 = [0, 0];
+    samplePose(L.a + pos - L.len, _lq, ro2, c2);
+    ro2[0] -= L.dx * (pos - L.len) / L.len + L.mx; ro2[2] -= L.dz * (pos - L.len) / L.len + L.mz;
+    for (let k = 0; k < nb; k++) outQ[k].slerp(_lq[k], u);
+    for (let j = 0; j < 3; j++) outRO[j] += (ro2[j] - outRO[j]) * u;
+    if (outCon) for (let j = 0; j < 2; j++) outCon[j] += (c2[j] - outCon[j]) * u;
+  }
+}
+const smooth01 = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+function loopLocomotion(A, dt, dir, myPos) {
+  const S = A.sim, v = Math.hypot(S.vx, S.vz), W = LOOPS.walk, R = LOOPS.run;
+  const wRun = smooth01(1.6, 2.5, v), wWalk = smooth01(0.04, 0.5, v);
+  const T = W.T + (R.T - W.T) * wRun, nat = W.v + (R.v - W.v) * wRun;
+  A.phase = ((A.phase || 0) + dt / T * clamp(v / nat, 0.55, 1.5)) % 1;
+  A.idlePh = ((A.idlePh || 0) + dt / LOOPS.idle.T) % 1;
+  A.wWalk = wWalk; A.wRun = wRun;
+  // the body is moved by the controller; facing follows it smoothly
+  const dx = S.x - myPos.x, dz = S.z - myPos.z;
+  A.heading += wrap(S.h - A.heading) * (1 - Math.exp(-dt * LN2 / 0.03));
+  A.speed = v; A.narrow = 1; A.vel = Math.hypot(dx, dz) / Math.max(dt, 1e-4);
+  A.label = (v < 0.08 ? 'idle' : v < 1.6 ? 'walk ' + v.toFixed(1) + ' m/s' : 'run ' + v.toFixed(1) + ' m/s') + injuryLabel(A);
+  return [dx, dz];
+}
+function loopPose(A) {
+  const nb = DB.nb;
+  if (!A.q2) { A.q2 = A.outQ.map(() => new THREE.Quaternion()); A.q3 = A.outQ.map(() => new THREE.Quaternion()); }
+  const ro2 = [0, 0, 0], ro3 = [0, 0, 0], c2 = [0, 0], c3 = [0, 0], wW = A.wWalk || 0, wR = A.wRun || 0;
+  sampleLoop(LOOPS.idle, A.idlePh || 0, A.outQ, A.ro, A.con);
+  if (wW > 0.001) {
+    sampleLoop(LOOPS.walk, A.phase || 0, A.q2, ro2, c2);
+    if (wR > 0.001) { sampleLoop(LOOPS.run, A.phase || 0, A.q3, ro3, c3); for (let k = 0; k < nb; k++) A.q2[k].slerp(A.q3[k], wR); for (let j = 0; j < 3; j++) ro2[j] += (ro3[j] - ro2[j]) * wR; for (let j = 0; j < 2; j++) c2[j] += (c3[j] - c2[j]) * wR; }
+    for (let k = 0; k < nb; k++) A.outQ[k].slerp(A.q2[k], wW);
+    for (let j = 0; j < 3; j++) A.ro[j] += (ro2[j] - A.ro[j]) * wW; for (let j = 0; j < 2; j++) A.con[j] += (c2[j] - A.con[j]) * wW;
+  }
 }
 
 // ---------- actor ----------
@@ -141,7 +200,7 @@ export function locomotion(A, dt, dir, mag, lockPos, myPos, collide) {
   let hGoal = S.h;
   if (lockPos) hGoal = Math.atan2(lockPos.x - S.x, lockPos.z - S.z);
   else if (dir) hGoal = Math.atan2(dir[0], dir[1]);
-  const HV = 0.13, HR = 0.085;   // snappy: velocity and facing reach the stick in ~0.25 s
+  const HV = 0.15, HR = 0.1;   // snappy: velocity and facing reach the stick in ~0.25 s
   // advance the simulation
   [S.x, S.vx, S.ax] = springChar(S.x, S.vx, S.ax, vgx, HV, dt);
   [S.z, S.vz, S.az] = springChar(S.z, S.vz, S.az, vgz, HV, dt);
@@ -151,6 +210,8 @@ export function locomotion(A, dt, dir, mag, lockPos, myPos, collide) {
   const dxs = S.x - myPos.x, dzs = S.z - myPos.z, dl = Math.hypot(dxs, dzs);
   if (dl > 0.25) { S.x = myPos.x + dxs / dl * 0.25; S.z = myPos.z + dzs / dl * 0.25; }
 
+  A.loopMode = A.mode !== 'mm' && !lockPos;
+  if (A.loopMode) return loopLocomotion(A, dt, dir, myPos);
   // ---- query: current pose features + predicted trajectory relative to the character ----
   const q = A.query, f0 = Math.floor(A.frame), NF = DB.NF;
   for (let j = 0; j < 15; j++) q[j] = DB.F[f0 * NF + j];
@@ -221,11 +282,14 @@ export function animateActor(A, t, dt = 1 / 60) {
   for (let k = 0; k < nb; k++) B[A.map[k]].quaternion.copy(A.baseQ[A.map[k]]);
   H.root.position.copy(A.rootPos);
   if (!DB) return;
-  samplePose(window.__forceFrame ?? A.frame, A.outQ, A.ro, A.con);
-  // inertialization offsets decay
-  const decay = Math.exp(-dt * LN2 / 0.1);
-  for (let k = 0; k < nb; k++) { A.off[k].slerp(_q.identity(), 1 - decay); A.outQ[k].premultiply(A.off[k]); }
-  for (let j = 0; j < 3; j++) { A.offRO[j] *= decay; A.ro[j] += A.offRO[j]; }
+  if (A.loopMode) loopPose(A);
+  else {
+    samplePose(window.__forceFrame ?? A.frame, A.outQ, A.ro, A.con);
+    // inertialization offsets decay
+    const decay = Math.exp(-dt * LN2 / 0.1);
+    for (let k = 0; k < nb; k++) { A.off[k].slerp(_q.identity(), 1 - decay); A.outQ[k].premultiply(A.off[k]); }
+    for (let j = 0; j < 3; j++) { A.offRO[j] *= decay; A.ro[j] += A.offRO[j]; }
+  }
   // weapon layer masks
   const weapon = A.char.cfgWeapon || 'none', names = MM_META.bones;
   for (let k = 0; k < nb; k++) {
@@ -309,7 +373,7 @@ function crawl(A, dt) {
 // ---------- arms ----------
 // The mocap actors hold their arms away from the body (marker suits). Bring a hanging arm back to the torso:
 // the sideways angle of the upper arm is limited softly, the forward/back swing is untouched.
-const ARM_MAX = 0.2, ARM_SOFT = 0.2;
+const ARM_MAX = 0.13, ARM_SOFT = 0.12;
 function relaxArms(A) {
   const H = A.H, g = A.char.group, weapon = A.char.cfgWeapon || 'none';
   const gq = g.getWorldQuaternion(new THREE.Quaternion()), gi = gq.clone().invert();
@@ -337,7 +401,7 @@ function footIK(A, dt) {
   const H = A.H, g = A.char.group;
   g.updateMatrixWorld(true);
   const scaleY = g.scale.y, groundAnkle = g.position.y + A.restAnkle * scaleY;
-  const moving = !A.noLock && A.speed > 0.08;
+  const moving = !A.noLock && !A.loopMode && A.speed > 0.08;
   const info = {}; let drop = 0;
   const oneLeg = A.limbs.legL !== A.limbs.legR;
   for (const s of ['L', 'R']) {
@@ -358,7 +422,7 @@ function footIK(A, dt) {
       // feet under the hips: the mocap stance is wider than a relaxed one (not while side-stepping)
       const gq = g.getWorldQuaternion(new THREE.Quaternion()), al = ap.clone().sub(g.position).applyQuaternion(gq.clone().invert());
       const lim = Math.abs(hp.clone().sub(g.position).applyQuaternion(gq.clone().invert()).x), ax = Math.abs(al.x);
-      if (ax > lim) { const nx = Math.sign(al.x) * (lim + (ax - lim) * 0.3); al.x += (nx - al.x) * A.narrow; const w = al.applyQuaternion(gq).add(g.position); target.x = w.x; target.z = w.z; }
+      if (ax > lim) { const nx = Math.sign(al.x) * (lim + (ax - lim) * 0.1); al.x += (nx - al.x) * A.narrow; const w = al.applyQuaternion(gq).add(g.position); target.x = w.x; target.z = w.z; }
     }
     if (oneLeg) {
       // hopping: the foot stays under the body, swings forward in the air and back on the ground

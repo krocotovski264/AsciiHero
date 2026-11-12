@@ -113,7 +113,7 @@ attribute vec3 anormal;
 attribute float aseed;
 uniform sampler2D tLit, tDepth;
 uniform vec2 uCell;
-uniform float uRow, uActor, uExposure, uNear, uFar, uDepthRef, uEps, uScale, uMinGlyph, uSmoke, uTime;
+uniform float uRow, uActor, uExposure, uNear, uFar, uDepthRef, uEps, uScale, uMinGlyph, uSmoke, uTime, uBurn;
 varying vec2 vLocal;
 varying vec3 vCol;
 varying float vGi;
@@ -123,6 +123,8 @@ void main() {
   // smoke: each glyph of the shadow body keeps drifting off the surface and upwards, fading as it goes
   float ph = fract(uTime * 0.45 + aseed * 7.31);
   if (uSmoke > 0.5) transformed += objectNormal * (0.004 + 0.05 * ph * ph) + vec3(0.0, 0.11 * ph * ph, 0.0);
+  // burning (torn-off limbs): glyphs turn to embers one by one, float up and go out
+  float ember = uBurn > 0.0 ? clamp((uBurn * 1.3 - aseed) / 0.3, 0.0, 1.0) : 0.0;
   #include <skinbase_vertex>
   #include <skinnormal_vertex>
   #include <skinning_vertex>
@@ -135,7 +137,8 @@ void main() {
   // visible only if this surface point is what the camera sees there (not a back face, not under armour)
   float sceneZ = -perspectiveDepthToViewZ(texture2D(tDepth, suv).x, uNear, uFar);
   float myZ = -mv.z;
-  bool vis = !gone && dot(nV, toCam) > -0.05 && myZ <= sceneZ + uEps + 0.002 * myZ && all(greaterThanEqual(suv, vec2(0.0))) && all(lessThanEqual(suv, vec2(1.0)));
+  mv.y += ember * ember * 0.35;
+  bool vis = !gone && ember < 0.999 && dot(nV, toCam) > -0.05 - ember && myZ <= sceneZ + uEps + 0.002 * myZ && all(greaterThanEqual(suv, vec2(0.0))) && all(lessThanEqual(suv, vec2(1.0)));
   vec3 col = pow(max(texture2D(tLit, suv).rgb, 0.0), vec3(1.0 / 2.2));
   float lum = dot(col, vec3(0.299, 0.587, 0.114));
   float depthK = clamp(1.0 - (myZ - uDepthRef) * 0.09, 0.5, 1.2);          // nearer = brighter
@@ -148,6 +151,7 @@ void main() {
     gi = floor(mix(15.0, uMinGlyph, ph));
     vCol = mix(vec3(0.42, 0.27, 0.80), vec3(0.10, 0.06, 0.24), ph) * (1.0 - ph * 0.8) * (0.75 + 0.25 * depthK);
   }
+  if (ember > 0.0) { vCol = mix(vCol, vec3(1.6, 0.62, 0.12), min(1.0, ember * 2.0)) * (1.0 - ember * ember); gi = floor(mix(gi, 2.0, ember)); }
   vGi = gi;
   vLocal = position.xy + 0.5;
   mv.xy += position.xy * uCell * uScale;     // upright character in the view plane, never skewed; slight overlap
@@ -165,16 +169,16 @@ void main() {
   gl_FragColor = vec4(vCol * mk, 1.0);
 }`;
 const GMAT = new Map();
-function glyphMaterial(row, cell, actor, smoke = 0) {
+function glyphMaterial(row, cell, actor, smoke = 0, burn = null) {
   const key = row + ':' + cell.x + ':' + actor + ':' + smoke;
-  if (GMAT.has(key)) return GMAT.get(key);
+  if (!burn && GMAT.has(key)) return GMAT.get(key);
   const m = new THREE.ShaderMaterial({
-    uniforms: Object.assign({}, GLYPH, { uRow: { value: row }, uCell: { value: cell }, uActor: { value: actor }, uSmoke: { value: smoke } }),
+    uniforms: Object.assign({}, GLYPH, { uRow: { value: row }, uCell: { value: cell }, uActor: { value: actor }, uSmoke: { value: smoke }, uBurn: burn || { value: 0 } }),
     vertexShader: GLYPH_VS, fragmentShader: GLYPH_FS,
     depthTest: false, depthWrite: false, transparent: false, side: THREE.DoubleSide,
     blending: THREE.CustomBlending, blendEquation: THREE.MaxEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
   });
-  GMAT.set(key, m); return m;
+  if (!burn) GMAT.set(key, m); return m;
 }
 
 // lay points on the surface in rows: one point per glyph cell centre of the surface coordinates
@@ -245,7 +249,7 @@ function makeGlyphs(mesh) {
     ig.setAttribute('skinWeight', new THREE.InstancedBufferAttribute(new Float32Array(S.sw), 4));
   }
   ig.instanceCount = S.n;
-  const gm = glyphMaterial(info.row, info.cell, info.actor, info.smoke);
+  const gm = glyphMaterial(info.row, info.cell, info.actor, info.smoke, mesh.userData.burn);   // userData.burn = { value } gives the mesh its own burn level
   const o = skinned ? new THREE.SkinnedMesh(ig, gm) : new THREE.Mesh(ig, gm);
   if (skinned) o.bind(mesh.skeleton, mesh.bindMatrix);
   o.frustumCulled = false; o.castShadow = false; o.receiveShadow = false;

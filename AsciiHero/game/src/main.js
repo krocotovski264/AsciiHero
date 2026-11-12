@@ -204,10 +204,34 @@ function damage(pct) {
   if (body.hp <= 0) return;
   body.hp = Math.max(0, body.hp - pct);
   const lost = [];
-  while (limbCount() > Math.ceil(body.hp / 20)) { const have = LIMBS.filter(l => body.limbs[l]); const l = have[Math.floor(Math.random() * have.length)]; body.limbs[l] = false; lost.push(LIMB_NAME[l]); }
+  while (limbCount() > Math.ceil(body.hp / 20)) { const have = LIMBS.filter(l => body.limbs[l]); const l = have[Math.floor(Math.random() * have.length)]; spawnDebris(l); body.limbs[l] = false; lost.push(LIMB_NAME[l]); }
   if (player) setLimbs(player, body.limbs);
   if (body.hp <= 0) { toast('Доспех разрушен — тень рассеялась'); setTimeout(() => { restoreBody(); if (loc) { pos.copy(loc.spawn); player.sim.init = false; } }, 1800); }
   else toast('Урон −' + pct + '% · целостность ' + body.hp + '%' + (lost.length ? '\nОторвано: ' + lost.join(', ') : ''));
+}
+// a torn-off limb flies off, tumbles, lies for a moment and burns away
+const debris = [];
+const DEBRIS_BONE = { head: 'head', armL: 'lowerarm01.L', armR: 'lowerarm01.R', legL: 'lowerleg01.L', legR: 'lowerleg01.R' };
+function spawnDebris(l) {
+  if (!char || mode !== 'world') return;
+  const b = char.human.bone(DEBRIS_BONE[l]); if (!b) return;
+  const p = b.getWorldPosition(new THREE.Vector3()), burn = { value: 0 };
+  const geo = l === 'head' ? new THREE.SphereGeometry(0.13, 10, 8) : l[0] === 'a' ? new THREE.CylinderGeometry(0.05, 0.04, 0.6, 8) : new THREE.CylinderGeometry(0.075, 0.055, 0.85, 8);
+  const m = new THREE.Mesh(geo, actorMats.PLATE); m.userData.burn = burn; m.castShadow = true;
+  m.position.copy(p); m.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+  const out = new THREE.Vector3(p.x - pos.x, 0, p.z - pos.z); if (out.lengthSq() < 1e-4) out.set(Math.random() - 0.5, 0, Math.random() - 0.5); out.normalize();
+  scene.add(m); buildGlyphLayer(m);
+  debris.push({ m, burn, v: new THREE.Vector3(out.x * 1.6, 2.6 + Math.random(), out.z * 1.6), w: new THREE.Vector3(Math.random() * 8 - 4, Math.random() * 4, Math.random() * 8 - 4), r: l === 'head' ? 0.13 : 0.06, t: 0 });
+}
+function updateDebris(dt) {
+  for (let i = debris.length - 1; i >= 0; i--) {
+    const d = debris[i]; d.t += dt;
+    d.v.y -= 9.8 * dt; d.m.position.addScaledVector(d.v, dt);
+    d.m.rotation.x += d.w.x * dt; d.m.rotation.y += d.w.y * dt; d.m.rotation.z += d.w.z * dt;
+    if (d.m.position.y < d.r) { d.m.position.y = d.r; if (d.v.y < 0) d.v.y *= -0.35; d.v.x *= 0.6; d.v.z *= 0.6; d.w.multiplyScalar(0.5); if (Math.abs(d.v.y) < 0.4) { d.v.set(0, 0, 0); d.w.set(0, 0, 0); } }
+    d.burn.value = Math.max(0, Math.min(1, (d.t - 1.6) / 3.2));          // lies for a moment, then burns for about three seconds
+    if (d.t > 5.2) { scene.remove(d.m); d.m.traverse(o => { if (o.geometry) o.geometry.dispose(); }); debris.splice(i, 1); }
+  }
 }
 function restoreBody() { body.hp = 100; for (const l of LIMBS) body.limbs[l] = true; if (player) setLimbs(player, body.limbs); }
 function pickups() {
@@ -334,7 +358,7 @@ function worldUpdate(dt, t) {
   heading = player.heading;
   char.group.position.set(pos.x, 0, pos.z);
   char.group.rotation.y = heading;
-  loc.update(t); pickups();
+  loc.update(t); pickups(); updateDebris(dt);
   GLYPH.uHeroA.value.set(pos.x, 0, pos.z); GLYPH.uHeroB.value.lerp(GLYPH.uHeroA.value, Math.min(1, dt * 2.2));
   if (moonLight) { moonLight.position.set(pos.x + 1, 7.5, pos.z - 7.5); moonLight.target.position.set(pos.x, 0, pos.z); }
   labelT -= dt; if (labelT <= 0) { labelT = 0.25; $('badge').innerHTML = `<b>${sexName[cfg.sex]}</b> · ${cfg.height} см\nСтик — движение · свайп — камера\nЦелостность: ${body.hp}% · ${player.label}`; }
