@@ -291,7 +291,10 @@ export function animateActor(A, t, dt = 1 / 60) {
     // inertialization offsets decay
     const decay = Math.exp(-dt * LN2 / 0.1);
     for (let k = 0; k < nb; k++) { A.off[k].slerp(_q.identity(), 1 - decay); A.outQ[k].premultiply(A.off[k]); }
-    for (let j = 0; j < 3; j++) { A.offRO[j] *= decay; A.ro[j] += A.offRO[j]; }
+    for (let j = 0; j < 3; j++) { A.offRO[j] *= decay; A.ro[j] += A.offRO[j]; }    // keep only the fast part of the stored pelvis offset (it drifts along clips and differs between them)
+    if (!A.roAvg) A.roAvg = [A.ro[0], 0, A.ro[2]];
+    const kp = 1 - Math.exp(-dt * LN2 / 0.25);
+    for (const j of [0, 2]) { if (Math.abs(A.ro[j] - A.roAvg[j]) > 0.12) A.roAvg[j] = A.ro[j]; A.roAvg[j] += (A.ro[j] - A.roAvg[j]) * kp; A.ro[j] -= A.roAvg[j]; }
   }
   // weapon layer masks
   const weapon = A.char.cfgWeapon || 'none', names = MM_META.bones;
@@ -425,7 +428,7 @@ function footIK(A, dt) {
   const H = A.H, g = A.char.group;
   g.updateMatrixWorld(true);
   const scaleY = g.scale.y, groundAnkle = g.position.y + A.restAnkle * scaleY;
-  const moving = !A.noLock && !A.loopMode && A.speed > 0.08;
+  const moving = false;   // foot locking is off: a foot pinned while the body moved on made the knees buckle
   const info = {}; let drop = 0;
   const oneLeg = A.limbs.legL !== A.limbs.legR;
   for (const s of ['L', 'R']) {

@@ -9,7 +9,7 @@ const scen = JSON.parse(process.argv[2] || '[]');
   await loadHuman(); await loadMocap();
   const c = buildCharacter({ sex: 'f', build: 1, height: 170, armor: 'cloth', weapon: 'none' }, mats);
   c.cfgWeapon = 'none'; const scene = new THREE.Scene(); scene.add(c.group);
-  const A = makeActor(c); const pos = { x: 0, z: 0 }; const dt = 1 / 60; let t = 0;
+  const A = makeActor(c); A.mode = process.env.MODE || 'loops'; const pos = { x: 0, z: 0 }; const dt = 1 / 60; let t = 0;
   const H = c.human, P = n => H.bone(n).getWorldPosition(new THREE.Vector3());
   const loc = v => v.clone().sub(c.group.position).applyAxisAngle(new THREE.Vector3(0, 1, 0), -A.heading);
   for (const [name, dx, dz, mag, secs] of scen) {

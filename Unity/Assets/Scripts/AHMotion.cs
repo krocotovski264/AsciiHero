@@ -280,7 +280,7 @@ namespace AsciiHero
             if (driver != null)
             {
                 // the Animator has already written the clip pose this frame
-                driver.ReadPose(out ro, con);
+                driver.ReadPose(out ro, con); SteadyPelvis(dt);
                 for (int k = 0; k < nb; k++)
                     if (map[k] >= 0 && mask[k] > 0) B[map[k]].localRotation = Quaternion.Slerp(B[map[k]].localRotation, baseQ[map[k]], mask[k]);
                 H.root.localPosition = rootPos + ro;
@@ -295,6 +295,7 @@ namespace AsciiHero
                 float decay = Mathf.Exp(-dt * LN2 / 0.1f);
                 for (int k = 0; k < nb; k++) { off[k] = Quaternion.Slerp(off[k], Quaternion.identity, 1 - decay); outQ[k] = off[k] * outQ[k]; }
                 offRO *= decay; ro += offRO;
+                SteadyPelvis(dt);
             }
             for (int k = 0; k < nb; k++)
             {
@@ -481,6 +482,19 @@ namespace AsciiHero
             }
         }
 
+        // The pelvis offset stored with the clips drifts (up to half a metre along a run clip) and differs from clip to
+        // clip, so every clip change or loop wrap made the body jump. Keep only its fast part (the sway of the gait).
+        Vector3 roAvg; bool roInit;
+        void SteadyPelvis(float dt)
+        {
+            if (!roInit) { roAvg = ro; roInit = true; }
+            float k = 1 - Mathf.Exp(-dt * LN2 / 0.25f);
+            // a jump of the stored offset is absorbed at once instead of being shown
+            if (Mathf.Abs(ro.x - roAvg.x) > 0.12f) roAvg.x = ro.x; if (Mathf.Abs(ro.z - roAvg.z) > 0.12f) roAvg.z = ro.z;
+            roAvg.x += (ro.x - roAvg.x) * k; roAvg.z += (ro.z - roAvg.z) * k;
+            ro.x -= roAvg.x; ro.z -= roAvg.z;
+        }
+
         // ---------- weapon arms ----------
         // An arm that carries something keeps the pose it was built with, relative to the body: fully for the shield
         // (it stays in front of the body instead of following the mocap arm swing), mostly for a weapon.
@@ -537,7 +551,9 @@ namespace AsciiHero
         {
             var model = ch.model;
             float scaleY = model.lossyScale.y, groundAnkle = model.position.y + restAnkle * scaleY;
-            bool moving = !noLock && !loopMode && speed > 0.08f;
+            // Foot locking is off: the body follows the controller, and a foot pinned to the ground while the body moved on
+            // was what made the knees buckle. Feet are only kept from sinking below the ground.
+            bool moving = false;
             float drop = 0;
             bool hopping = limbs[3] != limbs[4];
             for (int si = 0; si < 2; si++)
