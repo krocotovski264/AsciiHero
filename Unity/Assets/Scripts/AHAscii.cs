@@ -131,7 +131,8 @@ namespace AsciiHero
                 int hw = (W + 1) / 2, hh = (H + 1) / 2;
                 rtCol = RT(hw, hh, half, FilterMode.Bilinear, 24, RenderTextureReadWrite.Linear);
                 rtND = RT(hw, hh, half, FilterMode.Point, 24, RenderTextureReadWrite.Linear);
-                rtFull = RT(W, H, half, FilterMode.Bilinear, 0, RenderTextureReadWrite.Linear);
+                // a camera target must have a depth buffer in URP's render graph, even though glyphs don't test depth
+                rtFull = RT(W, H, half, FilterMode.Bilinear, 24, RenderTextureReadWrite.Linear);
                 Shader.SetGlobalTexture("_AsciiLitTex", rtCol); Shader.SetGlobalTexture("_AsciiNDTex", rtND);
             }
             else

@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.9.2 · Unity";
+        public const string VERSION = "beta 0.9.3 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -659,7 +659,7 @@ namespace AsciiHero
             for (int i = LogHub.lines.Count - 1; i >= 0 && y > by + bh + 6 * k; i--)
             {
                 var l = LogHub.lines[i];
-                string text = l.text.Length > 900 ? l.text.Substring(0, 900) + "…" : l.text;
+                string text = (l.count > 1 ? "(×" + l.count + ") " : "") + (l.text.Length > 900 ? l.text.Substring(0, 900) + "…" : l.text);
                 float h = st.CalcHeight(new GUIContent(text), w);
                 y -= h + 2 * k; if (y < by + bh + 6 * k) break;
                 bool err = l.type == LogType.Error || l.type == LogType.Exception || l.type == LogType.Assert;

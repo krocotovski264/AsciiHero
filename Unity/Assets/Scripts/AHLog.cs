@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public static class LogHub
     {
-        public struct Line { public LogType type; public string text; public float time; }
+        public struct Line { public LogType type; public string text; public float time; public int count; }
         public static readonly List<Line> lines = new List<Line>();
         public static int errors, version;
         public static string lastError = "";
@@ -54,9 +54,16 @@ namespace AsciiHero
             {
                 while (pending.Count > 0)
                 {
-                    var l = pending.Dequeue(); l.time = Time.realtimeSinceStartup;
-                    lines.Add(l); version++;
-                    if (l.type == LogType.Exception || l.type == LogType.Error || l.type == LogType.Assert) { errors++; lastError = l.text; }
+                    var l = pending.Dequeue(); l.time = Time.realtimeSinceStartup; l.count = 1;
+                    bool err = l.type == LogType.Exception || l.type == LogType.Error || l.type == LogType.Assert;
+                    // a message repeating every frame is counted, not listed again, so the start of the log survives
+                    bool dup = false;
+                    for (int i = lines.Count - 1; i >= 0 && i >= lines.Count - 8; i--)
+                        if (lines[i].text == l.text) { var o = lines[i]; o.count++; lines[i] = o; dup = true; break; }
+                    version++;
+                    if (dup) continue;
+                    lines.Add(l);
+                    if (err) { errors++; lastError = l.text; }
                 }
             }
             if (lines.Count > MAX) lines.RemoveRange(0, lines.Count - MAX);
@@ -65,7 +72,7 @@ namespace AsciiHero
         public static string AllText()
         {
             var sb = new System.Text.StringBuilder();
-            foreach (var l in lines) sb.Append('[').Append(l.type).Append("] ").Append(l.text).Append('\n');
+            foreach (var l in lines) sb.Append('[').Append(l.type).Append("] ").Append(l.count > 1 ? "(×" + l.count + ") " : "").Append(l.text).Append('\n');
             return sb.ToString();
         }
     }
