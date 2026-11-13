@@ -12,6 +12,7 @@ import { MM_META, MM_B64 } from './data_mm.js';
 let DB = null;
 const LN2 = Math.log(2);
 export const RUN_SPEED = 3.0;
+const SPRINT_EXTRA = 1.1;
 let SWITCH_K = +(globalThis.process && process.env.SK || 0.7);   // a jump must beat the current clip clearly, otherwise poses flicker
 export async function loadMocap() {
   if (DB) return;
@@ -107,7 +108,7 @@ function loopLocomotion(A, dt, dir, myPos) {
   const dx = S.x - myPos.x, dz = S.z - myPos.z;
   A.heading += wrap(S.h - A.heading) * (1 - Math.exp(-dt * LN2 / 0.045));
   A.speed = v; A.narrow = 1; A.vel = Math.hypot(dx, dz) / Math.max(dt, 1e-4);
-  A.label = (v < 0.08 ? 'idle' : v < 1.6 ? 'walk ' + v.toFixed(1) + ' m/s' : 'run ' + v.toFixed(1) + ' m/s') + injuryLabel(A);
+  A.label = (v < 0.08 ? 'idle' : v < 1.6 ? 'walk ' + v.toFixed(1) + ' m/s' : ((A.sprint || 0) > 0.5 ? 'sprint ' : 'run ') + v.toFixed(1) + ' m/s') + injuryLabel(A);
   return [dx, dz];
 }
 function loopPose(A) {
@@ -195,6 +196,11 @@ export function locomotion(A, dt, dir, mag, lockPos, myPos, collide) {
     // inside the stick ring: turn on the spot -> stroll -> brisk walk; finger pulled past the ring: run
     const walk = mag < 0.22 ? 0 : 0.75 + 0.65 * clamp((mag - 0.22) / 0.78, 0, 1);
     speed = mag <= 1 ? walk : 1.4 + (RUN_SPEED - 1.4) * clamp(mag - 1, 0, 1);
+    // sprint: holding the run for a moment builds into an all-out sprint (and it drops at once when the run is released)
+    const vNow = Math.hypot(S.vx, S.vz);
+    A.sprintT = mag > 1.6 && vNow > 2.3 && !lockPos ? Math.min(3, (A.sprintT || 0) + dt) : Math.max(0, (A.sprintT || 0) - dt * 4);
+    A.sprint = smooth01(0.7, 1.7, A.sprintT);
+    if (mag > 1.6) speed += SPRINT_EXTRA * A.sprint;
     if (lockPos) speed = Math.min(speed, 1.7);
     const legs = (A.limbs.legL ? 1 : 0) + (A.limbs.legR ? 1 : 0), arms = (A.limbs.armL ? 1 : 0) + (A.limbs.armR ? 1 : 0);
     if (legs === 1) speed = Math.min(speed, 1.15);                       // hopping on one leg
@@ -401,7 +407,8 @@ function bodyLife(A, t, dt) {
   const ph = (A.phase || 0) * Math.PI * 2, cs = Math.cos(ph), breath = Math.sin(t * 1.7), idle = 1 - wW;
   // posture: the mocap runner bends 17 degrees forward and throws the head back; bring the trunk to a normal
   // carriage for the gait (upright at rest, about 3 degrees forward walking, 8 running) before adding the leans
-  const want = 0.01 + 0.045 * wW + 0.09 * wR;
+  const sp = A.sprint || 0;
+  const want = 0.01 + 0.045 * wW + 0.09 * wR + 0.13 * sp;      // the sprint drives the whole body forward as one line
   { // the pelvis first (a pelvis tipped forward under an upright chest is what reads as an arched back); the legs keep their pose
     const w = P(H.bone('spine03')).sub(P(H.bone('root'))), d = (want - (Math.atan2(w.dot(Z), w.y) - A.restLower)) * 0.8;
     rot('root', X, d); rot('upperleg01.L', X, -d); rot('upperleg01.R', X, -d); }
@@ -410,7 +417,7 @@ function bodyLife(A, t, dt) {
   // pelvis: dip under load, slow weight shift when standing
   H.root.position.y -= A.dip; H.root.position.x += idle * 0.012 * Math.sin(t * 0.45); H.root.updateMatrixWorld(true);
   // torso: lean (root, lower and upper spine share it), counter-rotation, breathing
-  const twist = (0.07 * wW + 0.07 * wR) * cs;
+  const twist = (0.07 * wW + 0.07 * wR + 0.08 * sp) * cs;
   for (const [n, f] of [['root', 0.3], ['spine05', 0.3], ['spine03', 0.4]]) { rot(n, X, A.lp * f); rot(n, Z, -A.lr * f); }
   rot('spine05', Y, twist * 0.4 + A.look * 0.15); rot('spine03', Y, twist * 0.6 + A.look * 0.2);
   rot('spine03', X, -0.012 * breath - idle * 0.01 * Math.sin(t * 0.6));
@@ -431,6 +438,16 @@ function bodyLife(A, t, dt) {
     rot('upperarm01.' + s, X, -amp * sw + idle * 0.02 * breath);
     rot('lowerarm01.' + s, X, -(carried && !shield ? 0.1 * wW + 0.5 * wR : 0.25 * wR) * Math.max(0, sw) - (shield ? 0 : 0.35 * wR));
     rot('upperarm01.' + s, Z, sg * (0.03 * breath * idle + 0.04 * wR * Math.abs(cs)));
+    if (sp > 0.01) {
+      // sprint: elbows locked near a right angle, the arms pump hard from the shoulder, hand up to the chin in front
+      // and back past the hip behind, whatever the hands carry
+      const a = 0.1 + 0.8 * sw, b = a + 1.45 + 0.25 * sw;
+      const W3 = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(gq);
+      const part = (bn, cn, dirW) => { const ba = H.bone(bn), bb = H.bone(cn); if (!ba || !bb) return;
+        const q = new THREE.Quaternion().setFromUnitVectors(P(bb).sub(P(ba)).normalize(), dirW.normalize()); rotateWorld(ba, new THREE.Quaternion().slerp(q, sp)); };
+      part('upperarm01.' + s, 'lowerarm01.' + s, W3(sg * 0.12, -Math.cos(a), Math.sin(a)));
+      part('lowerarm01.' + s, 'wrist.' + s, W3(-sg * 0.14, -Math.cos(b), Math.sin(b)));
+    }
   }
 }
 

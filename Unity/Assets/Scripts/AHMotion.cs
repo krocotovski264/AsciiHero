@@ -167,11 +167,17 @@ namespace AsciiHero
                 // mag 0..1: stick inside the ring (turn on the spot -> stroll -> brisk walk); 1..2: finger pulled past the ring (run)
                 float walk = mag < 0.22f ? 0 : 0.75f + 0.65f * Mathf.Clamp01((mag - 0.22f) / 0.78f);
                 spd = mag <= 1 ? walk : 1.4f + (maxSpeed - 1.4f) * Mathf.Clamp01(mag - 1);
+                // sprint: holding the run for a moment builds into an all-out sprint (and it drops at once when the run is released)
+                float vNow = Mathf.Sqrt(S.vx * S.vx + S.vz * S.vz);
+                sprintT = mag > 1.6f && vNow > 2.3f && !lockPos.HasValue ? Mathf.Min(3f, sprintT + dt) : Mathf.Max(0f, sprintT - dt * 4);
+                sprint = Smooth01(0.7f, 1.7f, sprintT);
+                if (mag > 1.6f) spd += SPRINT_EXTRA * sprint;
                 if (lockPos.HasValue) spd = Mathf.Min(spd, 1.7f);
                 int legsC = Legs, armsC = (limbs[1] ? 1 : 0) + (limbs[2] ? 1 : 0);
                 if (legsC == 1) spd = Mathf.Min(spd, 1.15f);                                        // hopping on one leg
                 if (legsC == 0) spd = Mathf.Min(spd, armsC == 2 ? 0.5f : armsC == 1 ? 0.35f : 0.18f);   // crawling
             }
+            if (!dir.HasValue) { sprintT = Mathf.Max(0f, sprintT - dt * 4); sprint = Smooth01(0.7f, 1.7f, sprintT); }
             float vgx = dir.HasValue ? dir.Value.x * spd : 0, vgz = dir.HasValue ? dir.Value.y * spd : 0;
             float hGoal = S.h;
             if (lockPos.HasValue) hGoal = Mathf.Atan2(lockPos.Value.x - S.x, lockPos.Value.y - S.z);
@@ -383,7 +389,7 @@ namespace AsciiHero
             float dx = S.x - myPos.x, dz = S.z - myPos.y;
             heading += Wrap(S.h - heading) * (1 - Mathf.Exp(-dt * LN2 / 0.045f));
             speed = v; narrow = 1; vel = Mathf.Sqrt(dx * dx + dz * dz) / Mathf.Max(dt, 1e-4f);
-            label = (v < 0.08f ? "idle" : v < 1.6f ? "walk " + v.ToString("0.0") + " m/s" : "run " + v.ToString("0.0") + " m/s") + InjuryLabel();
+            label = (v < 0.08f ? "idle" : v < 1.6f ? "walk " + v.ToString("0.0") + " m/s" : (sprint > 0.5f ? "sprint " : "run ") + v.ToString("0.0") + " m/s") + InjuryLabel();
             return new Vector2(dx, dz);
         }
         void LoopPose()
@@ -512,6 +518,7 @@ namespace AsciiHero
         //   * arms swing with the gait even when they carry a shield or a weapon, elbows bend more in a run
         //   * standing still is not frozen: breathing, a slow shift of weight, the head drifting
         float lp, lr, dip, look, restTrunk, restLower;
+        const float SPRINT_EXTRA = 1.1f; float sprintT; public float sprint;
         void Rot(string name, Vector3 axis, float ang)
         {
             var b = H.Bone(name); if (b == null || Mathf.Abs(ang) < 1e-5f) return;
@@ -533,7 +540,8 @@ namespace AsciiHero
             float ph = phase * Mathf.PI * 2, cs = Mathf.Cos(ph), breath = Mathf.Sin(t * 1.7f), idle = 1 - wW;
             // posture: the mocap runner bends 17 degrees forward and throws the head back; bring the trunk to a normal
             // carriage for the gait (upright at rest, about 3 degrees forward walking, 8 running) before adding the leans
-            float want = 0.01f + 0.045f * wW + 0.09f * wR;
+            float sp = sprint;
+            float want = 0.01f + 0.045f * wW + 0.09f * wR + 0.13f * sp;      // the sprint drives the whole body forward as one line
             Transform bRoot = H.Bone("root"), bSp = H.Bone("spine03"), bNk = H.Bone("neck01");
             if (bRoot != null && bSp != null && bNk != null)
             {
@@ -546,7 +554,7 @@ namespace AsciiHero
             // pelvis: dip under load, slow weight shift when standing
             var rp = H.root.localPosition; rp.y -= dip; rp.x += idle * 0.012f * Mathf.Sin(t * 0.45f); H.root.localPosition = rp;
             // torso: lean (root, lower and upper spine share it), counter-rotation, breathing
-            float twist = -(0.07f * wW + 0.07f * wR) * cs;
+            float twist = -(0.07f * wW + 0.07f * wR + 0.08f * sp) * cs;
             string[] chain = { "root", "spine05", "spine03" }; float[] share = { 0.3f, 0.3f, 0.4f };
             for (int i = 0; i < 3; i++) { Rot(chain[i], X, lp * share[i]); Rot(chain[i], Z, -lr * share[i]); }
             Rot("spine05", Y, twist * 0.4f + look * 0.15f); Rot("spine03", Y, twist * 0.6f + look * 0.2f);
@@ -574,7 +582,22 @@ namespace AsciiHero
                 Rot("upperarm01." + s, X, -amp * sw + idle * 0.02f * breath);
                 Rot("lowerarm01." + s, X, -(carried && !shield ? 0.1f * wW + 0.5f * wR : 0.25f * wR) * Mathf.Max(0, sw) - (shield ? 0 : 0.35f * wR));
                 Rot("upperarm01." + s, Z, sg * (0.03f * breath * idle + 0.04f * wR * Mathf.Abs(cs)));
+                if (sp > 0.01f)
+                {
+                    // sprint: elbows locked near a right angle, the arms pump hard from the shoulder, hand up to the chin
+                    // in front and back past the hip behind, whatever the hands carry
+                    float a = 0.1f + 0.8f * sw, b2 = a + 1.45f + 0.25f * sw;
+                    SprintPart("upperarm01." + s, "lowerarm01." + s, gq * new Vector3(sg * 0.12f, -Mathf.Cos(a), Mathf.Sin(a)), sp);
+                    SprintPart("lowerarm01." + s, "wrist." + s, gq * new Vector3(-sg * 0.14f, -Mathf.Cos(b2), Mathf.Sin(b2)), sp);
+                }
             }
+        }
+
+        void SprintPart(string an, string bn, Vector3 dirW, float w)
+        {
+            Transform ba = H.Bone(an), bb = H.Bone(bn); if (ba == null || bb == null) return;
+            Vector3 cur = bb.position - ba.position; if (cur.sqrMagnitude < 1e-8f) return;
+            ba.rotation = Quaternion.Slerp(Quaternion.identity, Quaternion.FromToRotation(cur.normalized, dirW.normalized), w) * ba.rotation;
         }
 
         // ---------- weapon arms ----------
