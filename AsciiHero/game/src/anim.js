@@ -205,7 +205,7 @@ export function locomotion(A, dt, dir, mag, lockPos, myPos, collide) {
     if (lockPos) speed = Math.min(speed, 1.7);
     if (A.guardHeld) speed = Math.min(speed, 1.1);          // behind the shield you only walk
     const legs = (A.limbs.legL ? 1 : 0) + (A.limbs.legR ? 1 : 0), arms = (A.limbs.armL ? 1 : 0) + (A.limbs.armR ? 1 : 0);
-    if (legs === 1) speed = Math.min(speed, 1.15);                       // hopping on one leg
+    if (legs === 1) speed = Math.min(speed, 1.9);                       // hopping on one leg
     if (legs === 0) speed = Math.min(speed, arms === 2 ? 0.5 : arms === 1 ? 0.35 : 0.18);   // crawling
   }
   const vgx = dir ? dir[0] * speed : 0, vgz = dir ? dir[1] * speed : 0;
@@ -365,11 +365,23 @@ function armLean(A) {
   rotateWorld(A.H.bone('spine03'), new THREE.Quaternion().setFromAxisAngle(fwd, L.armL ? -0.08 : 0.08));
 }
 function hopBody(A, dt) {
-  const H = A.H, moving = A.vel > 0.15, side = A.limbs.legL ? 1 : -1;
-  A.hopPh = moving ? (A.hopPh + dt * Math.PI * 2 * (1.7 + 0.5 * A.vel)) % (Math.PI * 2) : 0;
-  A.hopH = moving ? 0.10 * Math.max(0, Math.sin(A.hopPh)) : 0;
-  H.root.position.y += A.hopH; H.root.position.x += side * 0.05;      // weight over the remaining foot
+  // A real hop cycle: on the ground the leg sinks and loads (the foot travels from front to back under the body), it
+  // drives off with the body thrown forward, in the air the leg is pulled up and swung far forward and the arms lift,
+  // then it reaches out, lands ahead of the body and gives again.
+  const H = A.H, moving = A.vel > 0.15, side = A.limbs.legL ? 1 : -1, gq = groupQ(A);
+  A.hopPh = moving ? (A.hopPh + dt * Math.PI * 2 * (1.5 + 0.5 * A.vel)) % (Math.PI * 2) : 0;      // 0..pi in the air, pi..2pi on the ground
+  const sn = Math.sin(A.hopPh), cs = Math.cos(A.hopPh), k = moving ? clamp(A.vel / 1.2, 0.4, 1) : 0;
+  A.hopH = moving ? (sn > 0 ? 0.19 * k * sn : 0) : 0;
+  A.hopDip = moving ? (sn < 0 ? 0.075 * k * -sn : 0) : 0;
+  A.hopStride = 0.2 + 0.11 * A.vel;
+  H.root.position.y += A.hopH - A.hopDip; H.root.position.x += side * 0.05;      // weight over the remaining foot
   H.root.updateMatrixWorld(true);
+  if (!moving) return;
+  const X = new THREE.Vector3(1, 0, 0).applyQuaternion(gq), R = (n, ang) => { const b = H.bone(n); if (b) rotateWorld(b, new THREE.Quaternion().setFromAxisAngle(X, ang)); };
+  const lean = (0.07 + 0.12 * cs) * k;                  // thrown forward at take-off, upright (a touch back) on landing
+  R('spine05', lean * 0.5); R('spine03', lean * 0.5);
+  const lift = Math.max(0, sn) * k;                      // the arms swing up with the jump and drop to load the next one
+  for (const [s, on] of [['L', A.limbs.armL], ['R', A.limbs.armR]]) if (on) { R('upperarm01.' + s, -0.55 * lift + 0.2 * Math.max(0, -sn) * k); R('lowerarm01.' + s, -0.4 * lift); }
 }
 function crawl(A, dt) {
   const H = A.H, gq = groupQ(A), L = A.limbs;
@@ -452,7 +464,7 @@ function bodyLife(A, t, dt) {
       const W3 = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(gq);
       const part = (bn, cn, dirW) => { const ba = H.bone(bn), bb = H.bone(cn); if (!ba || !bb) return;
         const q = new THREE.Quaternion().setFromUnitVectors(P(bb).sub(P(ba)).normalize(), dirW.normalize()); rotateWorld(ba, new THREE.Quaternion().slerp(q, aw)); };
-      part('upperarm01.' + s, 'lowerarm01.' + s, W3(sg * (0.2 - 0.1 * u), -Math.cos(a), Math.sin(a)));
+      part('upperarm01.' + s, 'lowerarm01.' + s, W3(sg * (0.3 - 0.07 * u), -Math.cos(a), Math.sin(a)));
       part('lowerarm01.' + s, 'wrist.' + s, W3(sg * (0.12 - 0.62 * u), -Math.cos(b), Math.sin(b)));
     }
   }
@@ -542,21 +554,36 @@ function combat(A, dt) {
     }
     else if (A.limbs.armR) { aim('upperarm01.R', 'lowerarm01.R', B([0.15, -0.55, 0.82]), gw); aim('lowerarm01.R', 'wrist.R', B([-0.5, 0.45, 0.74]), gw); blade(B([-0.6, 0.78, 0.15]), gw); }
   }
-  // cut
-  const a = A.atk; if (!a || a.t >= a.dur || !A.limbs.armR) return;
-  a.t += dt; const K = ATTACKS[a.type].k; let i = 0; while (i < K.length - 2 && a.t > K[i + 1][0]) i++;
-  const k0 = K[i], k1 = K[i + 1], u = clamp((a.t - k0[0]) / (k1[0] - k0[0]), 0, 1), s = u * u * (3 - 2 * u);
-  // entering and leaving the cut the pose is blended with the body's own; between the keys the arm follows one smooth
-  // curve through them (Catmull-Rom), so it sweeps through without stopping anywhere
-  const w = k0[1] && k1[1] ? 1 : k1[1] ? s : 1 - s;
-  const on = j => K[clamp(j, 1, K.length - 2)];
-  const cr = j => { if (!k0[1] || !k1[1]) return (k1[1] ? k1 : k0)[j];
-    const p0 = on(i - 1)[j], p1 = k0[j], p2 = k1[j], p3 = on(i + 2)[j], f = (a0, a1, a2, a3) => 0.5 * (2 * a1 + (a2 - a0) * u + (2 * a0 - 5 * a1 + 4 * a2 - a3) * u * u + (3 * a1 - a0 - 3 * a2 + a3) * u * u * u);
-    return typeof p1 === 'number' ? f(p0, p1, p2, p3) : [0, 1, 2].map(c => f(p0[c], p1[c], p2[c], p3[c])); };
-  twist(cr(4) * w);
+  // cut. The power comes from the ground up, link after link, each a little later than the one below it:
+  // the legs shift the weight, the hips turn first, the chest follows them, then the shoulder and the arm, and the
+  // wrist with the blade comes through last. So the pelvis is evaluated slightly ahead of the chest and the arm.
+  const a = A.atk; if (!a || a.t >= a.dur || !A.limbs.armR) { A.plantW = 0; return; }
+  a.t += dt; const K = ATTACKS[a.type].k;
+  const at = tt => { let i = 0; while (i < K.length - 2 && tt > K[i + 1][0]) i++;
+    const k0 = K[i], k1 = K[i + 1], u = clamp((tt - k0[0]) / (k1[0] - k0[0]), 0, 1), s = u * u * (3 - 2 * u);
+    // entering and leaving the cut the pose is blended with the body's own; between the keys everything follows one
+    // smooth curve through them (Catmull-Rom), so the arm sweeps through without stopping anywhere
+    const w = k0[1] && k1[1] ? 1 : k1[1] ? s : 1 - s, on = j => K[clamp(j, 1, K.length - 2)];
+    const cr = j => { if (!k0[1] || !k1[1]) return (k1[1] ? k1 : k0)[j];
+      const p0 = on(i - 1)[j], p1 = k0[j], p2 = k1[j], p3 = on(i + 2)[j], f = (a0, a1, a2, a3) => 0.5 * (2 * a1 + (a2 - a0) * u + (2 * a0 - 5 * a1 + 4 * a2 - a3) * u * u + (3 * a1 - a0 - 3 * a2 + a3) * u * u * u);
+      return typeof p1 === 'number' ? f(p0, p1, p2, p3) : [0, 1, 2].map(c => f(p0[c], p1[c], p2[c], p3[c])); };
+    return { w, cr }; };
+  const now = at(a.t), lead = at(Math.min(a.dur, a.t + 0.055)), w = now.w, cr = now.cr;
+  const stl = 1 - (A.wWalk || 0) * 0.6, yawN = clamp(cr(4) / 0.85, -1, 1), hipYaw = lead.cr(4) * lead.w * 0.42 * stl;
+  // feet stay where they were while the pelvis turns over them (footIK re-plants them): the legs take the twist
+  A.plant = {}; for (const s of ['L', 'R']) { const fb = H.bone('foot.' + s); if (fb) A.plant[s] = P(fb); }
+  A.plantW = w * (1 - (A.wWalk || 0));
+  { const rb = H.bone('root'); if (rb) rotateWorld(rb, new THREE.Quaternion().setFromAxisAngle(Y, -hipYaw)); }
+  // weight: back and onto the rear side while winding up, then driven forward and across; the knees give as the cut lands
+  const through = 1 - yawN * yawN;
+  H.root.position.x -= 0.05 * yawN * w * stl; H.root.position.z += (0.25 * cr(6) + 0.045 * through) * w * stl; H.root.position.y -= (0.015 + 0.035 * through) * w;
+  H.root.updateMatrixWorld(true);
+  twist(cr(4) * w * 0.75);
   { const Zb = new THREE.Vector3(0, 0, 1).applyQuaternion(gq), Xb = new THREE.Vector3(1, 0, 0).applyQuaternion(gq), roll = cr(5) * w, pitch = cr(6) * w;
     for (const n of ['spine05', 'spine03']) { const b = H.bone(n); if (b) { rotateWorld(b, new THREE.Quaternion().setFromAxisAngle(Zb, roll * 0.5)); rotateWorld(b, new THREE.Quaternion().setFromAxisAngle(Xb, pitch * 0.5)); } } }
   aim('upperarm01.R', 'lowerarm01.R', B(cr(1)), w); aim('lowerarm01.R', 'wrist.R', B(cr(2)), w); blade(B(cr(3)), w);
+  // the free arm balances the sword arm: forward while the sword is drawn back, thrown back and out as the cut goes through
+  if (A.limbs.armL && (A.char.cfgWeapon || 'none') !== 'shield') { aim('upperarm01.L', 'lowerarm01.L', B([-0.4, -0.78, 0.05 + 0.45 * yawN]), 0.7 * w); aim('lowerarm01.L', 'wrist.L', B([-0.15, -0.55, 0.6 + 0.3 * yawN]), 0.6 * w); }
   // while the edge is travelling it leaves a streak in the air
   const g = A.char.group.userData.weapon, C = ATTACKS[a.type].cut;
   if (g && a.t > C[0] && a.t < C[1]) { g.updateWorldMatrix(true, false); (A.trail = A.trail || []).push(new THREE.Vector3(0, 0.8, 0).applyMatrix4(g.matrixWorld), new THREE.Vector3(0, 0.45, 0).applyMatrix4(g.matrixWorld)); }
@@ -626,7 +653,7 @@ function relaxArms(A) {
     const sign = s === 'L' ? 1 : -1, o = d.x * sign, r = Math.hypot(o, d.y), abd = Math.atan2(o, -d.y);
     const oneLeg = A.limbs.legL !== A.limbs.legR;
     if (!oneLeg && abd <= ARM_MAX) continue;
-    const a2 = oneLeg ? Math.max(abd, 0.55 + 0.12 * Math.sin(A.hopPh)) : ARM_MAX + (abd - ARM_MAX) * ARM_SOFT;   // one leg: arms out for balance
+    const a2 = oneLeg ? Math.max(abd, 0.55 + 0.12 * Math.sin(A.hopPh)) : (ARM_MAX + 0.13 * (A.wRun || 0)) + Math.max(0, abd - ARM_MAX - 0.13 * (A.wRun || 0)) * ARM_SOFT;   // one leg: arms out for balance
     const d2 = new THREE.Vector3(Math.sin(a2) * r * sign, -Math.cos(a2) * r, d.z).normalize().applyQuaternion(gq);
     rotateWorld(up, new THREE.Quaternion().setFromUnitVectors(dW, d2));
   }
@@ -658,6 +685,7 @@ function footIK(A, dt) {
     const dxl = F.pos.x - ap.x, dzl = F.pos.z - ap.z;
     if (F.rel > 0 && dxl * dxl + dzl * dzl > 0.16 * 0.16) { F.locked = false; F.rel = 0; }
     const target = ap.clone();
+    if ((A.plantW || 0) > 0.01 && A.plant && A.plant[s]) { target.x += (A.plant[s].x - target.x) * A.plantW; target.z += (A.plant[s].z - target.z) * A.plantW; }
     if (F.rel > 0) { target.x += dxl * F.rel; target.z += dzl * F.rel; }
     else if (A.narrow > 0) {
       // feet under the hips: the mocap stance is wider than a relaxed one (not while side-stepping)
@@ -672,8 +700,9 @@ function footIK(A, dt) {
     if (oneLeg) {
       // hopping: the foot stays under the body, swings forward in the air and back on the ground
       const gq = groupQ(A), sg = s === 'L' ? 1 : -1, mv = A.vel > 0.15 ? 1 : 0;
-      const w = new THREE.Vector3(sg * 0.03, 0, -0.13 * Math.cos(A.hopPh) * mv).applyQuaternion(gq).add(g.position);
-      target.set(w.x, groundAnkle + 0.55 * (A.hopH || 0) * scaleY, w.z); F.locked = false; F.rel = 0;
+      const w = new THREE.Vector3(sg * 0.03, 0, -(A.hopStride || 0.13) * Math.cos(A.hopPh) * mv).applyQuaternion(gq).add(g.position);
+      // in the air the foot is pulled up under the body (more than the body rises), on the ground it stays down
+      target.set(w.x, groundAnkle + (0.5 * (A.hopH || 0) + 0.14 * Math.max(0, Math.sin(A.hopPh)) * mv) * scaleY, w.z); F.locked = false; F.rel = 0;
     }
     target.y = Math.max(target.y, groundAnkle);
     const l1 = kp.distanceTo(hp), l2 = ap.distanceTo(kp), over = target.distanceTo(hp) - (l1 + l2) * 0.99;

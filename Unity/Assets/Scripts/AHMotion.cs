@@ -177,7 +177,7 @@ namespace AsciiHero
                 if (lockPos.HasValue) spd = Mathf.Min(spd, 1.7f);
                 if (guardHeld) spd = Mathf.Min(spd, 1.1f);          // behind the shield you only walk
                 int legsC = Legs, armsC = (limbs[1] ? 1 : 0) + (limbs[2] ? 1 : 0);
-                if (legsC == 1) spd = Mathf.Min(spd, 1.15f);                                        // hopping on one leg
+                if (legsC == 1) spd = Mathf.Min(spd, 1.9f);                                        // hopping on one leg
                 if (legsC == 0) spd = Mathf.Min(spd, armsC == 2 ? 0.5f : armsC == 1 ? 0.35f : 0.18f);   // crawling
             }
             if (!dir.HasValue) { sprintT = Mathf.Max(0f, sprintT - dt * 4); sprint = Smooth01(0.7f, 1.7f, sprintT); }
@@ -476,12 +476,25 @@ namespace AsciiHero
             Vector3 fwd = ch.go.transform.rotation * Vector3.forward;
             sp.rotation = Quaternion.AngleAxis((limbs[1] ? 0.08f : -0.08f) * Mathf.Rad2Deg, fwd) * sp.rotation;
         }
+        // A real hop cycle: on the ground the leg sinks and loads (the foot travels from front to back under the body), it
+        // drives off with the body thrown forward, in the air the leg is pulled up and swung far forward and the arms
+        // lift, then it reaches out, lands ahead of the body and gives again.
+        float hopStride = 0.13f;
         void HopBody(float dt)
         {
             bool moving = vel > 0.15f; float side = limbs[3] ? -1f : 1f;      // Unity: left is -X
-            hopPh = moving ? (hopPh + dt * Mathf.PI * 2 * (1.7f + 0.5f * vel)) % (Mathf.PI * 2) : 0;
-            hopH = moving ? 0.10f * Mathf.Max(0, Mathf.Sin(hopPh)) : 0;
-            var p = H.root.localPosition; p.y += hopH; p.x += side * 0.05f; H.root.localPosition = p;   // weight over the remaining foot
+            hopPh = moving ? (hopPh + dt * Mathf.PI * 2 * (1.5f + 0.5f * vel)) % (Mathf.PI * 2) : 0;      // 0..pi in the air, pi..2pi on the ground
+            float sn = Mathf.Sin(hopPh), cs = Mathf.Cos(hopPh), kk = moving ? Mathf.Clamp(vel / 1.2f, 0.4f, 1f) : 0;
+            hopH = moving && sn > 0 ? 0.19f * kk * sn : 0;
+            float dipH = moving && sn < 0 ? 0.075f * kk * -sn : 0;
+            hopStride = 0.2f + 0.11f * vel;
+            var p = H.root.localPosition; p.y += hopH - dipH; p.x += side * 0.05f; H.root.localPosition = p;   // weight over the remaining foot
+            if (!moving) return;
+            Vector3 X = ch.go.transform.rotation * Vector3.right;
+            float lean = (0.07f + 0.12f * cs) * kk;              // thrown forward at take-off, upright (a touch back) on landing
+            Rot("spine05", X, lean * 0.5f); Rot("spine03", X, lean * 0.5f);
+            float lift = Mathf.Max(0, sn) * kk;                  // the arms swing up with the jump and drop to load the next one
+            for (int si = 0; si < 2; si++) if (limbs[1 + si]) { Rot("upperarm01." + SIDES[si], X, -0.55f * lift + 0.2f * Mathf.Max(0, -sn) * kk); Rot("lowerarm01." + SIDES[si], X, -0.4f * lift); }
         }
         void Crawl(float dt)
         {
@@ -595,7 +608,7 @@ namespace AsciiHero
                     float u = 0.5f + 0.5f * sw;                              // 0 = arm back, 1 = arm in front
                     // behind: the arm is driven well back and opens almost straight (only a slight bend in the elbow), away from the ribs
                     float a = -0.95f + 1.05f * u, b2 = -0.7f + 3.1f * u;     // upper arm and forearm angles from straight down, forwards
-                    SprintPart("upperarm01." + s, "lowerarm01." + s, gq * new Vector3(sg * (0.2f - 0.1f * u), -Mathf.Cos(a), Mathf.Sin(a)), aw);
+                    SprintPart("upperarm01." + s, "lowerarm01." + s, gq * new Vector3(sg * (0.3f - 0.07f * u), -Mathf.Cos(a), Mathf.Sin(a)), aw);   // elbows lifted 11-15 degrees off the trunk, travelling on a diagonal
                     SprintPart("lowerarm01." + s, "wrist." + s, gq * new Vector3(sg * (0.12f - 0.62f * u), -Mathf.Cos(b2), Mathf.Sin(b2)), aw);
                 }
             }
@@ -711,25 +724,47 @@ namespace AsciiHero
                 }
                 else if (limbs[2]) { AimW("upperarm01.R", "lowerarm01.R", gq * V(0.15f, -0.55f, 0.82f), gw); AimW("lowerarm01.R", "wrist.R", gq * V(-0.5f, 0.45f, 0.74f), gw); BladeW(gq * V(-0.6f, 0.78f, 0.15f), gw); }
             }
-            // cut
-            if (!Attacking || !limbs[2]) return;
-            atkT += dt; var K = ATTACKS[atkType]; int i = 0; while (i < K.Length - 2 && atkT > K[i + 1].t) i++;
-            AtkKey k0 = K[i], k1 = K[i + 1]; float u = Mathf.Clamp01((atkT - k0.t) / (k1.t - k0.t)), s = u * u * (3 - 2 * u);
-            // entering and leaving the cut the pose is blended with the body's own; between the keys the arm follows one
-            // smooth curve through them (Catmull-Rom), so it sweeps through without stopping anywhere
-            float w = k0.on && k1.on ? 1 : k1.on ? s : 1 - s;
-            Vector3 ua, fa, bl; float yaw, roll, pitch;
+            // cut. The power comes from the ground up, link after link, each a little later than the one below it:
+            // the legs shift the weight, the hips turn first, the chest follows them, then the shoulder and the arm, and
+            // the wrist with the blade comes through last. So the pelvis is evaluated slightly ahead of the chest and arm.
+            if (!Attacking || !limbs[2]) { plantW = 0; return; }
+            atkT += dt; var K = ATTACKS[atkType];
+            AtkPose now = EvalAttack(K, atkT), lead = EvalAttack(K, Mathf.Min(atkDur, atkT + 0.055f));
+            float w = now.w, stl = 1 - wWalk * 0.6f, yawN = Mathf.Clamp(now.yaw / 0.85f, -1f, 1f), hipYaw = lead.yaw * lead.w * 0.42f * stl;
+            // feet stay where they were while the pelvis turns over them (FootIK re-plants them): the legs take the twist
+            for (int si = 0; si < 2; si++) { var fb = H.Bone("foot." + SIDES[si]); if (fb != null) plant[si] = fb.position; }
+            plantW = w * (1 - wWalk);
+            Rot("root", Vector3.up, hipYaw);
+            // weight: back and onto the rear side while winding up, then driven forward and across; the knees give as the cut lands
+            float through = 1 - yawN * yawN;
+            var rpos = H.root.localPosition;
+            rpos.x += 0.05f * yawN * w * stl; rpos.z += (0.25f * now.pitch + 0.045f * through) * w * stl; rpos.y -= (0.015f + 0.035f * through) * w;
+            H.root.localPosition = rpos;
+            TwistRight(now.yaw * w * 0.75f);
+            { Vector3 fz = gq * Vector3.forward, fx = gq * Vector3.right; foreach (var n in new[] { "spine05", "spine03" }) { Rot(n, fz, -now.roll * w * 0.5f); Rot(n, fx, now.pitch * w * 0.5f); } }
+            AimW("upperarm01.R", "lowerarm01.R", gq * now.ua, w); AimW("lowerarm01.R", "wrist.R", gq * now.fa, w); BladeW(gq * now.bl, w);
+            // the free arm balances the sword arm: forward while the sword is drawn back, thrown back and out as the cut goes through
+            if (limbs[1] && ch.cfg.weapon != "shield") { AimW("upperarm01.L", "lowerarm01.L", gq * V(-0.4f, -0.78f, 0.05f + 0.45f * yawN), 0.7f * w); AimW("lowerarm01.L", "wrist.L", gq * V(-0.15f, -0.55f, 0.6f + 0.3f * yawN), 0.6f * w); }
+            // while the edge is travelling it leaves a streak in the air
+            if (ch.weapon != null && atkT > CUT_FROM && atkT < CUT_TO) { trail.Add(ch.weapon.TransformPoint(0, 0.8f, 0)); trail.Add(ch.weapon.TransformPoint(0, 0.45f, 0)); }
+        }
+        struct AtkPose { public float w, yaw, roll, pitch; public Vector3 ua, fa, bl; }
+        readonly Vector3[] plant = new Vector3[2]; float plantW;
+        // entering and leaving the cut the pose is blended with the body's own (w); between the keys everything follows
+        // one smooth curve through them (Catmull-Rom), so the arm sweeps through without stopping anywhere
+        static AtkPose EvalAttack(AtkKey[] K, float t)
+        {
+            int i = 0; while (i < K.Length - 2 && t > K[i + 1].t) i++;
+            AtkKey k0 = K[i], k1 = K[i + 1]; float u = Mathf.Clamp01((t - k0.t) / (k1.t - k0.t)), s = u * u * (3 - 2 * u);
+            var r = new AtkPose { w = k0.on && k1.on ? 1 : k1.on ? s : 1 - s };
             if (k0.on && k1.on)
             {
                 AtkKey p0 = K[Mathf.Clamp(i - 1, 1, K.Length - 2)], p3 = K[Mathf.Clamp(i + 2, 1, K.Length - 2)];
-                ua = CR(p0.ua, k0.ua, k1.ua, p3.ua, u); fa = CR(p0.fa, k0.fa, k1.fa, p3.fa, u); bl = CR(p0.bl, k0.bl, k1.bl, p3.bl, u); yaw = CR(p0.yaw, k0.yaw, k1.yaw, p3.yaw, u); roll = CR(p0.roll, k0.roll, k1.roll, p3.roll, u); pitch = CR(p0.pitch, k0.pitch, k1.pitch, p3.pitch, u);
+                r.ua = CR(p0.ua, k0.ua, k1.ua, p3.ua, u); r.fa = CR(p0.fa, k0.fa, k1.fa, p3.fa, u); r.bl = CR(p0.bl, k0.bl, k1.bl, p3.bl, u);
+                r.yaw = CR(p0.yaw, k0.yaw, k1.yaw, p3.yaw, u); r.roll = CR(p0.roll, k0.roll, k1.roll, p3.roll, u); r.pitch = CR(p0.pitch, k0.pitch, k1.pitch, p3.pitch, u);
             }
-            else { AtkKey e = k1.on ? k1 : k0; ua = e.ua; fa = e.fa; bl = e.bl; yaw = e.yaw; roll = e.roll; pitch = e.pitch; }
-            TwistRight(yaw * w);
-            { Vector3 fz = gq * Vector3.forward, fx = gq * Vector3.right; foreach (var n in new[] { "spine05", "spine03" }) { Rot(n, fz, -roll * w * 0.5f); Rot(n, fx, pitch * w * 0.5f); } }
-            AimW("upperarm01.R", "lowerarm01.R", gq * ua, w); AimW("lowerarm01.R", "wrist.R", gq * fa, w); BladeW(gq * bl, w);
-            // while the edge is travelling it leaves a streak in the air
-            if (ch.weapon != null && atkT > CUT_FROM && atkT < CUT_TO) { trail.Add(ch.weapon.TransformPoint(0, 0.8f, 0)); trail.Add(ch.weapon.TransformPoint(0, 0.45f, 0)); }
+            else { AtkKey e = k1.on ? k1 : k0; r.ua = e.ua; r.fa = e.fa; r.bl = e.bl; r.yaw = e.yaw; r.roll = e.roll; r.pitch = e.pitch; }
+            return r;
         }
         /// moves the simulated position (dash) without touching the velocity
         public void Teleport(float dx, float dz, float newHeading) { S.x += dx; S.z += dz; S.h = newHeading; heading = newHeading; }
@@ -819,7 +854,7 @@ namespace AsciiHero
                 float o = d.x * sign, r = Mathf.Sqrt(o * o + d.y * d.y), abd = Mathf.Atan2(o, -d.y);
                 bool oneLeg = limbs[3] != limbs[4];
                 if (!oneLeg && abd <= ARM_MAX) continue;
-                float a2 = oneLeg ? Mathf.Max(abd, 0.55f + 0.12f * Mathf.Sin(hopPh)) : ARM_MAX + (abd - ARM_MAX) * ARM_SOFT;   // one leg: arms out for balance
+                float a2 = oneLeg ? Mathf.Max(abd, 0.55f + 0.12f * Mathf.Sin(hopPh)) : (ARM_MAX + 0.13f * wRun) + Mathf.Max(0, abd - ARM_MAX - 0.13f * wRun) * ARM_SOFT;   // one leg: arms out for balance
                 Vector3 d2 = gq * new Vector3(Mathf.Sin(a2) * r * sign, -Mathf.Cos(a2) * r, d.z).normalized;
                 up.rotation = Quaternion.FromToRotation(dW, d2) * up.rotation;
             }
@@ -852,6 +887,7 @@ namespace AsciiHero
                 float dxl = F.pos.x - ap.x, dzl = F.pos.z - ap.z;
                 if (F.rel > 0 && dxl * dxl + dzl * dzl > 0.16f * 0.16f) { F.locked = false; F.rel = 0; }
                 Vector3 target = ap;
+                if (plantW > 0.01f) { target.x += (plant[si].x - target.x) * plantW; target.z += (plant[si].z - target.z) * plantW; }
                 if (F.rel > 0) { target.x += dxl * F.rel; target.z += dzl * F.rel; }
                 else if (narrow > 0)
                 {
@@ -868,8 +904,8 @@ namespace AsciiHero
                 {
                     // hopping: the foot stays under the body, swings forward in the air and back on the ground
                     Transform g = ch.go.transform; float sg = si == 0 ? -1f : 1f, mv = vel > 0.15f ? 1f : 0f;
-                    Vector3 w = g.rotation * new Vector3(sg * 0.03f, 0, -0.13f * Mathf.Cos(hopPh) * mv) + g.position;
-                    target = new Vector3(w.x, groundAnkle + 0.55f * hopH * scaleY, w.z); F.locked = false; F.rel = 0;
+                    Vector3 w = g.rotation * new Vector3(sg * 0.03f, 0, -hopStride * Mathf.Cos(hopPh) * mv) + g.position;
+                    target = new Vector3(w.x, groundAnkle + (0.5f * hopH + 0.14f * Mathf.Max(0, Mathf.Sin(hopPh)) * mv) * scaleY, w.z);   // in the air the foot is pulled up under the body F.locked = false; F.rel = 0;
                 }
                 target.y = Mathf.Max(target.y, groundAnkle);
                 float l1 = Vector3.Distance(kp, hp), l2 = Vector3.Distance(ap, kp), over = Vector3.Distance(target, hp) - (l1 + l2) * 0.99f;
