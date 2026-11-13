@@ -94,3 +94,11 @@ jobs:
             --target "$GITHUB_SHA" --prerelease \
             --title "Последняя сборка APK" \
             --notes "Сборка №${GITHUB_RUN_NUMBER} из ветки ${GITHUB_REF_NAME}, коммит ${GITHUB_SHA::7}. Файл заменяется при каждой новой сборке."
+
+      # the Unity image and build output fill the runner's disk; without this the cache save at the end fails
+      - name: Free space before saving the cache
+        if: always()
+        run: |
+          docker system prune -af || true
+          sudo rm -rf build || true
+          df -h /
