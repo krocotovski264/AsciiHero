@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.16 · Unity";
+        public const string VERSION = "beta 0.17 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -243,38 +243,90 @@ namespace AsciiHero
             else ShowToast("Урон −" + pct + "% · целостность " + hp + "%" + (lost.Length > 0 ? "\nОторвано: " + lost : ""));
         }
         // a torn-off limb flies off, tumbles, lies for a moment and burns away
-        class Debris { public GameObject go; public Vector3 v, w; public float r, t; public List<Renderer> glyphs = new List<Renderer>(); public MaterialPropertyBlock mpb = new MaterialPropertyBlock(); }
         readonly List<Debris> debris = new List<Debris>();
-        static readonly string[] DEBRIS_BONE = { "head", "lowerarm01.L", "lowerarm01.R", "lowerleg01.L", "lowerleg01.R" };
+        // a torn-off limb bursts out of the body in a cloud of smoke and comes apart at the joints: every piece flies
+        // its own way, tumbles, bounces, lies for a moment and burns away
+        class Debris { public GameObject go; public Vector3 v, w; public float r, t, trail = 0.12f, life = 5f; public bool rest; public List<Renderer> glyphs = new List<Renderer>(); public MaterialPropertyBlock mpb = new MaterialPropertyBlock(); }
+        class Puff { public GameObject go; public Vector3 v; public float t, life; public List<Renderer> glyphs = new List<Renderer>(); public MaterialPropertyBlock mpb = new MaterialPropertyBlock(); }
+        readonly List<Puff> puffs = new List<Puff>();
+        struct Seg { public string a, b; public float r; public int kind; public Seg(string a, string b, float r, int kind) { this.a = a; this.b = b; this.r = r; this.kind = kind; } }
+        static Seg[] ArmSegs(string s) { return new[] { new Seg("upperarm01." + s, "lowerarm01." + s, 0.05f, 0), new Seg("lowerarm01." + s, "wrist." + s, 0.042f, 0), new Seg("wrist." + s, null, 0.03f, 2) }; }
+        static Seg[] LegSegs(string s) { return new[] { new Seg("upperleg01." + s, "lowerleg01." + s, 0.078f, 0), new Seg("lowerleg01." + s, "foot." + s, 0.058f, 0), new Seg("foot." + s, null, 0.04f, 3) }; }
+        static readonly Seg[][] DEBRIS_SEGS = { new[] { new Seg("head", null, 0.13f, 1) }, ArmSegs("L"), ArmSegs("R"), LegSegs("L"), LegSegs("R") };
+        static void GlyphsOf(GameObject go, List<Renderer> into) { foreach (var r in go.GetComponentsInChildren<Renderer>(true)) if (r.gameObject.layer == GlyphLayer.LAYER) into.Add(r); }
+        void SpawnPuff(Vector3 p, float size, Vector3 v)
+        {
+            if (puffs.Count > 40) return;
+            var go = MeshGen.Obj(MeshGen.Sphere(size, 10, 7), actorMats["SHADOW"], null, p, Quaternion.identity, false, "Puff");
+            GlyphLayer.Build(go);
+            var f = new Puff { go = go, v = v, life = 0.9f + size * 4 }; GlyphsOf(go, f.glyphs);
+            f.mpb.SetFloat("_GlyphPuff", 0.001f); foreach (var r in f.glyphs) if (r != null) r.SetPropertyBlock(f.mpb);
+            puffs.Add(f);
+        }
         void SpawnDebris(int l)
         {
             if (hero == null || !world) return;
-            var b = hero.human.Bone(DEBRIS_BONE[l]); if (b == null) return;
-            Vector3 p = b.position;
-            Mesh m = l == 0 ? MeshGen.Sphere(0.13f, 10, 8) : l <= 2 ? MeshGen.Cylinder(0.04f, 0.05f, 0.6f, 8) : MeshGen.Cylinder(0.055f, 0.075f, 0.85f, 8);
-            var go = MeshGen.Obj(m, actorMats["PLATE"], null, p, Random.rotation, true, "Debris");
-            GlyphLayer.Build(go);
-            var d = new Debris { go = go, r = l == 0 ? 0.13f : 0.06f };
-            foreach (var r in go.GetComponentsInChildren<Renderer>(true)) if (r.gameObject.layer == GlyphLayer.LAYER) d.glyphs.Add(r);
-            Vector3 o = new Vector3(p.x - pos.x, 0, p.z - pos.z); if (o.sqrMagnitude < 1e-4f) o = new Vector3(Random.value - 0.5f, 0, Random.value - 0.5f); o.Normalize();
-            d.v = new Vector3(o.x * 1.6f, 2.6f + Random.value, o.z * 1.6f); d.w = new Vector3(Random.Range(-230f, 230f), Random.Range(0f, 230f), Random.Range(-230f, 230f));
-            debris.Add(d);
+            var segs = DEBRIS_SEGS[l];
+            var b0 = hero.human.Bone(segs[0].a); if (b0 == null) return;
+            Vector3 p0 = b0.position, hv = player != null ? player.Velocity : Vector3.zero;
+            // outwards from the body
+            Vector3 o = new Vector3(p0.x - pos.x, 0, p0.z - pos.z); if (o.sqrMagnitude < 4e-3f) o = new Vector3(Random.value - 0.5f, 0, Random.value - 0.5f + 0.01f); o.Normalize();
+            SpawnPuff(p0, l == 0 ? 0.11f : l <= 2 ? 0.085f : 0.11f, hv * 0.5f + new Vector3(o.x * 0.5f, 0.5f, o.z * 0.5f));
+            foreach (var sg in segs)
+            {
+                var ba = hero.human.Bone(sg.a); if (ba == null) continue;
+                var bb = sg.b != null ? hero.human.Bone(sg.b) : null;
+                Vector3 c = ba.position; Quaternion q = Quaternion.identity; Mesh m;
+                if (bb != null)
+                {
+                    Vector3 dv = bb.position - ba.position; float len = Mathf.Max(0.08f, dv.magnitude);
+                    m = MeshGen.Cylinder(sg.r * 0.82f, sg.r, len, 8); c += dv * 0.5f;
+                    if (dv.sqrMagnitude > 1e-8f) q = Quaternion.FromToRotation(Vector3.down, dv.normalized);
+                }
+                else if (sg.kind == 1) m = MeshGen.Sphere(0.13f, 10, 8);
+                else if (sg.kind == 2) { m = MeshGen.Box(0.085f, 0.16f, 0.04f); c.y -= 0.07f; }
+                else { m = MeshGen.Box(0.095f, 0.075f, 0.25f); c.y -= 0.04f; }
+                var go = MeshGen.Obj(m, actorMats["PLATE"], null, c, q, true, "Debris");
+                GlyphLayer.Build(go);
+                var d = new Debris { go = go, r = sg.r, life = 5f + Random.value * 0.8f }; GlyphsOf(go, d.glyphs);
+                // each piece gets its own direction (a wide fan around "outwards"), speed and spin
+                float ang = (Random.value - 0.5f) * 2.2f, cs = Mathf.Cos(ang), sn = Mathf.Sin(ang), sp = 1.2f + Random.value * 2.2f;
+                d.v = new Vector3((o.x * cs - o.z * sn) * sp, 2.2f + Random.value * 2.6f + (sg.kind == 1 ? 1.2f : 0f), (o.x * sn + o.z * cs) * sp) + hv * 0.6f;
+                d.w = Random.onUnitSphere * (5f + Random.value * 11f);        // rad/s around a random axis
+                debris.Add(d);
+            }
         }
         void UpdateDebris(float dt)
         {
             for (int i = debris.Count - 1; i >= 0; i--)
             {
                 var d = debris[i]; d.t += dt; var tr = d.go.transform;
-                d.v.y -= 9.8f * dt; tr.position += d.v * dt; tr.Rotate(d.w * dt, Space.World);
-                if (tr.position.y < d.r)
+                if (!d.rest)
                 {
-                    var q = tr.position; q.y = d.r; tr.position = q;
-                    if (d.v.y < 0) d.v.y *= -0.35f; d.v.x *= 0.6f; d.v.z *= 0.6f; d.w *= 0.5f;
-                    if (Mathf.Abs(d.v.y) < 0.4f) { d.v = Vector3.zero; d.w = Vector3.zero; }
+                    d.v.y -= 9.8f * dt; d.v *= 1 - 0.25f * dt; tr.position += d.v * dt;
+                    float wl = d.w.magnitude; if (wl > 1e-3f) tr.rotation = Quaternion.AngleAxis(wl * dt * Mathf.Rad2Deg, d.w / wl) * tr.rotation;
+                    if (tr.position.y < d.r)
+                    {
+                        var q = tr.position; q.y = d.r; tr.position = q;
+                        if (d.v.y < 0) d.v.y *= -0.38f; d.v.x *= 0.62f; d.v.z *= 0.62f;
+                        // on the ground the spin follows the roll and dies out
+                        float rr = Mathf.Max(d.r, 0.04f); d.w = new Vector3(d.v.z / rr, d.w.y * 0.4f, -d.v.x / rr) * 0.5f;
+                        if (Mathf.Abs(d.v.y) < 0.5f && new Vector2(d.v.x, d.v.z).magnitude < 0.25f) { d.rest = true; d.v = Vector3.zero; }
+                    }
+                    // smoke keeps pouring out of the piece while it flies
+                    d.trail -= dt; if (d.trail <= 0 && d.t < 0.75f) { d.trail = 0.22f; SpawnPuff(tr.position, 0.05f, d.v * 0.25f); }
                 }
-                d.mpb.SetFloat("_GlyphBurn", Mathf.Clamp01((d.t - 1.6f) / 3.2f));     // lies for a moment, then burns for about three seconds
+                d.mpb.SetFloat("_GlyphBurn", Mathf.Clamp01((d.t - 1.6f) / (d.life - 2f)));     // lies for a moment, then burns for about three seconds
                 foreach (var r in d.glyphs) if (r != null) r.SetPropertyBlock(d.mpb);
-                if (d.t > 5.2f) { Destroy(d.go); debris.RemoveAt(i); }
+                if (d.t > d.life) { Destroy(d.go); debris.RemoveAt(i); }
+            }
+            for (int i = puffs.Count - 1; i >= 0; i--)
+            {
+                var f = puffs[i]; f.t += dt; f.v *= Mathf.Max(0f, 1 - 2.5f * dt); f.go.transform.position += f.v * dt;
+                float u = f.t / f.life;
+                f.mpb.SetFloat("_GlyphPuff", Mathf.Max(0.001f, 1 - (1 - u) * (1 - u)));          // fast at first, then hanging in the air
+                foreach (var r in f.glyphs) if (r != null) r.SetPropertyBlock(f.mpb);
+                if (u >= 1) { Destroy(f.go); puffs.RemoveAt(i); }
             }
         }
         void RestoreBody() { hp = 100; for (int l = 0; l < 5; l++) limbs[l] = true; if (player != null) player.SetLimbs(limbs); }
@@ -562,6 +614,7 @@ namespace AsciiHero
             if (respawnT > 0) { respawnT -= dt; if (respawnT <= 0) { RestoreBody(); pos = loc.spawn; player.ResetSim(); } }
             // grass: the hero and a point trailing behind him push the blades aside
             heroTrail = Vector3.Lerp(heroTrail, pos, Mathf.Min(1, dt * 2.2f));
+            Shader.SetGlobalVector("_AsciiHeroVel", player != null ? (Vector4)player.Velocity : Vector4.zero);
             Shader.SetGlobalVector("_AsciiHeroA", new Vector4(pos.x, 0, pos.z, 0)); Shader.SetGlobalVector("_AsciiHeroB", new Vector4(heroTrail.x, 0, heroTrail.z, 0));
             labelT -= dt; if (labelT <= 0) { labelT = 0.25f; animLabel = player.label; }
             if (loc == tavern)

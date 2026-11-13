@@ -209,28 +209,67 @@ function damage(pct) {
   if (body.hp <= 0) { toast('Доспех разрушен — тень рассеялась'); setTimeout(() => { restoreBody(); if (loc) { pos.copy(loc.spawn); player.sim.init = false; } }, 1800); }
   else toast('Урон −' + pct + '% · целостность ' + body.hp + '%' + (lost.length ? '\nОторвано: ' + lost.join(', ') : ''));
 }
-// a torn-off limb flies off, tumbles, lies for a moment and burns away
-const debris = [];
-const DEBRIS_BONE = { head: 'head', armL: 'lowerarm01.L', armR: 'lowerarm01.R', legL: 'lowerleg01.L', legR: 'lowerleg01.R' };
+// a torn-off limb bursts out of the body in a cloud of smoke and comes apart at the joints: every piece flies its own
+// way, tumbles, bounces, lies for a moment and burns away
+const debris = [], puffs = [];
+const SEG = s => ({
+  arm: [['upperarm01.' + s, 'lowerarm01.' + s, 0.05], ['lowerarm01.' + s, 'wrist.' + s, 0.042], ['wrist.' + s, null, 'hand']],
+  leg: [['upperleg01.' + s, 'lowerleg01.' + s, 0.078], ['lowerleg01.' + s, 'foot.' + s, 0.058], ['foot.' + s, null, 'foot']] });
+const DEBRIS_SEGS = { head: [['head', null, 'head']], armL: SEG('L').arm, armR: SEG('R').arm, legL: SEG('L').leg, legR: SEG('R').leg };
+function spawnPuff(p, size, v) {
+  const puff = { value: 0.001 };
+  const m = new THREE.Mesh(new THREE.SphereGeometry(size, 10, 7), actorMats.SHADOW); m.userData.puff = puff; m.position.copy(p);
+  scene.add(m); buildGlyphLayer(m);
+  puffs.push({ m, puff, t: 0, life: 0.9 + size * 4, v: v ? v.clone() : new THREE.Vector3() });
+}
 function spawnDebris(l) {
   if (!char || mode !== 'world') return;
-  const b = char.human.bone(DEBRIS_BONE[l]); if (!b) return;
-  const p = b.getWorldPosition(new THREE.Vector3()), burn = { value: 0 };
-  const geo = l === 'head' ? new THREE.SphereGeometry(0.13, 10, 8) : l[0] === 'a' ? new THREE.CylinderGeometry(0.05, 0.04, 0.6, 8) : new THREE.CylinderGeometry(0.075, 0.055, 0.85, 8);
-  const m = new THREE.Mesh(geo, actorMats.PLATE); m.userData.burn = burn; m.castShadow = true;
-  m.position.copy(p); m.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
-  const out = new THREE.Vector3(p.x - pos.x, 0, p.z - pos.z); if (out.lengthSq() < 1e-4) out.set(Math.random() - 0.5, 0, Math.random() - 0.5); out.normalize();
-  scene.add(m); buildGlyphLayer(m);
-  debris.push({ m, burn, v: new THREE.Vector3(out.x * 1.6, 2.6 + Math.random(), out.z * 1.6), w: new THREE.Vector3(Math.random() * 8 - 4, Math.random() * 4, Math.random() * 8 - 4), r: l === 'head' ? 0.13 : 0.06, t: 0 });
+  const segs = DEBRIS_SEGS[l], P = n => { const b = n && char.human.bone(n); return b ? b.getWorldPosition(new THREE.Vector3()) : null; };
+  const p0 = P(segs[0][0]); if (!p0) return;
+  const hv = player ? new THREE.Vector3(player.sim.vx, 0, player.sim.vz) : new THREE.Vector3();
+  // outwards from the body; the head goes up and back
+  const out = new THREE.Vector3(p0.x - pos.x, 0, p0.z - pos.z); if (out.lengthSq() < 4e-3) out.set(Math.random() - 0.5, 0, Math.random() - 0.5); out.normalize();
+  spawnPuff(p0, l === 'head' ? 0.11 : l[0] === 'a' ? 0.085 : 0.11, hv.clone().multiplyScalar(0.5).add(new THREE.Vector3(out.x * 0.5, 0.5, out.z * 0.5)));
+  for (const [an, bn, kind] of segs) {
+    const a = P(an), b = P(bn); if (!a) continue;
+    let geo, r, c = a.clone(); const q = new THREE.Quaternion();
+    if (b) { const d = b.clone().sub(a), len = Math.max(0.08, d.length()); geo = new THREE.CylinderGeometry(kind, kind * 0.82, len, 8); r = kind; c.addScaledVector(d, 0.5); q.setFromUnitVectors(new THREE.Vector3(0, -1, 0), d.normalize()); }
+    else if (kind === 'head') { geo = new THREE.SphereGeometry(0.13, 10, 8); r = 0.13; }
+    else if (kind === 'hand') { geo = new THREE.BoxGeometry(0.085, 0.16, 0.04); r = 0.03; c.y -= 0.07; }
+    else { geo = new THREE.BoxGeometry(0.095, 0.075, 0.25); r = 0.04; c.y -= 0.04; }
+    const burn = { value: 0 }, m = new THREE.Mesh(geo, actorMats.PLATE); m.userData.burn = burn; m.castShadow = true;
+    m.position.copy(c); m.quaternion.copy(q);
+    scene.add(m); buildGlyphLayer(m);
+    // each piece gets its own direction (a wide fan around "outwards"), speed and spin
+    const ang = (Math.random() - 0.5) * 2.2, cs = Math.cos(ang), sn = Math.sin(ang), sp = 1.2 + Math.random() * 2.2;
+    const v = new THREE.Vector3((out.x * cs - out.z * sn) * sp, 2.2 + Math.random() * 2.6 + (kind === 'head' ? 1.2 : 0), (out.x * sn + out.z * cs) * sp).add(hv.clone().multiplyScalar(0.6));
+    const w = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().multiplyScalar(5 + Math.random() * 11);
+    debris.push({ m, burn, v, w, r, t: 0, rest: false, trail: 0.12, life: 5 + Math.random() * 0.8 });
+  }
 }
 function updateDebris(dt) {
   for (let i = debris.length - 1; i >= 0; i--) {
     const d = debris[i]; d.t += dt;
-    d.v.y -= 9.8 * dt; d.m.position.addScaledVector(d.v, dt);
-    d.m.rotation.x += d.w.x * dt; d.m.rotation.y += d.w.y * dt; d.m.rotation.z += d.w.z * dt;
-    if (d.m.position.y < d.r) { d.m.position.y = d.r; if (d.v.y < 0) d.v.y *= -0.35; d.v.x *= 0.6; d.v.z *= 0.6; d.w.multiplyScalar(0.5); if (Math.abs(d.v.y) < 0.4) { d.v.set(0, 0, 0); d.w.set(0, 0, 0); } }
-    d.burn.value = Math.max(0, Math.min(1, (d.t - 1.6) / 3.2));          // lies for a moment, then burns for about three seconds
-    if (d.t > 5.2) { scene.remove(d.m); d.m.traverse(o => { if (o.geometry) o.geometry.dispose(); }); debris.splice(i, 1); }
+    if (!d.rest) {
+      d.v.y -= 9.8 * dt; d.v.multiplyScalar(1 - 0.25 * dt); d.m.position.addScaledVector(d.v, dt);
+      const wl = d.w.length(); if (wl > 1e-3) d.m.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(d.w.clone().divideScalar(wl), wl * dt));
+      if (d.m.position.y < d.r) {
+        d.m.position.y = d.r;
+        if (d.v.y < 0) d.v.y *= -0.38; d.v.x *= 0.62; d.v.z *= 0.62;
+        // on the ground the spin follows the roll and dies out
+        d.w.set(d.v.z / Math.max(d.r, 0.04), d.w.y * 0.4, -d.v.x / Math.max(d.r, 0.04)).multiplyScalar(0.5);
+        if (Math.abs(d.v.y) < 0.5 && Math.hypot(d.v.x, d.v.z) < 0.25) { d.rest = true; d.v.set(0, 0, 0); }
+      }
+      // smoke keeps pouring out of the piece while it flies
+      d.trail -= dt; if (d.trail <= 0 && d.t < 0.75) { d.trail = 0.22; spawnPuff(d.m.position, 0.05, d.v.clone().multiplyScalar(0.25)); }
+    }
+    d.burn.value = Math.max(0, Math.min(1, (d.t - 1.6) / (d.life - 2)));          // lies for a moment, then burns for about three seconds
+    if (d.t > d.life) { scene.remove(d.m); d.m.traverse(o => { if (o.geometry) o.geometry.dispose(); }); debris.splice(i, 1); }
+  }
+  for (let i = puffs.length - 1; i >= 0; i--) {
+    const f = puffs[i]; f.t += dt; f.v.multiplyScalar(1 - 2.5 * dt); f.m.position.addScaledVector(f.v, dt);
+    const u = f.t / f.life; f.puff.value = Math.max(0.001, 1 - (1 - u) * (1 - u));        // fast at first, then hanging in the air
+    if (u >= 1) { scene.remove(f.m); f.m.traverse(o => { if (o.geometry) o.geometry.dispose(); }); puffs.splice(i, 1); }
   }
 }
 function restoreBody() { body.hp = 100; for (const l of LIMBS) body.limbs[l] = true; if (player) setLimbs(player, body.limbs); }
@@ -359,6 +398,7 @@ function worldUpdate(dt, t) {
   char.group.position.set(pos.x, 0, pos.z);
   char.group.rotation.y = heading;
   loc.update(t); pickups(); updateDebris(dt);
+  if (player) GLYPH.uVel.value.set(player.sim.vx, 0, player.sim.vz);
   GLYPH.uHeroA.value.set(pos.x, 0, pos.z); GLYPH.uHeroB.value.lerp(GLYPH.uHeroA.value, Math.min(1, dt * 2.2));
   if (moonLight) { moonLight.position.set(pos.x + 1, 7.5, pos.z - 7.5); moonLight.target.position.set(pos.x, 0, pos.z); }
   labelT -= dt; if (labelT <= 0) { labelT = 0.25; $('badge').innerHTML = `<b>${sexName[cfg.sex]}</b> · ${cfg.height} см\nСтик — движение · свайп — камера\nЦелостность: ${body.hp}% · ${player.label}`; }
@@ -377,7 +417,7 @@ function worldUpdate(dt, t) {
 // ---------- loop ----------
 let lastT = performance.now(), fpsAcc = 0, fpsN = 0;
 function frame(now) {
-  const dt = Math.min(0.1, (now - lastT) / 1000); lastT = now;
+  const dt = Math.min(0.1, (now - lastT) / 1000) * (window.__ts === undefined ? 1 : window.__ts); lastT = now;
   if (rebuildPending) { rebuildPending = false; rebuild(); }
   if (!interacting && mode === 'editor') {
     if (Math.abs(vel) > 1e-4) { cam.yaw += vel; vel *= Math.pow(0.04, dt); }
@@ -403,7 +443,7 @@ function frame(now) {
   if (fpsAcc > 1) { $('fps').textContent = Math.round(fpsN / fpsAcc) + ' fps · ' + (GLYPH.uMode.value > 0.5 ? GLYPH_STATS.count + ' симв.' : AR.cols + '×' + AR.rows); fpsAcc = 0; fpsN = 0; }
   requestAnimationFrame(frame);
 }
-window.__dbg = { damage, body, get loc() { return loc; }, cam, setCfg, enterWorld, leaveWorld, stick, get pos() { return pos; }, get player() { return player; }, get auto() { return autoRotate; }, set auto(v) { autoRotate = v; }, AR };
+window.__dbg = { damage, body, debris, puffs, get loc() { return loc; }, cam, setCfg, enterWorld, leaveWorld, stick, get pos() { return pos; }, get player() { return player; }, get auto() { return autoRotate; }, set auto(v) { autoRotate = v; }, AR };
 (async () => {
   try {
     await loadHuman(); await loadMocap();

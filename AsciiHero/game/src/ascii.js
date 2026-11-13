@@ -69,7 +69,7 @@ export const MATERIAL_DEFS = {
 export const GLYPH = {
   tGlyph: { value: null }, uRows: { value: RAMPS.length }, uExposure: { value: 1 }, uMode: { value: 1 },
   tLit: { value: null }, tDepth: { value: null }, uNear: { value: 0.05 }, uFar: { value: 30 }, uDepthRef: { value: 4 }, uEps: { value: 0.008 },
-  uScale: { value: 1.5 }, uMinGlyph: { value: 5 }, uTime: { value: 0 },
+  uScale: { value: 1.5 }, uMinGlyph: { value: 5 }, uTime: { value: 0 }, uVel: { value: new THREE.Vector3() },
   uHeroA: { value: new THREE.Vector3(0, -99, 0) }, uHeroB: { value: new THREE.Vector3(0, -99, 0) },
 };
 let ATLAS = null;
@@ -113,7 +113,8 @@ attribute vec3 anormal;
 attribute float aseed;
 uniform sampler2D tLit, tDepth;
 uniform vec2 uCell;
-uniform float uRow, uActor, uExposure, uNear, uFar, uDepthRef, uEps, uScale, uMinGlyph, uSmoke, uTime, uBurn;
+uniform float uRow, uActor, uExposure, uNear, uFar, uDepthRef, uEps, uScale, uMinGlyph, uSmoke, uTime, uBurn, uPuff;
+uniform vec3 uVel;
 varying vec2 vLocal;
 varying vec3 vCol;
 varying float vGi;
@@ -122,7 +123,11 @@ void main() {
   vec3 objectNormal = anormal;
   // smoke: each glyph of the shadow body keeps drifting off the surface and upwards, fading as it goes
   float ph = fract(uTime * 0.45 + aseed * 7.31);
-  if (uSmoke > 0.5) transformed += objectNormal * (0.004 + 0.05 * ph * ph) + vec3(0.0, 0.11 * ph * ph, 0.0);
+  // a third of the glyphs are long wisps: they rise much higher and trail behind the moving body
+  float wisp = step(0.62, fract(aseed * 13.7));
+  if (uSmoke > 0.5) transformed += objectNormal * (0.004 + (0.07 + 0.09 * wisp) * ph * ph) + vec3(0.0, (0.15 + 0.4 * wisp) * ph * ph, 0.0);
+  // puff (a burst of smoke where a limb is torn off): the glyphs fly apart from the centre, rise and thin out
+  if (uPuff > 0.0) transformed += objectNormal * uPuff * (0.18 + 0.5 * aseed) + vec3(0.0, uPuff * uPuff * (0.15 + 0.5 * fract(aseed * 5.3)), 0.0);
   // burning (torn-off limbs): glyphs turn to embers one by one, float up and go out
   float ember = uBurn > 0.0 ? clamp((uBurn * 1.3 - aseed) / 0.3, 0.0, 1.0) : 0.0;
   #include <skinbase_vertex>
@@ -130,6 +135,7 @@ void main() {
   #include <skinning_vertex>
   bool gone = length(objectNormal) < 0.3;      // torn-off limb: its bones are scaled to nothing
   vec4 mv = modelViewMatrix * vec4(transformed, 1.0);
+  if (uSmoke > 0.5 && uPuff <= 0.0) mv.xyz -= (viewMatrix * vec4(uVel, 0.0)).xyz * (0.05 + 0.2 * wisp) * ph * ph;
   vec3 nV = normalize(normalMatrix * objectNormal);
   vec3 toCam = normalize(-mv.xyz);
   vec4 clip = projectionMatrix * mv;
@@ -138,7 +144,7 @@ void main() {
   float sceneZ = -perspectiveDepthToViewZ(texture2D(tDepth, suv).x, uNear, uFar);
   float myZ = -mv.z;
   mv.y += ember * ember * 0.35;
-  bool vis = !gone && ember < 0.999 && dot(nV, toCam) > -0.05 - ember && myZ <= sceneZ + uEps + 0.002 * myZ && all(greaterThanEqual(suv, vec2(0.0))) && all(lessThanEqual(suv, vec2(1.0)));
+  bool vis = !gone && ember < 0.999 && dot(nV, toCam) > -0.05 - ember - uPuff * 4.0 && myZ <= sceneZ + uEps + 0.002 * myZ && all(greaterThanEqual(suv, vec2(0.0))) && all(lessThanEqual(suv, vec2(1.0)));
   vec3 col = pow(max(texture2D(tLit, suv).rgb, 0.0), vec3(1.0 / 2.2));
   float lum = dot(col, vec3(0.299, 0.587, 0.114));
   float depthK = clamp(1.0 - (myZ - uDepthRef) * 0.09, 0.5, 1.2);          // nearer = brighter
@@ -149,7 +155,8 @@ void main() {
   vCol = (uRow > 8.5 && uRow < 9.5) ? col * 1.3 + 0.15 : (col / max(m, 1e-3)) * (0.10 + 0.95 * lum);
   if (uSmoke > 0.5) {
     gi = floor(mix(15.0, uMinGlyph, ph));
-    vCol = mix(vec3(0.42, 0.27, 0.80), vec3(0.10, 0.06, 0.24), ph) * (1.0 - ph * 0.8) * (0.75 + 0.25 * depthK);
+    vCol = mix(vec3(0.42, 0.27, 0.80), vec3(0.10, 0.06, 0.24), ph) * (1.0 - ph * (0.8 - 0.25 * wisp)) * (0.75 + 0.25 * depthK);
+    if (uPuff > 0.0) { gi = floor(mix(15.0, uMinGlyph, uPuff)); vCol = mix(vec3(0.55, 0.36, 0.95), vec3(0.10, 0.06, 0.22), uPuff) * (1.0 - uPuff) * (1.0 - uPuff * 0.5); }
   }
   if (ember > 0.0) { vCol = mix(vCol, vec3(1.6, 0.62, 0.12), min(1.0, ember * 2.0)) * (1.0 - ember * ember); gi = floor(mix(gi, 2.0, ember)); }
   vGi = gi;
@@ -169,16 +176,16 @@ void main() {
   gl_FragColor = vec4(vCol * mk, 1.0);
 }`;
 const GMAT = new Map();
-function glyphMaterial(row, cell, actor, smoke = 0, burn = null) {
+function glyphMaterial(row, cell, actor, smoke = 0, burn = null, puff = null) {
   const key = row + ':' + cell.x + ':' + actor + ':' + smoke;
-  if (!burn && GMAT.has(key)) return GMAT.get(key);
+  if (!burn && !puff && GMAT.has(key)) return GMAT.get(key);
   const m = new THREE.ShaderMaterial({
-    uniforms: Object.assign({}, GLYPH, { uRow: { value: row }, uCell: { value: cell }, uActor: { value: actor }, uSmoke: { value: smoke }, uBurn: burn || { value: 0 } }),
+    uniforms: Object.assign({}, GLYPH, { uRow: { value: row }, uCell: { value: cell }, uActor: { value: actor }, uSmoke: { value: smoke }, uBurn: burn || { value: 0 }, uPuff: puff || { value: 0 } }),
     vertexShader: GLYPH_VS, fragmentShader: GLYPH_FS,
     depthTest: false, depthWrite: false, transparent: false, side: THREE.DoubleSide,
     blending: THREE.CustomBlending, blendEquation: THREE.MaxEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
   });
-  if (!burn) GMAT.set(key, m); return m;
+  if (!burn && !puff) GMAT.set(key, m); return m;
 }
 
 // lay points on the surface in rows: one point per glyph cell centre of the surface coordinates
@@ -249,7 +256,7 @@ function makeGlyphs(mesh) {
     ig.setAttribute('skinWeight', new THREE.InstancedBufferAttribute(new Float32Array(S.sw), 4));
   }
   ig.instanceCount = S.n;
-  const gm = glyphMaterial(info.row, info.cell, info.actor, info.smoke, mesh.userData.burn);   // userData.burn = { value } gives the mesh its own burn level
+  const gm = glyphMaterial(info.row, info.cell, info.actor, info.smoke, mesh.userData.burn, mesh.userData.puff);   // userData.burn = { value } gives the mesh its own burn level
   const o = skinned ? new THREE.SkinnedMesh(ig, gm) : new THREE.Mesh(ig, gm);
   if (skinned) o.bind(mesh.skeleton, mesh.bindMatrix);
   o.frustumCulled = false; o.castShadow = false; o.receiveShadow = false;

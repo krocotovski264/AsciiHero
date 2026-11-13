@@ -139,7 +139,8 @@ export function makeActor(c) {
     limbs: { head: true, armL: true, armR: true, legL: true, legR: true }, hopPh: 0, crawlPh: 0, vel: 0,
   };
   A.restAnkle = Math.min(localY(H, 'foot.L'), localY(H, 'foot.R'));
-  { const u = P(H.bone('neck01')).sub(P(H.bone('root'))); A.restTrunk = Math.atan2(u.z, u.y); const w = P(H.bone('spine03')).sub(P(H.bone('root'))); A.restLower = Math.atan2(w.z, w.y); }   // upright trunk angle of the rest pose
+  { const u = P(H.bone('neck01')).sub(P(H.bone('root'))); A.restTrunk = Math.atan2(u.z, u.y); const w = P(H.bone('spine03')).sub(P(H.bone('root'))); A.restLower = Math.atan2(w.z, w.y);
+    const hb = H.bone('head'), cb = H.bone('spine03'); if (hb && cb) A.headRest = cb.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(hb.getWorldQuaternion(new THREE.Quaternion())); }   // upright trunk angle of the rest pose
   // weapon / shield arms: remember the built pose of the whole arm chain relative to the body
   const gqi = c.group.getWorldQuaternion(new THREE.Quaternion()).invert(); A.armRel = {};
   for (const s of ['L', 'R']) for (const n of ARM_CHAIN) { const b = H.bone(n + '.' + s); if (b) A.armRel[n + '.' + s] = gqi.clone().multiply(b.getWorldQuaternion(new THREE.Quaternion())); }
@@ -323,6 +324,7 @@ export function animateActor(A, t, dt = 1 / 60) {
     if (A.loopMode && !A.noLife) bodyLife(A, t, dt);
     armLean(A);
     relaxArms(A);
+    jointLimits(A);
     footIK(A, dt);
   }
   const wp = A.char.group.userData.weapon; if (wp && wp.userData.orb) { wp.userData.orb.rotation.y = t * 1.4; const s = 1 + 0.08 * Math.sin(t * 3); wp.userData.orb.scale.set(0.8 * s, 1.2 * s, 0.8 * s); }
@@ -408,7 +410,7 @@ function bodyLife(A, t, dt) {
   // posture: the mocap runner bends 17 degrees forward and throws the head back; bring the trunk to a normal
   // carriage for the gait (upright at rest, about 3 degrees forward walking, 8 running) before adding the leans
   const sp = A.sprint || 0;
-  const want = 0.01 + 0.045 * wW + 0.09 * wR + 0.13 * sp;      // the sprint drives the whole body forward as one line
+  const want = 0.01 + 0.07 * wW + 0.19 * wR + 0.1 * sp;      // 4 degrees forward walking, 12 running, 17 in the sprint: one line from hips to head
   { // the pelvis first (a pelvis tipped forward under an upright chest is what reads as an arched back); the legs keep their pose
     const w = P(H.bone('spine03')).sub(P(H.bone('root'))), d = (want - (Math.atan2(w.dot(Z), w.y) - A.restLower)) * 0.8;
     rot('root', X, d); rot('upperleg01.L', X, -d); rot('upperleg01.R', X, -d); }
@@ -438,16 +440,47 @@ function bodyLife(A, t, dt) {
     rot('upperarm01.' + s, X, -amp * sw + idle * 0.02 * breath);
     rot('lowerarm01.' + s, X, -(carried && !shield ? 0.1 * wW + 0.5 * wR : 0.25 * wR) * Math.max(0, sw) - (shield ? 0 : 0.35 * wR));
     rot('upperarm01.' + s, Z, sg * (0.03 * breath * idle + 0.04 * wR * Math.abs(cs)));
-    if (sp > 0.01) {
-      // sprint: elbows locked near a right angle, the arms pump hard from the shoulder, hand up to the chin in front
-      // and back past the hip behind, whatever the hands carry
-      const a = 0.1 + 0.8 * sw, b = a + 1.45 + 0.25 * sw;
+    // run: compact arm action. The elbow stays sharply bent; in front the fist comes up to the chest (towards the
+    // breastbone, not reaching forward), behind the elbow goes only a little past the back and the fist stops at the hip
+    const aw = Math.min(1, 0.8 * wR + 0.2 * sp) * (shield ? 0.45 : 1);
+    if (aw > 0.01) {
+      const u = 0.5 + 0.5 * sw;                              // 0 = arm back, 1 = arm in front
+      const a = -0.4 + 0.5 * u, b = 0.75 + 1.65 * u;         // upper arm and forearm angles from straight down, forwards
       const W3 = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(gq);
       const part = (bn, cn, dirW) => { const ba = H.bone(bn), bb = H.bone(cn); if (!ba || !bb) return;
-        const q = new THREE.Quaternion().setFromUnitVectors(P(bb).sub(P(ba)).normalize(), dirW.normalize()); rotateWorld(ba, new THREE.Quaternion().slerp(q, sp)); };
-      part('upperarm01.' + s, 'lowerarm01.' + s, W3(sg * 0.12, -Math.cos(a), Math.sin(a)));
-      part('lowerarm01.' + s, 'wrist.' + s, W3(-sg * 0.14, -Math.cos(b), Math.sin(b)));
+        const q = new THREE.Quaternion().setFromUnitVectors(P(bb).sub(P(ba)).normalize(), dirW.normalize()); rotateWorld(ba, new THREE.Quaternion().slerp(q, aw)); };
+      part('upperarm01.' + s, 'lowerarm01.' + s, W3(sg * 0.1, -Math.cos(a), Math.sin(a)));
+      part('lowerarm01.' + s, 'wrist.' + s, W3(-sg * (0.05 + 0.5 * u), -Math.cos(b), Math.sin(b)));
     }
+  }
+}
+
+// ---------- anatomical joint limits ----------
+// Knees and elbows are hinges: they never bend the wrong way and never fold further than a real joint can.
+// The head cannot turn or nod further than a neck allows.
+function jointLimits(A) {
+  const H = A.H, gq = groupQ(A), Z = new THREE.Vector3(0, 0, 1).applyQuaternion(gq);
+  const hinge = (an, bn, cn, fwdBlocked, maxFlex) => {
+    const ba = H.bone(an), bb = H.bone(bn), bc = H.bone(cn); if (!ba || !bb || !bc) return;
+    const pa = P(ba), pb = P(bb), pc = P(bc), t = pb.clone().sub(pa).normalize(), s = pc.clone().sub(pb).normalize();
+    let s2 = s.clone();
+    if (fwdBlocked) {                       // knee: the shin may fold back, never forwards past the line of the thigh
+      const f = Z.clone().addScaledVector(t, -Z.dot(t)); if (f.lengthSq() > 1e-4) { f.normalize(); const c = s2.dot(f); if (c > 0) s2.addScaledVector(f, -c).normalize(); }
+    }
+    const flex = Math.acos(clamp(s2.dot(t), -1, 1));
+    if (flex > maxFlex) { const ax = new THREE.Vector3().crossVectors(t, s2); if (ax.lengthSq() > 1e-8) s2 = t.clone().applyAxisAngle(ax.normalize(), maxFlex); }
+    if (s2.distanceToSquared(s) > 1e-8) rotateWorld(bb, new THREE.Quaternion().setFromUnitVectors(s, s2));
+  };
+  for (const s of ['L', 'R']) {
+    hinge('upperleg01.' + s, 'lowerleg01.' + s, 'foot.' + s, true, 2.45);      // knee: 0..140 degrees
+    hinge('upperarm01.' + s, 'lowerarm01.' + s, 'wrist.' + s, false, 2.53);    // elbow: up to 145 degrees
+  }
+  // neck: the head stays within 70 degrees of turn and 45 degrees of nod or tilt from the chest
+  const hb = H.bone('head'), cb = H.bone('spine03');
+  if (hb && cb) {
+    const rel = cb.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(hb.getWorldQuaternion(new THREE.Quaternion()));
+    if (A.headRest) { const d = A.headRest.clone().invert().multiply(rel); const ang = 2 * Math.acos(clamp(Math.abs(d.w), 0, 1));
+      if (ang > 1.0) { const fix = new THREE.Quaternion().slerp(d.clone().invert(), 1 - 1.0 / ang); hb.quaternion.multiply(fix); hb.updateMatrixWorld(true); } }
   }
 }
 

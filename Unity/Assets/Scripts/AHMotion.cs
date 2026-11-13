@@ -48,7 +48,7 @@ namespace AsciiHero
         bool loopMode;
         public float maxSpeed = 3.0f;
         struct Sim { public float x, z, vx, vz, ax, az, h, w; public bool init; }
-        Sim S; bool hadDir; Vector2 lastDir;
+        Sim S; public Vector3 Velocity => new Vector3(S.vx, 0, S.vz); bool hadDir; Vector2 lastDir;
         Quaternion[] off, outQ, tmpQ; Vector3 offRO, ro; float[] con = { 1, 1 };
         class Foot { public bool locked; public Vector3 pos; public float rel; }
         readonly Foot[] feet = { new Foot(), new Foot() };
@@ -86,6 +86,7 @@ namespace AsciiHero
                 {
                     Vector3 u = Quaternion.Inverse(c.go.transform.rotation) * (nk.position - rt.position), w = Quaternion.Inverse(c.go.transform.rotation) * (sp.position - rt.position);
                     restTrunk = Mathf.Atan2(u.z, u.y); restLower = Mathf.Atan2(w.z, w.y);
+                    var hb0 = H.Bone("head"); if (hb0 != null) { headRest = Quaternion.Inverse(sp.rotation) * hb0.rotation; hasHeadRest = true; }
                 }
             }
             // weapon / shield arms: remember the built pose of the whole arm chain relative to the body
@@ -457,6 +458,7 @@ namespace AsciiHero
             if (loopMode) BodyLife(dt);
             ArmLean();
             RelaxArms();
+            JointLimits();
             FootIK(dt);
         }
         void Aim(string a, string b, Vector3 dirW)
@@ -541,7 +543,7 @@ namespace AsciiHero
             // posture: the mocap runner bends 17 degrees forward and throws the head back; bring the trunk to a normal
             // carriage for the gait (upright at rest, about 3 degrees forward walking, 8 running) before adding the leans
             float sp = sprint;
-            float want = 0.01f + 0.045f * wW + 0.09f * wR + 0.13f * sp;      // the sprint drives the whole body forward as one line
+            float want = 0.01f + 0.07f * wW + 0.19f * wR + 0.1f * sp;      // 4 degrees forward walking, 12 running, 17 in the sprint: one line from hips to head
             Transform bRoot = H.Bone("root"), bSp = H.Bone("spine03"), bNk = H.Bone("neck01");
             if (bRoot != null && bSp != null && bNk != null)
             {
@@ -582,17 +584,56 @@ namespace AsciiHero
                 Rot("upperarm01." + s, X, -amp * sw + idle * 0.02f * breath);
                 Rot("lowerarm01." + s, X, -(carried && !shield ? 0.1f * wW + 0.5f * wR : 0.25f * wR) * Mathf.Max(0, sw) - (shield ? 0 : 0.35f * wR));
                 Rot("upperarm01." + s, Z, sg * (0.03f * breath * idle + 0.04f * wR * Mathf.Abs(cs)));
-                if (sp > 0.01f)
+                // run: compact arm action. The elbow stays sharply bent; in front the fist comes up to the chest (towards
+                // the breastbone, not reaching forward), behind the elbow goes only a little past the back, fist at the hip
+                float aw = Mathf.Min(1f, 0.8f * wR + 0.2f * sp) * (shield ? 0.45f : 1f);
+                if (aw > 0.01f)
                 {
-                    // sprint: elbows locked near a right angle, the arms pump hard from the shoulder, hand up to the chin
-                    // in front and back past the hip behind, whatever the hands carry
-                    float a = 0.1f + 0.8f * sw, b2 = a + 1.45f + 0.25f * sw;
-                    SprintPart("upperarm01." + s, "lowerarm01." + s, gq * new Vector3(sg * 0.12f, -Mathf.Cos(a), Mathf.Sin(a)), sp);
-                    SprintPart("lowerarm01." + s, "wrist." + s, gq * new Vector3(-sg * 0.14f, -Mathf.Cos(b2), Mathf.Sin(b2)), sp);
+                    float u = 0.5f + 0.5f * sw;                              // 0 = arm back, 1 = arm in front
+                    float a = -0.4f + 0.5f * u, b2 = 0.75f + 1.65f * u;      // upper arm and forearm angles from straight down, forwards
+                    SprintPart("upperarm01." + s, "lowerarm01." + s, gq * new Vector3(sg * 0.1f, -Mathf.Cos(a), Mathf.Sin(a)), aw);
+                    SprintPart("lowerarm01." + s, "wrist." + s, gq * new Vector3(-sg * (0.05f + 0.5f * u), -Mathf.Cos(b2), Mathf.Sin(b2)), aw);
                 }
             }
         }
 
+        // ---------- anatomical joint limits ----------
+        // Knees and elbows are hinges: they never bend the wrong way and never fold further than a real joint can.
+        // The head cannot turn or nod further than a neck allows.
+        Quaternion headRest; bool hasHeadRest;
+        void Hinge(string an, string bn, string cn, bool fwdBlocked, float maxFlex, Vector3 Z)
+        {
+            Transform ba = H.Bone(an), bb = H.Bone(bn), bc = H.Bone(cn); if (ba == null || bb == null || bc == null) return;
+            Vector3 t = bb.position - ba.position, sv = bc.position - bb.position;
+            if (t.sqrMagnitude < 1e-8f || sv.sqrMagnitude < 1e-8f) return;
+            t.Normalize(); sv.Normalize(); Vector3 s2 = sv;
+            if (fwdBlocked)
+            {   // knee: the shin may fold back, never forwards past the line of the thigh
+                Vector3 f = Z - t * Vector3.Dot(Z, t);
+                if (f.sqrMagnitude > 1e-4f) { f.Normalize(); float c = Vector3.Dot(s2, f); if (c > 0) s2 = (s2 - f * c).normalized; }
+            }
+            float flex = Mathf.Acos(Mathf.Clamp(Vector3.Dot(s2, t), -1f, 1f));
+            if (flex > maxFlex) { Vector3 ax = Vector3.Cross(t, s2); if (ax.sqrMagnitude > 1e-8f) s2 = Quaternion.AngleAxis(maxFlex * Mathf.Rad2Deg, ax.normalized) * t; }
+            if ((s2 - sv).sqrMagnitude > 1e-8f) bb.rotation = Quaternion.FromToRotation(sv, s2) * bb.rotation;
+        }
+        void JointLimits()
+        {
+            Vector3 Z = ch.go.transform.rotation * Vector3.forward;
+            for (int si = 0; si < 2; si++)
+            {
+                string s = SIDES[si];
+                Hinge("upperleg01." + s, "lowerleg01." + s, "foot." + s, true, 2.45f, Z);      // knee: 0..140 degrees
+                Hinge("upperarm01." + s, "lowerarm01." + s, "wrist." + s, false, 2.53f, Z);    // elbow: up to 145 degrees
+            }
+            // neck: the head stays within about 57 degrees of its rest attitude on the chest
+            Transform hb = H.Bone("head"), cb = H.Bone("spine03");
+            if (hb != null && cb != null && hasHeadRest)
+            {
+                Quaternion rel = Quaternion.Inverse(cb.rotation) * hb.rotation, d = Quaternion.Inverse(headRest) * rel;
+                float ang = Quaternion.Angle(Quaternion.identity, d) * Mathf.Deg2Rad;
+                if (ang > 1.0f) hb.rotation = cb.rotation * headRest * Quaternion.Slerp(Quaternion.identity, d, 1.0f / ang);
+            }
+        }
         void SprintPart(string an, string bn, Vector3 dirW, float w)
         {
             Transform ba = H.Bone(an), bb = H.Bone(bn); if (ba == null || bb == null) return;
