@@ -604,26 +604,27 @@ namespace AsciiHero
         // ---------- combat: two sword cuts and the guard ----------
         // Directions are in the body frame as (right, up, forward). Each key: time, upper arm, forearm, blade, torso yaw (to the right +).
         // 1: from the upper right down to the lower left.  2: flat, from the left to the right.
-        class AtkKey { public float t, yaw; public bool on; public Vector3 ua, fa, bl;
+        // roll: lean of the trunk to the right (+), pitch: forwards (+) - the body goes with the sword
+        class AtkKey { public float t, yaw, roll, pitch; public bool on; public Vector3 ua, fa, bl;
             public AtkKey(float t) { this.t = t; }
-            public AtkKey(float t, Vector3 ua, Vector3 fa, Vector3 bl, float yaw) { this.t = t; this.ua = ua; this.fa = fa; this.bl = bl; this.yaw = yaw; on = true; } }
+            public AtkKey(float t, Vector3 ua, Vector3 fa, Vector3 bl, float yaw, float roll, float pitch) { this.t = t; this.ua = ua; this.fa = fa; this.bl = bl; this.yaw = yaw; this.roll = roll; this.pitch = pitch; on = true; } }
         static Vector3 V(float x, float y, float z) { return new Vector3(x, y, z); }
         // A cut, not a chop: the hand leads and the blade trails behind it, the edge is drawn through the target in one long
         // arc that never stops at the "hit" - it keeps going through and only then runs out at the far hip or shoulder.
         static readonly AtkKey[][] ATTACKS = {
             null,
             new[] { new AtkKey(0),
-                    new AtkKey(0.2f, V(0.55f, 0.7f, -0.45f), V(0.1f, 0.75f, -0.65f), V(0.35f, 0.1f, -0.95f), 0.85f),
-                    new AtkKey(0.3f, V(0.5f, 0.5f, 0.65f), V(0.25f, 0.8f, 0.45f), V(0.5f, 0.75f, -0.5f), 0.5f),
-                    new AtkKey(0.37f, V(0.25f, 0.1f, 0.95f), V(0f, 0.1f, 1f), V(-0.1f, 0.7f, 0.7f), 0f),
-                    new AtkKey(0.44f, V(-0.15f, -0.4f, 0.9f), V(-0.55f, -0.35f, 0.75f), V(-0.55f, 0.05f, 0.83f), -0.5f),
-                    new AtkKey(0.52f, V(-0.45f, -0.75f, 0.4f), V(-0.85f, -0.45f, -0.1f), V(-0.6f, -0.5f, -0.65f), -0.85f), new AtkKey(0.74f) },
+                    new AtkKey(0.2f, V(0.55f, 0.7f, -0.45f), V(0.1f, 0.75f, -0.65f), V(0.35f, 0.1f, -0.95f), 0.85f, 0.22f, -0.12f),
+                    new AtkKey(0.3f, V(0.5f, 0.5f, 0.65f), V(0.25f, 0.8f, 0.45f), V(0.5f, 0.75f, -0.5f), 0.5f, 0.14f, -0.06f),
+                    new AtkKey(0.37f, V(0.25f, 0.1f, 0.95f), V(0f, 0.1f, 1f), V(-0.1f, 0.7f, 0.7f), 0f, 0f, 0.05f),
+                    new AtkKey(0.44f, V(-0.15f, -0.4f, 0.9f), V(-0.55f, -0.35f, 0.75f), V(-0.55f, 0.05f, 0.83f), -0.5f, -0.15f, 0.14f),
+                    new AtkKey(0.52f, V(-0.45f, -0.75f, 0.4f), V(-0.85f, -0.45f, -0.1f), V(-0.6f, -0.5f, -0.65f), -0.85f, -0.25f, 0.18f), new AtkKey(0.74f) },
             new[] { new AtkKey(0),
-                    new AtkKey(0.2f, V(-0.7f, -0.05f, 0.55f), V(-0.9f, 0.25f, -0.3f), V(-0.3f, 0.25f, -0.95f), -0.85f),
-                    new AtkKey(0.3f, V(-0.3f, -0.12f, 0.95f), V(-0.7f, 0.1f, 0.7f), V(-0.95f, 0.15f, -0.15f), -0.5f),
-                    new AtkKey(0.37f, V(0.1f, -0.1f, 1f), V(0.05f, 0.05f, 1f), V(-0.45f, 0.1f, 0.9f), 0f),
-                    new AtkKey(0.44f, V(0.6f, -0.12f, 0.8f), V(0.7f, 0f, 0.7f), V(0.35f, 0.1f, 0.93f), 0.5f),
-                    new AtkKey(0.52f, V(0.95f, -0.15f, -0.05f), V(0.8f, 0f, -0.6f), V(0.45f, 0.1f, -0.9f), 0.85f), new AtkKey(0.72f) } };
+                    new AtkKey(0.2f, V(-0.7f, -0.05f, 0.55f), V(-0.9f, 0.25f, -0.3f), V(-0.3f, 0.25f, -0.95f), -0.85f, -0.22f, 0.12f),
+                    new AtkKey(0.3f, V(-0.3f, -0.12f, 0.95f), V(-0.7f, 0.1f, 0.7f), V(-0.95f, 0.15f, -0.15f), -0.5f, -0.14f, 0.08f),
+                    new AtkKey(0.37f, V(0.1f, -0.1f, 1f), V(0.05f, 0.05f, 1f), V(-0.45f, 0.1f, 0.9f), 0f, 0f, 0f),
+                    new AtkKey(0.44f, V(0.6f, -0.12f, 0.8f), V(0.7f, 0f, 0.7f), V(0.35f, 0.1f, 0.93f), 0.5f, 0.15f, -0.08f),
+                    new AtkKey(0.52f, V(0.95f, -0.15f, -0.05f), V(0.8f, 0f, -0.6f), V(0.45f, 0.1f, -0.9f), 0.85f, 0.25f, -0.15f), new AtkKey(0.72f) } };
         const float CUT_FROM = 0.27f, CUT_TO = 0.54f;
         public const float COMBAT_HOLD = 3f;      // seconds the fighting stance is kept after the last cut, block or hit
         public float combatT; float stance, stanceFeet;
@@ -675,15 +676,20 @@ namespace AsciiHero
             if (st > 0.01f)
             {
                 Vector3 SX = gq * Vector3.right, SZ = gq * Vector3.forward;
-                var sp0 = H.root.localPosition; sp0.y -= (0.075f * still + 0.02f) * st; H.root.localPosition = sp0;
+                var sp0 = H.root.localPosition; sp0.y -= (0.1f * still + 0.02f) * st; H.root.localPosition = sp0;
+                // the whole trunk tips forward from the hips (the legs keep their place), then the back rounds over
+                Rot("root", SX, 0.13f * st); Rot("upperleg01.L", SX, -0.13f * st); Rot("upperleg01.R", SX, -0.13f * st);
                 float hunch = st * (0.6f + 0.4f * still);
-                Rot("spine05", SX, 0.11f * hunch); Rot("spine03", SX, 0.14f * hunch); Rot("neck01", SX, -0.16f * hunch);
+                Rot("spine05", SX, 0.15f * hunch); Rot("spine03", SX, 0.2f * hunch); Rot("neck01", SX, -0.3f * hunch);
                 for (int si = 0; si < 2; si++)
                 {
                     if (!limbs[1 + si]) continue; float sg = si == 0 ? -1f : 1f;
                     Rot("upperarm01." + SIDES[si], SZ, sg * 0.24f * st); Rot("lowerarm01." + SIDES[si], SX, -0.3f * st * still);
                 }
             }
+            // in the stance the shield is carried out in front of the body
+            if (st > 0.01f && ch.cfg.weapon == "shield" && limbs[1])
+            { AimW("upperarm01.L", "lowerarm01.L", gq * V(-0.28f, -0.72f, 0.63f), 0.85f * st); AimW("lowerarm01.L", "wrist.L", gq * V(0.3f, 0.2f, 0.93f), 0.85f * st); }
             // guard
             guard += ((guardHeld ? 1f : 0f) - guard) * (1 - Mathf.Exp(-dt * LN2 / 0.06f));
             float gw = guard; bool shield = ch.cfg.weapon == "shield";
@@ -712,14 +718,15 @@ namespace AsciiHero
             // entering and leaving the cut the pose is blended with the body's own; between the keys the arm follows one
             // smooth curve through them (Catmull-Rom), so it sweeps through without stopping anywhere
             float w = k0.on && k1.on ? 1 : k1.on ? s : 1 - s;
-            Vector3 ua, fa, bl; float yaw;
+            Vector3 ua, fa, bl; float yaw, roll, pitch;
             if (k0.on && k1.on)
             {
                 AtkKey p0 = K[Mathf.Clamp(i - 1, 1, K.Length - 2)], p3 = K[Mathf.Clamp(i + 2, 1, K.Length - 2)];
-                ua = CR(p0.ua, k0.ua, k1.ua, p3.ua, u); fa = CR(p0.fa, k0.fa, k1.fa, p3.fa, u); bl = CR(p0.bl, k0.bl, k1.bl, p3.bl, u); yaw = CR(p0.yaw, k0.yaw, k1.yaw, p3.yaw, u);
+                ua = CR(p0.ua, k0.ua, k1.ua, p3.ua, u); fa = CR(p0.fa, k0.fa, k1.fa, p3.fa, u); bl = CR(p0.bl, k0.bl, k1.bl, p3.bl, u); yaw = CR(p0.yaw, k0.yaw, k1.yaw, p3.yaw, u); roll = CR(p0.roll, k0.roll, k1.roll, p3.roll, u); pitch = CR(p0.pitch, k0.pitch, k1.pitch, p3.pitch, u);
             }
-            else { AtkKey e = k1.on ? k1 : k0; ua = e.ua; fa = e.fa; bl = e.bl; yaw = e.yaw; }
+            else { AtkKey e = k1.on ? k1 : k0; ua = e.ua; fa = e.fa; bl = e.bl; yaw = e.yaw; roll = e.roll; pitch = e.pitch; }
             TwistRight(yaw * w);
+            { Vector3 fz = gq * Vector3.forward, fx = gq * Vector3.right; foreach (var n in new[] { "spine05", "spine03" }) { Rot(n, fz, -roll * w * 0.5f); Rot(n, fx, pitch * w * 0.5f); } }
             AimW("upperarm01.R", "lowerarm01.R", gq * ua, w); AimW("lowerarm01.R", "wrist.R", gq * fa, w); BladeW(gq * bl, w);
             // while the edge is travelling it leaves a streak in the air
             if (ch.weapon != null && atkT > CUT_FROM && atkT < CUT_TO) { trail.Add(ch.weapon.TransformPoint(0, 0.8f, 0)); trail.Add(ch.weapon.TransformPoint(0, 0.45f, 0)); }
@@ -854,7 +861,7 @@ namespace AsciiHero
                     bool movedT = false;
                     if (ax > lim) { float nx = Mathf.Sign(al.x) * (lim + (ax - lim) * 0.1f); al.x += (nx - al.x) * narrow; movedT = true; }
                     // fighting stance: feet a little wider than the shoulders, the left one half a step ahead
-                    if (stanceFeet > 0.01f) { float sgn = si == 0 ? -1f : 1f; al.x += (sgn * (lim + 0.13f) - al.x) * stanceFeet; al.z += -sgn * 0.09f * stanceFeet; movedT = true; }
+                    if (stanceFeet > 0.01f) { float sgn = si == 0 ? -1f : 1f; al.x += (sgn * (lim + 0.21f) - al.x) * stanceFeet; al.z += -sgn * 0.1f * stanceFeet; movedT = true; }
                     if (movedT) { Vector3 w = g.rotation * al + g.position; target.x = w.x; target.z = w.z; }
                 }
                 if (hopping)
@@ -881,13 +888,21 @@ namespace AsciiHero
                 Vector3 perpK = kd - toT * Vector3.Dot(kd, toT);
                 Vector3 tdir = L.toe.position - ap; Vector3 perpT = tdir - toT * Vector3.Dot(tdir, toT);
                 if (perpT.sqrMagnitude > 1e-8f) perpT = perpT.normalized * (Mathf.Max(perpK.magnitude, 0.02f) * 0.6f);
-                Vector3 perp = perpK + perpT; if (perp.sqrMagnitude < 1e-10f) continue; perp.Normalize();
+                Vector3 perp = perpK + perpT;
+                // fighting stance: the knees open outwards over the feet (the thighs turn out), not only the shins
+                float sgK = si == 0 ? -1f : 1f;
+                if (stanceFeet > 0.01f)
+                {
+                    Vector3 o = ch.go.transform.rotation * new Vector3(sgK, 0, 0.25f); o -= toT * Vector3.Dot(o, toT);
+                    if (o.sqrMagnitude > 1e-8f) perp += o.normalized * (Mathf.Max(perp.magnitude, 0.03f) * 1.6f * stanceFeet);
+                }
+                if (perp.sqrMagnitude < 1e-10f) continue; perp.Normalize();
                 float a = Mathf.Acos(Mathf.Clamp((L.l1 * L.l1 + d * d - L.l2 * L.l2) / (2 * L.l1 * d), -1, 1));
                 Vector3 newK = hp + toT * (Mathf.Cos(a) * L.l1) + perp * (Mathf.Sin(a) * L.l1);
                 RotateWorld(L.hip, Quaternion.FromToRotation(kd.normalized, (newK - hp).normalized));
                 Vector3 kp2 = L.knee.position, ap2 = L.foot.position;
                 RotateWorld(L.knee, Quaternion.FromToRotation((ap2 - kp2).normalized, (L.target - kp2).normalized));
-                L.foot.rotation = footQ;
+                L.foot.rotation = stanceFeet > 0.01f ? Quaternion.AngleAxis(sgK * 0.3f * stanceFeet * Mathf.Rad2Deg, Vector3.up) * footQ : footQ;     // toes turned out
             }
         }
     }

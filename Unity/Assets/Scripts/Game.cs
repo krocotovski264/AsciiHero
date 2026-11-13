@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.20 · Unity";
+        public const string VERSION = "beta 0.21 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -737,9 +737,9 @@ namespace AsciiHero
         static Vector3 Mirror(Vector3 v) { return new Vector3(-v.x, v.y, v.z); }
 
         // ---------- actions: attack, guard, dash ----------
-        class Piece { public List<Renderer> rs = new List<Renderer>(); public float delay, dur = 0.15f, turns = 1, side; public Vector3 axis = Vector3.up; }
+        class Piece { public List<Renderer> rs = new List<Renderer>(); public float delay, om = 11, zeta = 0.45f, lift = 0.3f, wob, turns = 1, side; public Vector3 axis = Vector3.up; }
         readonly List<Piece> pieces = new List<Piece>(); MaterialPropertyBlock shiftMpb;
-        const float DASH_DIST = 2.0f, DASH_T = 0.1f; float dashAnim = 0.4f;
+        const float DASH_DIST = 2.0f, DASH_T = 0.1f; float dashAnim = 0.4f, dashSettle = 0;
         float dashT = 9, dashCd, dashMist; Vector3 dashFrom, dashDir; Vector2? moveDir; bool dashShifted;
         Rect atkRect, defRect, dashRect;
         void DoAttack() { if (world && player != null && dashT >= DASH_T) player.StartAttack(); }
@@ -749,16 +749,20 @@ namespace AsciiHero
             // moving: where the stick points; standing: where the hero looks
             Vector3 d = moveDir.HasValue ? new Vector3(moveDir.Value.x, 0, moveDir.Value.y) : new Vector3(Mathf.Sin(player.heading), 0, Mathf.Cos(player.heading));
             dashDir = d.normalized; dashT = 0; dashFrom = pos; dashMist = 0;
-            // the armour follows piece by piece, one after another, like a suit assembling itself; each piece tumbles on its way
+            // the armour follows piece by piece, one after another, like a suit assembling itself. Every piece is pulled in
+            // by its own spring: it accelerates gently, overshoots its place, swings back and only then settles; it tumbles
+            // on the way. Order, timing, stiffness, path and spin are drawn anew for every dash.
             var order = new List<Piece>(pieces);
             for (int i = order.Count - 1; i > 0; i--) { int j = Random.Range(0, i + 1); var tmp = order[i]; order[i] = order[j]; order[j] = tmp; }
-            float gap = Mathf.Min(0.04f, 0.4f / Mathf.Max(1, order.Count));
-            for (int i = 0; i < order.Count; i++)
+            float gap = Mathf.Min(0.05f, 0.5f / Mathf.Max(1, order.Count)), at = DASH_T * 0.7f;
+            foreach (var pc in order)
             {
-                var pc = order[i]; pc.delay = DASH_T * 0.6f + i * gap; pc.dur = 0.14f + Random.value * 0.04f;
-                pc.axis = Random.onUnitSphere; pc.turns = (Random.value < 0.5f ? -1 : 1) * Random.Range(1, 3); pc.side = (Random.value - 0.5f) * 0.7f;
+                pc.delay = at; at += gap * (0.5f + Random.value);
+                pc.om = 9f + Random.value * 5f; pc.zeta = 0.34f + Random.value * 0.22f;
+                pc.axis = Random.onUnitSphere; pc.turns = (Random.value < 0.5f ? -1 : 1) * (Random.value < 0.65f ? 1 : 2);
+                pc.side = (Random.value - 0.5f) * 0.9f; pc.lift = 0.12f + Random.value * 0.4f; pc.wob = (Random.value - 0.5f) * 1.6f;
             }
-            dashAnim = DASH_T * 0.6f + Mathf.Max(0, order.Count - 1) * gap + 0.18f; dashCd = dashAnim + 0.5f;
+            dashAnim = at + 0.3f; dashSettle = at + 1.3f; dashCd = dashAnim + 0.5f;
             player.Teleport(0, 0, Mathf.Atan2(dashDir.x, dashDir.z));
         }
         void SetShift(Piece pc, Vector3 v, Vector4 spin)
@@ -775,7 +779,7 @@ namespace AsciiHero
         void UpdateDash(float dt)
         {
             dashCd = Mathf.Max(0, dashCd - dt);
-            if (dashT > dashAnim + 0.05f)
+            if (dashT > dashSettle)
             {
                 if (dashShifted) { foreach (var pc in pieces) SetShift(pc, Vector3.zero, new Vector4(0, 1, 0, 0)); dashShifted = false; }
                 return;
@@ -790,11 +794,15 @@ namespace AsciiHero
             dashT += dt;
             Vector3 back = dashFrom - pos; dashShifted = true;
             Vector3 sideV = new Vector3(-dashDir.z, 0, dashDir.x);
+            bool last = dashT >= dashSettle;
             foreach (var pc in pieces)
             {
-                float u = Mathf.Clamp01((dashT - pc.delay) / pc.dur), e = u * u * (3 - 2 * u), arc = Mathf.Sin(Mathf.PI * e);
-                Vector3 sh = back * (1 - e) + sideV * (pc.side * arc) + Vector3.up * (0.3f * arc);       // a low arc, a little to one side
-                SetShift(pc, sh, new Vector4(pc.axis.x, pc.axis.y, pc.axis.z, u > 0 ? pc.turns * Mathf.PI * 2 * (1 - e) : 0));
+                float tau = Mathf.Max(0, dashT - pc.delay), wd = pc.om * Mathf.Sqrt(1 - pc.zeta * pc.zeta), T1 = Mathf.PI / wd;
+                // spring response: 0 -> past 1 -> back -> 1
+                float p = last ? 1 : 1 - Mathf.Exp(-pc.zeta * pc.om * tau) * (Mathf.Cos(wd * tau) + pc.zeta * pc.om / wd * Mathf.Sin(wd * tau));
+                float u = Mathf.Min(1, tau / T1), sm = last ? 1 : u * u * u * (u * (u * 6 - 15) + 10), arc = Mathf.Sin(Mathf.PI * sm);
+                Vector3 sh = back * (1 - p) + sideV * (pc.side * arc) + Vector3.up * (pc.lift * arc);
+                SetShift(pc, sh, new Vector4(pc.axis.x, pc.axis.y, pc.axis.z, tau > 0 && !last ? pc.turns * Mathf.PI * 2 * (1 - sm) + pc.wob * (sm - p) * 3 : 0));
             }
             // mist hangs along the path
             dashMist -= dt;

@@ -144,7 +144,7 @@ function rebuild() {
     char.group.updateMatrixWorld(true);
     char.group.traverse(o => { if (!o.isMesh || o.material === actorMats.SHADOW || o.material === actorMats.EYE) return;
       const key = o.isSkinnedMesh ? o : o.parent; let pc = byKey.get(key);
-      if (!pc) { pc = { shifts: [], delay: 0, dur: 0.15, axis: new THREE.Vector3(0, 1, 0), turns: 1, side: 0 }; byKey.set(key, pc); char.pieces.push(pc);
+      if (!pc) { pc = { shifts: [], delay: 0, om: 11, zeta: 0.45, lift: 0.3, wob: 0, axis: new THREE.Vector3(0, 1, 0), turns: 1, side: 0 }; byKey.set(key, pc); char.pieces.push(pc);
         // the point the piece tumbles about: its centre, carried by the nearest bone
         if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
         const c = o.geometry.boundingBox.getCenter(new THREE.Vector3()); if (!o.isSkinnedMesh) c.applyMatrix4(o.matrixWorld);
@@ -499,16 +499,22 @@ function doDash() {
   // moving: where the stick points; standing: where the hero looks
   const d = act.dir ? new THREE.Vector3(act.dir[0], 0, act.dir[1]) : new THREE.Vector3(Math.sin(player.heading), 0, Math.cos(player.heading));
   dash.dir = d.normalize(); dash.t = 0; dash.from.copy(pos); dash.mist = 0;
-  // the armour follows piece by piece, one after another, like a suit assembling itself; each piece tumbles on its way
-  const order = char.pieces.slice().sort(() => Math.random() - 0.5), gap = Math.min(0.04, 0.4 / Math.max(1, order.length));
-  order.forEach((pc, i) => { pc.delay = DASH_T * 0.6 + i * gap; pc.dur = 0.14 + Math.random() * 0.04;
-    pc.axis.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize(); pc.turns = (Math.random() < 0.5 ? -1 : 1) * (1 + Math.floor(Math.random() * 2)); pc.side = (Math.random() - 0.5) * 0.7; });
-  dash.anim = DASH_T * 0.6 + (order.length - 1) * gap + 0.18; dash.cd = dash.anim + 0.5;
+  // the armour follows piece by piece, one after another, like a suit assembling itself. Every piece is pulled in by its
+  // own spring: it accelerates gently, overshoots its place, swings back and only then settles; it tumbles on the way.
+  // Order, timing, stiffness, path and spin are drawn anew for every dash.
+  const order = char.pieces.slice().sort(() => Math.random() - 0.5), gap = Math.min(0.05, 0.5 / Math.max(1, order.length)); let at = DASH_T * 0.7;
+  for (const pc of order) {
+    pc.delay = at; at += gap * (0.5 + Math.random());
+    pc.om = 9 + Math.random() * 5; pc.zeta = 0.34 + Math.random() * 0.22;
+    pc.axis.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize(); pc.turns = (Math.random() < 0.5 ? -1 : 1) * (Math.random() < 0.65 ? 1 : 2);
+    pc.side = (Math.random() - 0.5) * 0.9; pc.lift = 0.12 + Math.random() * 0.4; pc.wob = (Math.random() - 0.5) * 1.6;
+  }
+  dash.anim = at + 0.3; dash.settle = at + 1.3; dash.cd = dash.anim + 0.5;
   player.sim.h = player.heading = Math.atan2(d.x, d.z);
 }
 function updateDash(dt) {
   dash.cd = Math.max(0, dash.cd - dt);
-  if (dash.t > (dash.anim || 0) + 0.05) return;
+  if (dash.t > (dash.settle || 0)) return;
   if (dash.t < DASH_T) {            // the shadow itself crosses the distance in a tenth of a second
     const k = Math.min(dt, DASH_T - dash.t) / DASH_T, bx = pos.x, bz = pos.z;
     pos.x += dash.dir.x * DASH_DIST * k; pos.z += dash.dir.z * DASH_DIST * k; collide(pos, 0.27);
@@ -517,12 +523,16 @@ function updateDash(dt) {
   dash.t += dt;
   const back = dash.from.clone().sub(pos);
   const sideV = new THREE.Vector3(-dash.dir.z, 0, dash.dir.x);
+  const last = dash.t >= dash.settle;
   for (const pc of char.pieces) {
-    const u = Math.max(0, Math.min(1, (dash.t - pc.delay) / pc.dur)), e = u * u * (3 - 2 * u), arc = Math.sin(Math.PI * e);
+    const tau = Math.max(0, dash.t - pc.delay), wd = pc.om * Math.sqrt(1 - pc.zeta * pc.zeta), T1 = Math.PI / wd;
+    // spring response: 0 -> past 1 -> back -> 1
+    const p = last ? 1 : 1 - Math.exp(-pc.zeta * pc.om * tau) * (Math.cos(wd * tau) + pc.zeta * pc.om / wd * Math.sin(wd * tau));
+    const u = Math.min(1, tau / T1), sm = last ? 1 : u * u * u * (u * (u * 6 - 15) + 10), arc = Math.sin(Math.PI * sm);
     const piv = pc.bone.localToWorld(pc.off.clone());
     for (const U of pc.shifts) {
-      U.shift.value.copy(back).multiplyScalar(1 - e).addScaledVector(sideV, pc.side * arc); U.shift.value.y += 0.3 * arc;     // a low arc, a little to one side
-      U.pivot.value.copy(piv); U.spin.value.set(pc.axis.x, pc.axis.y, pc.axis.z, pc.turns * Math.PI * 2 * (1 - e) * (u > 0 ? 1 : 0));
+      U.shift.value.copy(back).multiplyScalar(1 - p).addScaledVector(sideV, pc.side * arc); U.shift.value.y += pc.lift * arc;
+      U.pivot.value.copy(piv); U.spin.value.set(pc.axis.x, pc.axis.y, pc.axis.z, tau > 0 && !last ? pc.turns * Math.PI * 2 * (1 - sm) + pc.wob * (sm - p) * 3 : 0);
     }
   }
   // mist hangs along the path
