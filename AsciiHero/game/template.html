@@ -25,6 +25,7 @@
   #hint{position:absolute;left:0;right:0;bottom:8px;text-align:center;color:var(--dim);font-size:11px;pointer-events:none;transition:opacity 1s}
   #badge{position:absolute;left:10px;top:8px;color:var(--dim);font-size:11px;line-height:1.5;pointer-events:none;white-space:pre}
   #badge b{color:var(--acc)}
+  #vig{position:fixed;inset:0;pointer-events:none;opacity:0;box-shadow:inset 0 0 18vmin 4vmin rgba(210,20,20,.85);z-index:3}
   #fps{position:absolute;right:10px;top:8px;color:#3d3d48;font-size:10px;pointer-events:none}
   #panel{flex:0 0 auto;max-height:42vh;display:flex;flex-direction:column;background:var(--panel);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
   .tabs{display:flex;border-bottom:1px solid var(--line)}
@@ -140,6 +141,7 @@
     </div>
   </div>
 </div>
+<div id="vig"></div>
 <div id="toast"></div>
 <div id="rotate"><pre>  ___________
  |  _______  |

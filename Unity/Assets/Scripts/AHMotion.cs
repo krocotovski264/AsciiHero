@@ -613,18 +613,25 @@ namespace AsciiHero
         static readonly AtkKey[][] ATTACKS = {
             null,
             new[] { new AtkKey(0),
-                    new AtkKey(0.16f, V(0.5f, 0.75f, -0.1f), V(-0.1f, 0.9f, -0.3f), V(0.3f, 0.5f, -0.8f), 0.45f),
-                    new AtkKey(0.26f, V(0.45f, 0.45f, 0.75f), V(0.2f, 0.75f, 0.6f), V(0.4f, 0.85f, -0.35f), 0.25f),
-                    new AtkKey(0.33f, V(0.25f, 0.1f, 0.95f), V(0f, 0.1f, 1f), V(-0.1f, 0.7f, 0.7f), 0f),
-                    new AtkKey(0.4f, V(-0.15f, -0.4f, 0.9f), V(-0.55f, -0.35f, 0.75f), V(-0.55f, 0.05f, 0.83f), -0.3f),
-                    new AtkKey(0.48f, V(-0.4f, -0.75f, 0.5f), V(-0.85f, -0.45f, 0.1f), V(-0.7f, -0.45f, -0.55f), -0.5f), new AtkKey(0.7f) },
+                    new AtkKey(0.2f, V(0.55f, 0.7f, -0.45f), V(0.1f, 0.75f, -0.65f), V(0.35f, 0.1f, -0.95f), 0.85f),
+                    new AtkKey(0.3f, V(0.5f, 0.5f, 0.65f), V(0.25f, 0.8f, 0.45f), V(0.5f, 0.75f, -0.5f), 0.5f),
+                    new AtkKey(0.37f, V(0.25f, 0.1f, 0.95f), V(0f, 0.1f, 1f), V(-0.1f, 0.7f, 0.7f), 0f),
+                    new AtkKey(0.44f, V(-0.15f, -0.4f, 0.9f), V(-0.55f, -0.35f, 0.75f), V(-0.55f, 0.05f, 0.83f), -0.5f),
+                    new AtkKey(0.52f, V(-0.45f, -0.75f, 0.4f), V(-0.85f, -0.45f, -0.1f), V(-0.6f, -0.5f, -0.65f), -0.85f), new AtkKey(0.74f) },
             new[] { new AtkKey(0),
-                    new AtkKey(0.16f, V(-0.5f, -0.2f, 0.8f), V(-0.95f, 0.2f, 0.1f), V(-0.6f, 0.2f, -0.75f), -0.5f),
-                    new AtkKey(0.26f, V(-0.25f, -0.15f, 0.95f), V(-0.6f, 0.1f, 0.8f), V(-0.95f, 0.15f, 0.1f), -0.25f),
-                    new AtkKey(0.33f, V(0.1f, -0.1f, 1f), V(0.05f, 0.05f, 1f), V(-0.45f, 0.1f, 0.9f), 0f),
-                    new AtkKey(0.4f, V(0.6f, -0.12f, 0.8f), V(0.7f, 0f, 0.7f), V(0.35f, 0.1f, 0.93f), 0.3f),
-                    new AtkKey(0.48f, V(0.9f, -0.2f, 0.3f), V(0.95f, 0f, -0.1f), V(0.9f, 0.1f, -0.4f), 0.5f), new AtkKey(0.68f) } };
-        const float CUT_FROM = 0.25f, CUT_TO = 0.5f;
+                    new AtkKey(0.2f, V(-0.7f, -0.05f, 0.55f), V(-0.9f, 0.25f, -0.3f), V(-0.3f, 0.25f, -0.95f), -0.85f),
+                    new AtkKey(0.3f, V(-0.3f, -0.12f, 0.95f), V(-0.7f, 0.1f, 0.7f), V(-0.95f, 0.15f, -0.15f), -0.5f),
+                    new AtkKey(0.37f, V(0.1f, -0.1f, 1f), V(0.05f, 0.05f, 1f), V(-0.45f, 0.1f, 0.9f), 0f),
+                    new AtkKey(0.44f, V(0.6f, -0.12f, 0.8f), V(0.7f, 0f, 0.7f), V(0.35f, 0.1f, 0.93f), 0.5f),
+                    new AtkKey(0.52f, V(0.95f, -0.15f, -0.05f), V(0.8f, 0f, -0.6f), V(0.45f, 0.1f, -0.9f), 0.85f), new AtkKey(0.72f) } };
+        const float CUT_FROM = 0.27f, CUT_TO = 0.54f;
+        public const float COMBAT_HOLD = 3f;      // seconds the fighting stance is kept after the last cut, block or hit
+        public float combatT; float stance, stanceFeet;
+        /// dummies (by index) the current cut has already hit
+        public readonly HashSet<int> atkHits = new HashSet<int>();
+        /// the edge is travelling: this is when the cut can land
+        public bool Cutting => Attacking && atkT > CUT_FROM + 0.06f && atkT < CUT_TO;
+        public float Guard => guard;
         /// points the blade passed through this frame (tip and mid-blade): the game turns them into a streak in the air
         public readonly List<Vector3> trail = new List<Vector3>();
         static float CR(float a0, float a1, float a2, float a3, float u) { return 0.5f * (2 * a1 + (a2 - a0) * u + (2 * a0 - 5 * a1 + 4 * a2 - a3) * u * u + (3 * a1 - a0 - 3 * a2 + a3) * u * u * u); }
@@ -639,6 +646,7 @@ namespace AsciiHero
             int type;
             if (Velocity.magnitude > 0.5f) type = Mathf.Cos(phase * Mathf.PI * 2) > 0 ? 2 : 1;
             else type = lastAtk != 0 ? 3 - lastAtk : (UnityEngine.Random.value < 0.5f ? 1 : 2);
+            atkHits.Clear(); combatT = COMBAT_HOLD;
             lastAtk = type; atkType = type; atkT = 0; var K = ATTACKS[type]; atkDur = K[K.Length - 1].t;
             return true;
         }
@@ -653,10 +661,29 @@ namespace AsciiHero
             var wb = H.Bone("wrist.R"); if (w <= 0 || wb == null || ch.weapon == null) return;
             wb.rotation = Quaternion.Slerp(Quaternion.identity, Quaternion.FromToRotation(ch.weapon.up, dirW.normalized), w) * wb.rotation;
         }
-        void TwistRight(float a) { Rot("spine05", Vector3.up, a * 0.4f); Rot("spine03", Vector3.up, a * 0.6f); }
+        // the whole trunk winds up and unwinds; the head keeps looking ahead
+        void TwistRight(float a) { Rot("spine05", Vector3.up, a * 0.4f); Rot("spine03", Vector3.up, a * 0.6f); Rot("neck01", Vector3.up, -a * 0.45f); }
         void Combat(float dt)
         {
             Quaternion gq = ch.go.transform.rotation;
+            // fighting stance: kept for a few seconds after the last cut, block or hit. Feet wider than the shoulders
+            // (see FootIK), knees bent, the back rounded forward, the arms held a little away from the body
+            if (guardHeld) combatT = COMBAT_HOLD;
+            combatT = Mathf.Max(0, combatT - dt);
+            stance += ((combatT > 0 ? 1f : 0f) - stance) * (1 - Mathf.Exp(-dt * LN2 / 0.14f));
+            float st = stance, still = 1 - wWalk; stanceFeet = st * still;
+            if (st > 0.01f)
+            {
+                Vector3 SX = gq * Vector3.right, SZ = gq * Vector3.forward;
+                var sp0 = H.root.localPosition; sp0.y -= (0.075f * still + 0.02f) * st; H.root.localPosition = sp0;
+                float hunch = st * (0.6f + 0.4f * still);
+                Rot("spine05", SX, 0.11f * hunch); Rot("spine03", SX, 0.14f * hunch); Rot("neck01", SX, -0.16f * hunch);
+                for (int si = 0; si < 2; si++)
+                {
+                    if (!limbs[1 + si]) continue; float sg = si == 0 ? -1f : 1f;
+                    Rot("upperarm01." + SIDES[si], SZ, sg * 0.24f * st); Rot("lowerarm01." + SIDES[si], SX, -0.3f * st * still);
+                }
+            }
             // guard
             guard += ((guardHeld ? 1f : 0f) - guard) * (1 - Mathf.Exp(-dt * LN2 / 0.06f));
             float gw = guard; bool shield = ch.cfg.weapon == "shield";
@@ -824,11 +851,11 @@ namespace AsciiHero
                     // feet under the hips: the mocap stance is wider than a relaxed one (not while side-stepping)
                     Transform g = ch.go.transform; Quaternion gi = Quaternion.Inverse(g.rotation);
                     Vector3 al = gi * (ap - g.position); float lim = Mathf.Abs((gi * (hp - g.position)).x), ax = Mathf.Abs(al.x);
-                    if (ax > lim)
-                    {
-                        float nx = Mathf.Sign(al.x) * (lim + (ax - lim) * 0.1f); al.x += (nx - al.x) * narrow;
-                        Vector3 w = g.rotation * al + g.position; target.x = w.x; target.z = w.z;
-                    }
+                    bool movedT = false;
+                    if (ax > lim) { float nx = Mathf.Sign(al.x) * (lim + (ax - lim) * 0.1f); al.x += (nx - al.x) * narrow; movedT = true; }
+                    // fighting stance: feet a little wider than the shoulders, the left one half a step ahead
+                    if (stanceFeet > 0.01f) { float sgn = si == 0 ? -1f : 1f; al.x += (sgn * (lim + 0.13f) - al.x) * stanceFeet; al.z += -sgn * 0.09f * stanceFeet; movedT = true; }
+                    if (movedT) { Vector3 w = g.rotation * al + g.position; target.x = w.x; target.z = w.z; }
                 }
                 if (hopping)
                 {

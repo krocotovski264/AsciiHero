@@ -17,6 +17,7 @@ namespace AsciiHero
     {
         public readonly List<ArmourPile> piles = new List<ArmourPile>();
         const float HX = 10, HZ = 8;
+        public static readonly Vector3[] DUMMY_SPOTS = { new Vector3(1.75f, 0, -1.2f), new Vector3(-1.75f, 0, -1.2f) };   // [0] only takes hits, [1] hits back
 
         public static Field Build(Mats mats)
         {
@@ -36,7 +37,9 @@ namespace AsciiHero
             root = new GameObject("Field"); var T = root.transform; var R = new System.Random(20261112);
             float Rnd() { return (float)R.NextDouble(); }
             MeshGen.Obj(Ground(HX * 2 + 6, HZ * 2 + 6), mats["GROUND"], T, Vector3.zero, Quaternion.identity, false, "Ground");
-            spawn = Vector3.zero;
+            spawn = new Vector3(0, 0, 1.5f);
+            // two training dummies in the middle, 3.5 m apart (the game builds them): keep the spots clear
+            foreach (var dp in DUMMY_SPOTS) colliders.Add(Collider2.Circle(dp.x, dp.z, 0.34f));
             bool Free(float x, float z, float r)
             {
                 if (Mathf.Sqrt(x * x + z * z) < 1.5f + r) return false;

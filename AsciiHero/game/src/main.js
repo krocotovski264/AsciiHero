@@ -5,7 +5,7 @@ import { AsciiRenderer, makeMaterials, buildGlyphLayer, enableShift, GLYPH, GLYP
 import { buildTavern } from './tavern.js';
 import { buildField, LIMBS, LIMB_NAME } from './field.js';
 import { applyPose } from './pose.js';
-import { makeActor, animateActor, locomotion, loadMocap, setLimbs, startAttack } from './anim.js';
+import { makeActor, animateActor, locomotion, loadMocap, setLimbs, startAttack, ATTACKS, COMBAT_HOLD } from './anim.js';
 
 const $ = id => document.getElementById(id);
 const DEF = { sex: 'm', height: 180, build: 1, armor: 'chain', weapon: 'shield' };
@@ -274,7 +274,7 @@ function updateDebris(dt) {
       // smoke keeps pouring out of the piece while it flies
       d.trail -= dt; if (d.trail <= 0 && d.t < 0.75) { d.trail = 0.22; spawnPuff(d.m.position, 0.05, d.v.clone().multiplyScalar(0.25)); }
     }
-    d.burn.value = Math.max(0, Math.min(1, (d.t - 1.6) / (d.life - 2)));          // lies for a moment, then burns for about three seconds
+    d.burn.value = d.spark ? 0.3 + 0.7 * d.t / d.life : Math.max(0, Math.min(1, (d.t - 1.6) / (d.life - 2)));          // lies for a moment, then burns for about three seconds
     if (d.t > d.life) { scene.remove(d.m); d.m.traverse(o => { if (o.geometry) o.geometry.dispose(); }); debris.splice(i, 1); }
   }
   for (let i = puffs.length - 1; i >= 0; i--) {
@@ -282,6 +282,103 @@ function updateDebris(dt) {
     const u = f.t / f.life; f.puff.value = Math.max(0.001, 1 - (1 - u) * (1 - u));        // fast at first, then hanging in the air
     if (u >= 1) { scene.remove(f.m); f.m.traverse(o => { if (o.geometry) o.geometry.dispose(); }); puffs.splice(i, 1); }
   }
+}
+// sparks: a handful of glowing bits thrown off where a blow lands on the guard
+function spawnSparks(p, away) {
+  for (let i = 0; i < 12; i++) {
+    const burn = { value: 0.3 }, m = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.05), actorMats.GOLD); m.userData.burn = burn; m.position.copy(p);
+    scene.add(m); buildGlyphLayer(m);
+    const v = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.9 + 0.1, Math.random() - 0.5).normalize().multiplyScalar(2 + Math.random() * 3.5).addScaledVector(away, 1.5);
+    debris.push({ m, burn, v, w: new THREE.Vector3(Math.random() * 20 - 10, Math.random() * 20 - 10, 0), r: 0.02, t: 0, rest: false, trail: 9, life: 0.35 + Math.random() * 0.25, spark: true });
+  }
+}
+// ---------- training dummies ----------
+// A post with a straw body, a crossbar for arms, a head under an old helmet. Pieces break off as it loses hit points
+// (helmet and a shoulder at 75, shield and the other shoulder at 50, the head at 25); at 0 it falls apart and is
+// rebuilt three seconds later. The second dummy turns to the hero and swings a wooden sword for 5 hit points.
+const DUMMY_HIT = 20, DUMMY_DMG = 5;
+function buildDummy(d) {
+  const g = new THREE.Group(), top = new THREE.Group(); g.position.set(d.x, 0, d.z); g.add(top);
+  d.group = g; d.top = top; d.parts = []; d.hp = 100; d.wob = 0; d.dead = 0; d.swing = -1; d.cd = 1; d.yaw = d.yaw || 0; d.struck = false;
+  const P = (parent, geo, mat, x, y, z, stage, rx = 0, rz = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx, 0, rz); m.castShadow = true; m.userData.burn = { value: 0 }; parent.add(m); d.parts.push({ m, stage }); return m; };
+  P(g, new THREE.CylinderGeometry(0.06, 0.08, 1.0, 8), actorMats.WOOD, 0, 0.5, 0, 0);
+  P(g, new THREE.CylinderGeometry(0.22, 0.26, 0.08, 10), actorMats.WOOD, 0, 0.04, 0, 0);
+  P(top, new THREE.CylinderGeometry(0.21, 0.17, 0.62, 10), actorMats.LINEN, 0, 1.16, 0, 0);
+  P(top, new THREE.CylinderGeometry(0.2, 0.2, 0.07, 10), actorMats.LEATHER2, 0, 1.0, 0, 0);
+  P(top, new THREE.CylinderGeometry(0.035, 0.035, 0.96, 8), actorMats.WOOD, 0, 1.36, 0, 0, 0, Math.PI / 2);
+  P(top, new THREE.SphereGeometry(0.15, 10, 8), actorMats.LINEN, 0, 1.63, 0, 25);
+  P(top, new THREE.SphereGeometry(0.17, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), actorMats.PLATE, 0, 1.66, 0, 75);
+  P(top, new THREE.SphereGeometry(0.11, 8, 6), actorMats.PLATE, -0.25, 1.43, 0, 75);
+  P(top, new THREE.SphereGeometry(0.11, 8, 6), actorMats.PLATE, 0.25, 1.43, 0, 50);
+  P(top, new THREE.CylinderGeometry(0.24, 0.24, 0.035, 12), actorMats.WOOD, -0.5, 1.3, 0.08, 50, Math.PI / 2);
+  if (d.attacker) P(top, new THREE.BoxGeometry(0.05, 0.035, 0.95), actorMats.WOOD, 0.5, 1.36, 0.45, 0);
+  else P(top, new THREE.SphereGeometry(0.1, 8, 6), actorMats.LINEN, 0.5, 1.36, 0, 50);
+  top.rotation.y = d.yaw;
+  loc.group.add(g); buildGlyphLayer(g);
+}
+function dummyBreak(d, part, power) {
+  const m = part.m; scene.attach(m);
+  const out = new THREE.Vector3(m.position.x - pos.x, 0, m.position.z - pos.z).normalize(), ang = (Math.random() - 0.5) * 1.6, cs = Math.cos(ang), sn = Math.sin(ang), sp = power * (0.8 + Math.random());
+  debris.push({ m, burn: m.userData.burn, v: new THREE.Vector3((out.x * cs - out.z * sn) * sp, 1.5 + Math.random() * 2.5, (out.x * sn + out.z * cs) * sp),
+    w: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().multiplyScalar(4 + Math.random() * 9), r: 0.07, t: 0, rest: false, trail: 9, life: 4 + Math.random() });
+  part.m = null;
+}
+function dummyDamage(d, dmg) {
+  if (d.dead > 0) return;
+  d.hp = Math.max(0, d.hp - dmg); d.wob = 1;
+  spawnPuff(new THREE.Vector3(d.x, 1.2, d.z), 0.05, new THREE.Vector3(0, 0.4, 0), 0.4);
+  for (const part of d.parts) if (part.m && (d.hp <= 0 || (part.stage > 0 && d.hp <= part.stage))) dummyBreak(d, part, d.hp <= 0 ? 2.2 : 1.6);
+  if (d.hp <= 0) { d.dead = 3; loc.group.remove(d.group); }
+}
+function updateDummies(dt, t) {
+  if (!loc || !loc.dummies) return;
+  for (let i = 0; i < loc.dummies.length; i++) {
+    const d = loc.dummies[i];
+    if (!d.group && !(d.dead > 0)) buildDummy(d);
+    if (d.dead > 0) { d.dead -= dt; if (d.dead <= 0) buildDummy(d); continue; }
+    const dx = pos.x - d.x, dz = pos.z - d.z, dist = Math.hypot(dx, dz);
+    // the hero's cut lands once, while the edge is travelling, on a dummy in reach and in front of him
+    const a = player.atk;
+    if (a && a.t < a.dur && !a.hits.has(i) && a.t > ATTACKS[a.type].cut[0] + 0.06 && a.t < ATTACKS[a.type].cut[1] && dist < 1.75) {
+      const fx = Math.sin(player.heading), fz = Math.cos(player.heading);
+      if ((-dx * fx - dz * fz) / Math.max(dist, 1e-3) > 0.3) { a.hits.add(i); dummyDamage(d, DUMMY_HIT); if (d.dead > 0) continue; }
+    }
+    // the worse its state, the more it leans; a hit makes it shudder and rock for a moment
+    d.wob *= Math.exp(-dt * 6);
+    const lean = (1 - d.hp / 100) * 0.22;
+    d.top.rotation.x = d.wob * 0.2 * Math.sin(t * 27); d.top.rotation.z = lean + d.wob * 0.13 * Math.sin(t * 33 + 1);
+    d.group.position.set(d.x + d.wob * 0.012 * Math.sin(t * 61), 0, d.z + d.wob * 0.012 * Math.sin(t * 53));
+    if (d.attacker) {
+      // it turns to face the hero and, when he is in reach, winds up and swings
+      let swing = 0;
+      if (dist < 4.5 && d.swing < 0) { const want = Math.atan2(dx, dz); let e = want - d.yaw; e = Math.atan2(Math.sin(e), Math.cos(e)); d.yaw += Math.max(-3 * dt, Math.min(3 * dt, e)); }
+      d.cd -= dt; if (d.swing < 0 && d.cd <= 0 && dist < 2.0 && body.hp > 0) { d.swing = 0; d.struck = false; }
+      if (d.swing >= 0) {
+        d.swing += dt; const u = d.swing;
+        swing = u < 0.5 ? -0.9 * (u / 0.5) * (2 - u / 0.5) : u < 0.64 ? -0.9 + 2.2 * (u - 0.5) / 0.14 : 1.3 * Math.max(0, 1 - (u - 0.64) / 0.4);
+        if (!d.struck && u >= 0.58) { d.struck = true; if (dist < 2.15) dummyStrike(d, dx, dz, dist); }
+        if (u > 1.04) { d.swing = -1; d.cd = 1.3; }
+      }
+      // the sword sticks out on its right, so the arm sweeps from that side across the front
+      d.top.rotation.y = d.yaw - 0.35 + swing;
+    }
+  }
+}
+function dummyStrike(d, dx, dz, dist) {
+  // blocked if the guard is up and the hero faces the dummy
+  const fx = Math.sin(player.heading), fz = Math.cos(player.heading), facing = (-dx * fx - dz * fz) / Math.max(dist, 1e-3);
+  player.combatT = COMBAT_HOLD;
+  if ((player.guard || 0) > 0.5 && facing > 0.2) spawnSparks(new THREE.Vector3(pos.x - dx / dist * 0.45, 1.15, pos.z - dz / dist * 0.45), new THREE.Vector3(dx / dist, 0, dz / dist));
+  else damage(DUMMY_DMG);
+}
+// low integrity: a red glow creeps in from the edges of the screen; when it is critical the view pulses like a heartbeat
+let heart = 0;
+function updateDanger(dt, t) {
+  const el = $('vig'); if (!el) return;
+  const k = mode === 'world' ? Math.max(0, Math.min(1, (50 - body.hp) / 50)) : 0;
+  const ph = (t % 0.9) / 0.9, g = x => Math.exp(-x * x), beat = body.hp <= 20 && body.hp > 0 && mode === 'world' ? g((ph - 0.08) / 0.05) + 0.6 * g((ph - 0.32) / 0.055) : 0;
+  heart = beat;
+  el.style.opacity = (k * (0.35 + 0.45 * k) + beat * 0.14 * k).toFixed(3);
 }
 function restoreBody() { body.hp = 100; for (const l of LIMBS) body.limbs[l] = true; if (player) setLimbs(player, body.limbs); }
 function pickups() {
@@ -462,7 +559,7 @@ function worldUpdate(dt, t) {
   heading = player.heading;
   char.group.position.set(pos.x, 0, pos.z);
   char.group.rotation.y = heading;
-  loc.update(t); pickups(); updateDebris(dt);
+  loc.update(t); pickups(); updateDummies(dt, t); updateDebris(dt);
   if (player) GLYPH.uVel.value.set(player.sim.vx, 0, player.sim.vz);
   GLYPH.uHeroA.value.set(pos.x, 0, pos.z); GLYPH.uHeroB.value.lerp(GLYPH.uHeroA.value, Math.min(1, dt * 2.2));
   if (moonLight) { moonLight.position.set(pos.x + 1, 7.5, pos.z - 7.5); moonLight.target.position.set(pos.x, 0, pos.z); }
@@ -477,6 +574,7 @@ function worldUpdate(dt, t) {
   camPos.copy(want);
   camPos.lerp(want, Math.min(1, dt * 4));
   camera.position.copy(camPos); camera.lookAt(camTgt);
+  camera.fov = ISO_FOV * (1 - 0.014 * heart); camera.updateProjectionMatrix();
 }
 
 // ---------- loop ----------
@@ -489,6 +587,7 @@ function frame(now) {
     else if (autoRotate && now - lastInteract > 1500) cam.yaw += dt * 0.4;
   }
   const t = now / 1000;
+  updateDanger(dt, t);
   if (mode === 'world') { worldUpdate(dt, t); animateActor(player, t, dt); }
   else {
   if (player) { player.noLock = true; locomotion(player, dt, null, 0, null, { x: 0, z: 0 }); player.heading = 0; player.sim.x = player.sim.z = 0; player.sim.h = 0; }
@@ -508,7 +607,7 @@ function frame(now) {
   if (fpsAcc > 1) { $('fps').textContent = Math.round(fpsN / fpsAcc) + ' fps · ' + (GLYPH.uMode.value > 0.5 ? GLYPH_STATS.count + ' симв.' : AR.cols + '×' + AR.rows); fpsAcc = 0; fpsN = 0; }
   requestAnimationFrame(frame);
 }
-window.__dbg = { damage, body, doAttack, doDash, act, dash, ISO, debris, puffs, get loc() { return loc; }, cam, setCfg, enterWorld, leaveWorld, stick, get pos() { return pos; }, get player() { return player; }, get auto() { return autoRotate; }, set auto(v) { autoRotate = v; }, AR };
+window.__dbg = { damage, body, get dummies() { return loc && loc.dummies; }, doAttack, doDash, act, dash, ISO, debris, puffs, get loc() { return loc; }, cam, setCfg, enterWorld, leaveWorld, stick, get pos() { return pos; }, get player() { return player; }, get auto() { return autoRotate; }, set auto(v) { autoRotate = v; }, AR };
 (async () => {
   try {
     await loadHuman(); await loadMocap();

@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.19 · Unity";
+        public const string VERSION = "beta 0.20 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -247,7 +247,7 @@ namespace AsciiHero
         readonly List<Debris> debris = new List<Debris>();
         // a torn-off limb bursts out of the body in a cloud of smoke and comes apart at the joints: every piece flies
         // its own way, tumbles, bounces, lies for a moment and burns away
-        class Debris { public GameObject go; public Vector3 v, w; public float r, t, trail = 0.12f, life = 5f; public bool rest; public List<Renderer> glyphs = new List<Renderer>(); public MaterialPropertyBlock mpb = new MaterialPropertyBlock(); }
+        class Debris { public GameObject go; public Vector3 v, w; public float r, t, trail = 0.12f, life = 5f; public bool rest, spark; public List<Renderer> glyphs = new List<Renderer>(); public MaterialPropertyBlock mpb = new MaterialPropertyBlock(); }
         class Puff { public GameObject go; public Vector3 v; public float t, life; public List<Renderer> glyphs = new List<Renderer>(); public MaterialPropertyBlock mpb = new MaterialPropertyBlock(); }
         readonly List<Puff> puffs = new List<Puff>();
         struct Seg { public string a, b; public float r; public int kind; public Seg(string a, string b, float r, int kind) { this.a = a; this.b = b; this.r = r; this.kind = kind; } }
@@ -317,7 +317,7 @@ namespace AsciiHero
                     // smoke keeps pouring out of the piece while it flies
                     d.trail -= dt; if (d.trail <= 0 && d.t < 0.75f) { d.trail = 0.22f; SpawnPuff(tr.position, 0.05f, d.v * 0.25f); }
                 }
-                d.mpb.SetFloat("_GlyphBurn", Mathf.Clamp01((d.t - 1.6f) / (d.life - 2f)));     // lies for a moment, then burns for about three seconds
+                d.mpb.SetFloat("_GlyphBurn", d.spark ? 0.3f + 0.7f * d.t / d.life : Mathf.Clamp01((d.t - 1.6f) / (d.life - 2f)));     // lies for a moment, then burns for about three seconds
                 foreach (var r in d.glyphs) if (r != null) r.SetPropertyBlock(d.mpb);
                 if (d.t > d.life) { Destroy(d.go); debris.RemoveAt(i); }
             }
@@ -329,6 +329,141 @@ namespace AsciiHero
                 foreach (var r in f.glyphs) if (r != null) r.SetPropertyBlock(f.mpb);
                 if (u >= 1) { Destroy(f.go); puffs.RemoveAt(i); }
             }
+        }
+        // sparks: a handful of glowing bits thrown off where a blow lands on the guard
+        void SpawnSparks(Vector3 p, Vector3 away)
+        {
+            for (int i = 0; i < 12; i++)
+            {
+                var go = MeshGen.Obj(MeshGen.Box(0.05f, 0.05f, 0.05f), actorMats["GOLD"], null, p, Random.rotation, false, "Spark");
+                GlyphLayer.Build(go);
+                var d = new Debris { go = go, r = 0.02f, life = 0.35f + Random.value * 0.25f, spark = true, trail = 9 }; GlyphsOf(go, d.glyphs);
+                d.v = new Vector3(Random.value - 0.5f, Random.value * 0.9f + 0.1f, Random.value - 0.5f).normalized * (2f + Random.value * 3.5f) + away * 1.5f;
+                d.w = Random.onUnitSphere * 12f;
+                d.mpb.SetFloat("_GlyphBurn", 0.3f); foreach (var r in d.glyphs) if (r != null) r.SetPropertyBlock(d.mpb);
+                debris.Add(d);
+            }
+        }
+
+        // ---------- training dummies ----------
+        // A post with a straw body, a crossbar for arms, a head under an old helmet. Pieces break off as it loses hit
+        // points (helmet and a shoulder at 75, shield and the other shoulder at 50, the head at 25); at 0 it falls apart
+        // and is rebuilt three seconds later. The second dummy turns to the hero and swings a wooden sword for 5 points.
+        const int DUMMY_HIT = 20, DUMMY_DMG = 5;
+        class DummyPart { public GameObject go; public int stage; }
+        class Dummy { public Vector3 p; public bool attacker; public GameObject root; public Transform top; public List<DummyPart> parts = new List<DummyPart>();
+            public int hp = 100; public float wob, dead, swing = -1, cd = 1, yaw; public bool struck; }
+        readonly List<Dummy> dummies = new List<Dummy>();
+        void BuildDummy(Dummy d)
+        {
+            d.root = new GameObject("Dummy"); d.root.transform.SetParent(field.root.transform, false); d.root.transform.localPosition = d.p;
+            d.top = new GameObject("Top").transform; d.top.SetParent(d.root.transform, false);
+            d.parts.Clear(); d.hp = 100; d.wob = 0; d.dead = 0; d.swing = -1; d.cd = 1; d.struck = false;
+            void P(Transform parent, Mesh m, string mat, float x, float y, float z, int stage, float rx = 0, float rz = 0)
+            { d.parts.Add(new DummyPart { go = MeshGen.Obj(m, actorMats[mat], parent, new Vector3(x, y, z), Quaternion.Euler(rx, 0, rz), true, "DummyPart"), stage = stage }); }
+            Transform g = d.root.transform, top = d.top;
+            P(g, MeshGen.Cylinder(0.08f, 0.06f, 1.0f, 8), "WOOD", 0, 0.5f, 0, 0);
+            P(g, MeshGen.Cylinder(0.26f, 0.22f, 0.08f, 10), "WOOD", 0, 0.04f, 0, 0);
+            P(top, MeshGen.Cylinder(0.17f, 0.21f, 0.62f, 10), "LINEN", 0, 1.16f, 0, 0);
+            P(top, MeshGen.Cylinder(0.2f, 0.2f, 0.07f, 10), "LEATHER2", 0, 1.0f, 0, 0);
+            P(top, MeshGen.Cylinder(0.035f, 0.035f, 0.96f, 8), "WOOD", 0, 1.36f, 0, 0, 0, 90);
+            P(top, MeshGen.Sphere(0.15f, 10, 8), "LINEN", 0, 1.63f, 0, 25);
+            P(top, MeshGen.Sphere(0.17f, 10, 6, Mathf.PI / 2), "PLATE", 0, 1.66f, 0, 75);
+            P(top, MeshGen.Sphere(0.11f, 8, 6), "PLATE", 0.25f, 1.43f, 0, 75);
+            P(top, MeshGen.Sphere(0.11f, 8, 6), "PLATE", -0.25f, 1.43f, 0, 50);
+            P(top, MeshGen.Cylinder(0.24f, 0.24f, 0.035f, 12), "WOOD", 0.5f, 1.3f, 0.08f, 50, 90);
+            if (d.attacker) P(top, MeshGen.Box(0.05f, 0.035f, 0.95f), "WOOD", -0.5f, 1.36f, 0.45f, 0);
+            else P(top, MeshGen.Sphere(0.1f, 8, 6), "LINEN", -0.5f, 1.36f, 0, 50);
+            top.localRotation = Quaternion.Euler(0, d.yaw * Mathf.Rad2Deg, 0);
+            GlyphLayer.Build(d.root);
+        }
+        void DummyBreak(Dummy d, DummyPart part, float power)
+        {
+            var go = part.go; part.go = null; go.transform.SetParent(null, true);
+            var b = new Debris { go = go, r = 0.07f, life = 4f + Random.value, trail = 9 }; GlyphsOf(go, b.glyphs);
+            Vector3 q = go.transform.position, o = new Vector3(q.x - pos.x, 0, q.z - pos.z); if (o.sqrMagnitude < 1e-4f) o = Vector3.forward; o.Normalize();
+            float ang = (Random.value - 0.5f) * 1.6f, cs = Mathf.Cos(ang), sn = Mathf.Sin(ang), sp = power * (0.8f + Random.value);
+            b.v = new Vector3((o.x * cs - o.z * sn) * sp, 1.5f + Random.value * 2.5f, (o.x * sn + o.z * cs) * sp);
+            b.w = Random.onUnitSphere * (4f + Random.value * 9f);
+            debris.Add(b);
+        }
+        void DummyDamage(Dummy d, int dmg)
+        {
+            if (d.dead > 0) return;
+            d.hp = Mathf.Max(0, d.hp - dmg); d.wob = 1;
+            SpawnPuff(d.p + Vector3.up * 1.2f, 0.05f, new Vector3(0, 0.4f, 0), 0.4f);
+            foreach (var part in d.parts) if (part.go != null && (d.hp <= 0 || (part.stage > 0 && d.hp <= part.stage))) DummyBreak(d, part, d.hp <= 0 ? 2.2f : 1.6f);
+            if (d.hp <= 0) { d.dead = 3; Destroy(d.root); d.root = null; }
+        }
+        void UpdateDummies(float dt, float t)
+        {
+            if (loc != field || field == null) return;
+            if (dummies.Count == 0) for (int i = 0; i < Field.DUMMY_SPOTS.Length; i++) dummies.Add(new Dummy { p = Field.DUMMY_SPOTS[i], attacker = i == 1 });
+            for (int i = 0; i < dummies.Count; i++)
+            {
+                var d = dummies[i];
+                if (d.dead > 0) { d.dead -= dt; if (d.dead <= 0) BuildDummy(d); continue; }
+                if (d.root == null) BuildDummy(d);
+                float dx = pos.x - d.p.x, dz = pos.z - d.p.z, dist = Mathf.Sqrt(dx * dx + dz * dz), inv = 1f / Mathf.Max(dist, 1e-3f);
+                float fx = Mathf.Sin(player.heading), fz = Mathf.Cos(player.heading), facing = (-dx * fx - dz * fz) * inv;
+                // the hero's cut lands once, while the edge is travelling, on a dummy in reach and in front of him
+                if (player.Cutting && !player.atkHits.Contains(i) && dist < 1.75f && facing > 0.3f)
+                { player.atkHits.Add(i); DummyDamage(d, DUMMY_HIT); if (d.dead > 0) continue; }
+                // the worse its state, the more it leans; a hit makes it shudder and rock for a moment
+                d.wob *= Mathf.Exp(-dt * 6);
+                float lean = (1 - d.hp / 100f) * 0.22f, swing = 0;
+                d.root.transform.localPosition = d.p + new Vector3(d.wob * 0.012f * Mathf.Sin(t * 61), 0, d.wob * 0.012f * Mathf.Sin(t * 53));
+                if (d.attacker)
+                {
+                    // it turns to face the hero and, when he is in reach, winds up and swings
+                    if (dist < 4.5f && d.swing < 0) { float e = Mathf.DeltaAngle(d.yaw * Mathf.Rad2Deg, Mathf.Atan2(dx, dz) * Mathf.Rad2Deg) * Mathf.Deg2Rad; d.yaw += Mathf.Clamp(e, -3 * dt, 3 * dt); }
+                    d.cd -= dt; if (d.swing < 0 && d.cd <= 0 && dist < 2.0f && hp > 0) { d.swing = 0; d.struck = false; }
+                    if (d.swing >= 0)
+                    {
+                        d.swing += dt; float u = d.swing;
+                        swing = u < 0.5f ? -0.9f * (u / 0.5f) * (2 - u / 0.5f) : u < 0.64f ? -0.9f + 2.2f * (u - 0.5f) / 0.14f : 1.3f * Mathf.Max(0, 1 - (u - 0.64f) / 0.4f);
+                        if (!d.struck && u >= 0.58f)
+                        {
+                            d.struck = true;
+                            if (dist < 2.15f)
+                            {
+                                // blocked if the guard is up and the hero faces the dummy
+                                player.combatT = MotionActor.COMBAT_HOLD;
+                                if (player.Guard > 0.5f && facing > 0.2f) SpawnSparks(new Vector3(pos.x - dx * inv * 0.45f, 1.15f, pos.z - dz * inv * 0.45f), new Vector3(dx * inv, 0, dz * inv));
+                                else Damage(DUMMY_DMG);
+                            }
+                        }
+                        if (u > 1.04f) { d.swing = -1; d.cd = 1.3f; }
+                    }
+                }
+                // the sword sticks out on its right side, so the arm sweeps from there across the front (Unity: mirrored)
+                float yawDeg = d.attacker ? (d.yaw + 0.35f - swing) * Mathf.Rad2Deg : d.yaw * Mathf.Rad2Deg;
+                d.top.localRotation = Quaternion.Euler(d.wob * 0.2f * Mathf.Sin(t * 27) * Mathf.Rad2Deg, yawDeg, (lean + d.wob * 0.13f * Mathf.Sin(t * 33 + 1)) * Mathf.Rad2Deg);
+            }
+        }
+        // low integrity: a red glow creeps in from the edges of the screen; when it is critical the view pulses like a heartbeat
+        float heart; Texture2D texVig;
+        float DangerK() { return world ? Mathf.Clamp01((50 - hp) / 50f) : 0; }
+        void UpdateDanger(float t)
+        {
+            float ph = (t % 0.9f) / 0.9f, a = (ph - 0.08f) / 0.05f, b = (ph - 0.32f) / 0.055f;
+            heart = world && hp <= 20 && hp > 0 ? Mathf.Exp(-a * a) + 0.6f * Mathf.Exp(-b * b) : 0;
+        }
+        void DrawDanger(float W, float H)
+        {
+            float kd = DangerK(); if (kd <= 0) return;
+            if (texVig == null)
+            {
+                const int S = 64; texVig = new Texture2D(S, S, TextureFormat.RGBA32, false); texVig.wrapMode = TextureWrapMode.Clamp; var px = new Color[S * S];
+                for (int y = 0; y < S; y++) for (int x = 0; x < S; x++)
+                {
+                    float ex = Mathf.Min(x, S - 1 - x) / (S * 0.5f), ey = Mathf.Min(y, S - 1 - y) / (S * 0.5f);     // 0 at the edge .. 1 in the middle
+                    float e = Mathf.Clamp01(1 - Mathf.Min(ex / 0.42f, ey / 0.55f)); px[y * S + x] = new Color(1, 1, 1, e * e);
+                }
+                texVig.SetPixels(px); texVig.Apply();
+            }
+            var old = GUI.color; GUI.color = new Color(0.85f, 0.06f, 0.06f, Mathf.Clamp01(kd * (0.35f + 0.45f * kd) + heart * 0.14f * kd));
+            GUI.DrawTexture(new Rect(0, 0, W, H), texVig, ScaleMode.StretchToFill, true); GUI.color = old;
         }
         void RestoreBody() { hp = 100; for (int l = 0; l < 5; l++) limbs[l] = true; if (player != null) player.SetLimbs(limbs); }
         void Pickups()
@@ -695,7 +830,7 @@ namespace AsciiHero
             if (player.trail.Count > 0) { foreach (var q in player.trail) SpawnPuff(q, 0.03f, Vector3.zero, 0.3f); player.trail.Clear(); }
             hero.go.transform.position = pos;
             hero.go.transform.rotation = Quaternion.Euler(0, player.heading * Mathf.Rad2Deg, 0);
-            loc.Update(tNow); Pickups(); UpdateDebris(dt);
+            loc.Update(tNow); Pickups(); UpdateDummies(dt, tNow); UpdateDebris(dt); UpdateDanger(tNow);
             if (respawnT > 0) { respawnT -= dt; if (respawnT <= 0) { RestoreBody(); pos = loc.spawn; player.ResetSim(); } }
             // grass: the hero and a point trailing behind him push the blades aside
             heroTrail = Vector3.Lerp(heroTrail, pos, Mathf.Min(1, dt * 2.2f));
@@ -715,6 +850,7 @@ namespace AsciiHero
             loc.Cutaway(off);
             camTgt = Vector3.Lerp(camTgt, new Vector3(pos.x, 0.6f, pos.z), Mathf.Min(1, dt * 5));
             sceneCam.transform.position = camTgt + off; sceneCam.transform.LookAt(camTgt);
+            sceneCam.fieldOfView = 30 * (1 - 0.014f * heart);
         }
 
         void ActionButton(Rect r, string text, bool on)
@@ -867,6 +1003,7 @@ namespace AsciiHero
                 else GUI.Label(new Rect(vr.x + 20 * k, vr.center.y, vr.width - 40 * k, 30 * k), "Кадр ASCII ещё не готов", sSmall);
             }
             float L = safe.x + 12 * k, T = safe.y + 8 * k;
+            if (world) DrawDanger(W, H);
             if (!world) EditorUI(W, H, vr, L, T); else WorldUI(W, H, L, T);
             if (toastT > 0 && !string.IsNullOrEmpty(toast))
             {

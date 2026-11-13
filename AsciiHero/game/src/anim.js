@@ -464,18 +464,19 @@ function bodyLife(A, t, dt) {
 // A cut, not a chop: the hand leads and the blade trails behind it, the edge is drawn through the target in one long
 // arc that never stops at the "hit" - it keeps accelerating through and only then runs out at the far hip or shoulder.
 export const ATTACKS = {
-  1: { dur: 0.7, cut: [0.25, 0.5], k: [[0, null],
-        [0.16, [0.5, 0.75, -0.1], [-0.1, 0.9, -0.3], [0.3, 0.5, -0.8], 0.45],
-        [0.26, [0.45, 0.45, 0.75], [0.2, 0.75, 0.6], [0.4, 0.85, -0.35], 0.25],
-        [0.33, [0.25, 0.1, 0.95], [0, 0.1, 1], [-0.1, 0.7, 0.7], 0],
-        [0.4, [-0.15, -0.4, 0.9], [-0.55, -0.35, 0.75], [-0.55, 0.05, 0.83], -0.3],
-        [0.48, [-0.4, -0.75, 0.5], [-0.85, -0.45, 0.1], [-0.7, -0.45, -0.55], -0.5], [0.7, null]] },
-  2: { dur: 0.68, cut: [0.25, 0.5], k: [[0, null],
-        [0.16, [-0.5, -0.2, 0.8], [-0.95, 0.2, 0.1], [-0.6, 0.2, -0.75], -0.5],
-        [0.26, [-0.25, -0.15, 0.95], [-0.6, 0.1, 0.8], [-0.95, 0.15, 0.1], -0.25],
-        [0.33, [0.1, -0.1, 1], [0.05, 0.05, 1], [-0.45, 0.1, 0.9], 0],
-        [0.4, [0.6, -0.12, 0.8], [0.7, 0, 0.7], [0.35, 0.1, 0.93], 0.3],
-        [0.48, [0.9, -0.2, 0.3], [0.95, 0, -0.1], [0.9, 0.1, -0.4], 0.5], [0.68, null]] } };
+  1: { dur: 0.74, cut: [0.27, 0.54], k: [[0, null],
+        [0.2, [0.55, 0.7, -0.45], [0.1, 0.75, -0.65], [0.35, 0.1, -0.95], 0.85],
+        [0.3, [0.5, 0.5, 0.65], [0.25, 0.8, 0.45], [0.5, 0.75, -0.5], 0.5],
+        [0.37, [0.25, 0.1, 0.95], [0, 0.1, 1], [-0.1, 0.7, 0.7], 0],
+        [0.44, [-0.15, -0.4, 0.9], [-0.55, -0.35, 0.75], [-0.55, 0.05, 0.83], -0.5],
+        [0.52, [-0.45, -0.75, 0.4], [-0.85, -0.45, -0.1], [-0.6, -0.5, -0.65], -0.85], [0.74, null]] },
+  2: { dur: 0.72, cut: [0.27, 0.54], k: [[0, null],
+        [0.2, [-0.7, -0.05, 0.55], [-0.9, 0.25, -0.3], [-0.3, 0.25, -0.95], -0.85],
+        [0.3, [-0.3, -0.12, 0.95], [-0.7, 0.1, 0.7], [-0.95, 0.15, -0.15], -0.5],
+        [0.37, [0.1, -0.1, 1], [0.05, 0.05, 1], [-0.45, 0.1, 0.9], 0],
+        [0.44, [0.6, -0.12, 0.8], [0.7, 0, 0.7], [0.35, 0.1, 0.93], 0.5],
+        [0.52, [0.95, -0.15, -0.05], [0.8, 0, -0.6], [0.45, 0.1, -0.9], 0.85], [0.72, null]] } };
+export const COMBAT_HOLD = 3;      // seconds the fighting stance is kept after the last cut, block or hit
 // starts a cut if the previous one is over (the cooldown is the animation itself). Standing: a random cut, then they
 // alternate. Running: the cut that continues the arm's motion - sword arm behind -> 1 (down from above), in front -> 2 (flat).
 export function startAttack(A) {
@@ -484,7 +485,7 @@ export function startAttack(A) {
   let type;
   if ((A.vel || 0) > 0.5) type = Math.cos((A.phase || 0) * Math.PI * 2) > 0 ? 2 : 1;
   else type = A.lastAtk ? 3 - A.lastAtk : (Math.random() < 0.5 ? 1 : 2);
-  A.lastAtk = type; A.atk = { type, t: 0, dur: ATTACKS[type].dur };
+  A.lastAtk = type; A.atk = { type, t: 0, dur: ATTACKS[type].dur, hits: new Set() }; A.combatT = COMBAT_HOLD;
   return true;
 }
 function combat(A, dt) {
@@ -495,7 +496,23 @@ function combat(A, dt) {
   const blade = (dirW, w) => { const g = A.char.group.userData.weapon, wb = H.bone('wrist.R'); if (!g || !wb || w <= 0) return;
     const cur = new THREE.Vector3(0, 1, 0).applyQuaternion(g.getWorldQuaternion(new THREE.Quaternion()));
     rotateWorld(wb, new THREE.Quaternion().slerp(new THREE.Quaternion().setFromUnitVectors(cur, dirW), w)); };
-  const twist = a => { for (const [n, f] of [['spine05', 0.4], ['spine03', 0.6]]) { const b = H.bone(n); if (b) rotateWorld(b, new THREE.Quaternion().setFromAxisAngle(Y, -a * f)); } };
+  // the whole trunk winds up and unwinds; the head keeps looking ahead
+  const twist = a => { for (const [n, f] of [['spine05', 0.4], ['spine03', 0.6], ['neck01', -0.45]]) { const b = H.bone(n); if (b) rotateWorld(b, new THREE.Quaternion().setFromAxisAngle(Y, -a * f)); } };
+  // fighting stance: kept for a few seconds after the last cut, block or hit. Feet wider than the shoulders (see footIK),
+  // knees bent, the back rounded forward, the arms held a little away from the body
+  if (A.guardHeld) A.combatT = COMBAT_HOLD;
+  A.combatT = Math.max(0, (A.combatT || 0) - dt);
+  A.stance = (A.stance || 0) + ((A.combatT > 0 ? 1 : 0) - (A.stance || 0)) * (1 - Math.exp(-dt * LN2 / 0.14));
+  const st = A.stance, still = 1 - (A.wWalk || 0);
+  A.stanceFeet = st * still;
+  if (st > 0.01) {
+    const X = new THREE.Vector3(1, 0, 0).applyQuaternion(gq), Z = new THREE.Vector3(0, 0, 1).applyQuaternion(gq);
+    const R = (n, ax, ang) => { const b = H.bone(n); if (b) rotateWorld(b, new THREE.Quaternion().setFromAxisAngle(ax, ang)); };
+    H.root.position.y -= (0.075 * still + 0.02) * st; H.root.updateMatrixWorld(true);
+    const hunch = st * (0.6 + 0.4 * still);
+    R('spine05', X, 0.11 * hunch); R('spine03', X, 0.14 * hunch); R('neck01', X, -0.16 * hunch);
+    for (const [s, sg, on] of [['L', 1, A.limbs.armL], ['R', -1, A.limbs.armR]]) { if (!on) continue; R('upperarm01.' + s, Z, sg * 0.24 * st); R('lowerarm01.' + s, X, -0.3 * st * still); }
+  }
   // guard
   A.guard = (A.guard || 0) + ((A.guardHeld ? 1 : 0) - (A.guard || 0)) * (1 - Math.exp(-dt * LN2 / 0.06));
   const gw = A.guard, shield = (A.char.cfgWeapon || 'none') === 'shield';
@@ -636,7 +653,11 @@ function footIK(A, dt) {
       // feet under the hips: the mocap stance is wider than a relaxed one (not while side-stepping)
       const gq = g.getWorldQuaternion(new THREE.Quaternion()), al = ap.clone().sub(g.position).applyQuaternion(gq.clone().invert());
       const lim = Math.abs(hp.clone().sub(g.position).applyQuaternion(gq.clone().invert()).x), ax = Math.abs(al.x);
-      if (ax > lim) { const nx = Math.sign(al.x) * (lim + (ax - lim) * 0.1); al.x += (nx - al.x) * A.narrow; const w = al.applyQuaternion(gq).add(g.position); target.x = w.x; target.z = w.z; }
+      let moved = false;
+      if (ax > lim) { const nx = Math.sign(al.x) * (lim + (ax - lim) * 0.1); al.x += (nx - al.x) * A.narrow; moved = true; }
+      // fighting stance: feet a little wider than the shoulders, the left one half a step ahead
+      const sf = A.stanceFeet || 0; if (sf > 0.01) { const sg = s === 'L' ? 1 : -1; al.x += (sg * (lim + 0.13) - al.x) * sf; al.z += sg * 0.09 * sf; moved = true; }
+      if (moved) { const w = al.applyQuaternion(gq).add(g.position); target.x = w.x; target.z = w.z; }
     }
     if (oneLeg) {
       // hopping: the foot stays under the body, swings forward in the air and back on the ground

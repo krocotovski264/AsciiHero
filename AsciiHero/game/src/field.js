@@ -13,7 +13,10 @@ export function buildField(mats) {
   const M = (geo, mat, x, y, z, cast = true) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = cast; m.receiveShadow = true; g.add(m); return m; };
   const ground = M(new THREE.PlaneGeometry(HX * 2 + 6, HZ * 2 + 6), mats.GROUND, 0, 0, 0, false); ground.rotation.x = -Math.PI / 2;
   g.add(new THREE.HemisphereLight(0x8fa4d8, 0x1a2414, 0.5));
-  const spawn = new THREE.Vector3(0, 0, 0);
+  const spawn = new THREE.Vector3(0, 0, 1.5);
+  // two training dummies in the middle, 3.5 m apart: the left one only takes hits, the right one hits back
+  const dummies = [{ x: -1.75, z: -1.2, attacker: false }, { x: 1.75, z: -1.2, attacker: true }];
+  for (const d of dummies) colliders.push({ x: d.x, z: d.z, r: 0.34 });
   const free = (x, z, r) => Math.hypot(x - spawn.x, z - spawn.z) > 1.5 + r && colliders.every(c => Math.hypot(x - c.x, z - c.z) > c.r + r + 0.5) && piles.every(p => Math.hypot(x - p.x, z - p.z) > 1.6 + r);
   const place = (r, margin = 1) => { for (let k = 0; k < 200; k++) { const x = (R() * 2 - 1) * (HX - margin), z = (R() * 2 - 1) * (HZ - margin); if (free(x, z, r)) return [x, z]; } return [0, 0]; };
   // trees
@@ -58,5 +61,5 @@ export function buildField(mats) {
   const bounds = { minx: -HX + 0.3, maxx: HX - 0.3, minz: -HZ + 0.3, maxz: HZ - 0.3 };
   // take the piece of this pile for limb `l`; returns true if there was one
   const take = (pile, l) => { const m = pile.items[l]; if (!m) return false; m.visible = false; pile.group.traverse(o => { if (o.userData.of === m) o.visible = false; }); delete pile.items[l]; return true; };
-  return { group: g, colliders, bounds, piles, take, spawn, update() {}, cutaway() {}, name: 'field' };
+  return { group: g, colliders, bounds, piles, take, spawn, dummies, update() {}, cutaway() {}, name: 'field' };
 }
