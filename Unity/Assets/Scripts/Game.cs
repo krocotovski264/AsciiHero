@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.22 · Unity";
+        public const string VERSION = "beta 0.23 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()

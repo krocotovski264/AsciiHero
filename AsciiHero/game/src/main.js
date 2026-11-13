@@ -339,7 +339,7 @@ function updateDummies(dt, t) {
     const dx = pos.x - d.x, dz = pos.z - d.z, dist = Math.hypot(dx, dz);
     // the hero's cut lands once, while the edge is travelling, on a dummy in reach and in front of him
     const a = player.atk;
-    if (a && a.t < a.dur && !a.hits.has(i) && a.t > ATTACKS[a.type].cut[0] + 0.06 && a.t < ATTACKS[a.type].cut[1] && dist < 1.75) {
+    if (a && a.t < a.dur && !a.hits.has(i) && a.t > ATTACKS[a.type].cut[0] && a.t < ATTACKS[a.type].cut[1] && dist < 1.75) {
       const fx = Math.sin(player.heading), fz = Math.cos(player.heading);
       if ((-dx * fx - dz * fz) / Math.max(dist, 1e-3) > 0.3) { a.hits.add(i); dummyDamage(d, DUMMY_HIT); if (d.dead > 0) continue; }
     }

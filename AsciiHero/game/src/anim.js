@@ -305,6 +305,8 @@ export function animateActor(A, t, dt = 1 / 60) {
     const kp = 1 - Math.exp(-dt * LN2 / 0.25);
     for (const j of [0, 2]) { if (Math.abs(A.ro[j] - A.roAvg[j]) > 0.12) A.roAvg[j] = A.ro[j]; A.roAvg[j] += (A.ro[j] - A.roAvg[j]) * kp; A.ro[j] -= A.roAvg[j]; }
   }
+  attackLayer(A, dt);
+  const aw0 = A.atkW || 0;
   // weapon layer masks
   const weapon = A.char.cfgWeapon || 'none', names = MM_META.bones;
   for (let k = 0; k < nb; k++) {
@@ -312,6 +314,7 @@ export function animateActor(A, t, dt = 1 / 60) {
     if (weapon !== 'none' && /(upperarm01|lowerarm01|wrist)\.R/.test(n)) m = (weapon === 'spear' || weapon === 'staff') ? 0.7 : 0.5;
     if (weapon === 'shield' && /(upperarm01|lowerarm01|wrist)\.L/.test(n)) m = 0.85;
     if (/wrist/.test(n) && m === 0) m = 0.3;
+    if (!(weapon === 'shield' && /\.L$/.test(n))) m *= 1 - aw0;      // a cut takes the arms over completely
     const q = A.outQ[k].clone(); if (m > 0) q.slerp(A.baseQ[A.map[k]], m);
     B[A.map[k]].quaternion.copy(q);
   }
@@ -424,12 +427,13 @@ function bodyLife(A, t, dt) {
   // posture: the mocap runner bends 17 degrees forward and throws the head back; bring the trunk to a normal
   // carriage for the gait (upright at rest, about 3 degrees forward walking, 8 running) before adding the leans
   const sp = A.sprint || 0;
+  const kw = 1 - (A.atkW || 0);          // during a cut the captured posture is left alone
   const want = 0.01 + 0.07 * wW + 0.19 * wR + 0.1 * sp;      // 4 degrees forward walking, 12 running, 17 in the sprint: one line from hips to head
   { // the pelvis first (a pelvis tipped forward under an upright chest is what reads as an arched back); the legs keep their pose
-    const w = P(H.bone('spine03')).sub(P(H.bone('root'))), d = (want - (Math.atan2(w.dot(Z), w.y) - A.restLower)) * 0.8;
+    const w = P(H.bone('spine03')).sub(P(H.bone('root'))), d = (want - (Math.atan2(w.dot(Z), w.y) - A.restLower)) * 0.8 * kw;
     rot('root', X, d); rot('upperleg01.L', X, -d); rot('upperleg01.R', X, -d); }
   { const u = P(H.bone('neck01')).sub(P(H.bone('root'))), cur = Math.atan2(u.dot(Z), u.y) - A.restTrunk;
-    const d = want - cur; rot('spine05', X, d * 0.5); rot('spine03', X, d * 0.5); }
+    const d = (want - cur) * kw; rot('spine05', X, d * 0.5); rot('spine03', X, d * 0.5); }
   // pelvis: dip under load, slow weight shift when standing
   H.root.position.y -= A.dip; H.root.position.x += idle * 0.012 * Math.sin(t * 0.45); H.root.updateMatrixWorld(true);
   // torso: lean (root, lower and upper spine share it), counter-rotation, breathing
@@ -441,7 +445,7 @@ function bodyLife(A, t, dt) {
   rot('neck01', Y, -twist * 0.5 + A.look * 0.3 + idle * 0.06 * Math.sin(t * 0.37)); rot('head', Y, -twist * 0.35 + A.look * 0.35 + idle * 0.05 * Math.sin(t * 0.23 + 1));
   // head: eyes on the path ahead, a touch below level, whatever the trunk does
   { const hb = H.bone('head'); if (hb) { const f = new THREE.Vector3(0, 0, 1).applyQuaternion(hb.getWorldQuaternion(new THREE.Quaternion()));
-      const up = Math.asin(clamp(f.y, -1, 1)), d = (up - (-0.07 + idle * 0.02 * Math.sin(t * 0.8))) * 0.9; rot('neck01', X, d * 0.4); rot('head', X, d * 0.6); } }
+      const up = Math.asin(clamp(f.y, -1, 1)), d = (up - (-0.07 + idle * 0.02 * Math.sin(t * 0.8))) * 0.9 * kw; rot('neck01', X, d * 0.4); rot('head', X, d * 0.6); } }
   // arms: swing opposite to the legs (phase 0 = left foot lands, so the right arm is forward)
   const weapon = A.char.cfgWeapon || 'none';
   for (const [s, sg, on] of [['L', 1, L.armL], ['R', -1, L.armR]]) {
@@ -456,7 +460,7 @@ function bodyLife(A, t, dt) {
     rot('upperarm01.' + s, Z, sg * (0.03 * breath * idle + 0.04 * wR * Math.abs(cs)));
     // run: compact arm action. The elbow stays sharply bent; in front the fist comes up to the chest (towards the
     // breastbone, not reaching forward), behind the elbow goes only a little past the back and the fist stops at the hip
-    const aw = Math.min(1, 0.8 * wR + 0.2 * sp) * (shield ? 0.45 : 1);
+    const aw = Math.min(1, 0.8 * wR + 0.2 * sp) * (shield ? 0.45 : 1) * kw;
     if (aw > 0.01) {
       const u = 0.5 + 0.5 * sw;                              // 0 = arm back, 1 = arm in front
       // behind: the arm is driven well back and opens almost straight (the elbow keeps only a slight bend), away from the ribs
@@ -471,25 +475,34 @@ function bodyLife(A, t, dt) {
 }
 
 // ---------- combat: two sword cuts and the guard ----------
-// Directions are in the body frame as [right, up, forward]. Each key: time, upper arm, forearm, blade, torso yaw (to the right +).
-// 1: from the upper right down to the lower left.  2: flat, from the left to the right.
-// A cut, not a chop: the hand leads and the blade trails behind it, the edge is drawn through the target in one long
-// arc that never stops at the "hit" - it keeps accelerating through and only then runs out at the far hip or shoulder.
-// After the yaw come the lean of the trunk to the side (to the right +) and forwards (+): the body goes with the sword -
-// winding up it leans the way it turns, cutting it throws its weight across to the other side.
+// The cuts are motion capture (Bandai Namco Research Motiondataset, CC BY-NC 4.0 - not for commercial use), retargeted
+// to this skeleton and stored at the end of the motion database. 1: from overhead down to the lower left.
+// 2: wound up low behind the left side and drawn across to the upper right.
+// knots: [game time, clip frame] - the wind-up and the cut are played faster than they were performed.
+// cut: the time the edge is travelling. blade: the direction of the blade per clip frame, body frame (x = left, y = up, z = forward).
 export const ATTACKS = {
-  1: { dur: 0.74, cut: [0.27, 0.54], k: [[0, null],
-        [0.2, [0.55, 0.7, -0.45], [0.1, 0.75, -0.65], [0.35, 0.1, -0.95], 0.85, 0.22, -0.12],
-        [0.3, [0.5, 0.5, 0.65], [0.25, 0.8, 0.45], [0.5, 0.75, -0.5], 0.5, 0.14, -0.06],
-        [0.37, [0.25, 0.1, 0.95], [0, 0.1, 1], [-0.1, 0.7, 0.7], 0, 0, 0.05],
-        [0.44, [-0.15, -0.4, 0.9], [-0.55, -0.35, 0.75], [-0.55, 0.05, 0.83], -0.5, -0.15, 0.14],
-        [0.52, [-0.45, -0.75, 0.4], [-0.85, -0.45, -0.1], [-0.6, -0.5, -0.65], -0.85, -0.25, 0.18], [0.74, null]] },
-  2: { dur: 0.72, cut: [0.27, 0.54], k: [[0, null],
-        [0.2, [-0.7, -0.05, 0.55], [-0.9, 0.25, -0.3], [-0.3, 0.25, -0.95], -0.85, -0.22, 0.12],
-        [0.3, [-0.3, -0.12, 0.95], [-0.7, 0.1, 0.7], [-0.95, 0.15, -0.15], -0.5, -0.14, 0.08],
-        [0.37, [0.1, -0.1, 1], [0.05, 0.05, 1], [-0.45, 0.1, 0.9], 0, 0, 0],
-        [0.44, [0.6, -0.12, 0.8], [0.7, 0, 0.7], [0.35, 0.1, 0.93], 0.5, 0.15, -0.08],
-        [0.52, [0.95, -0.15, -0.05], [0.8, 0, -0.6], [0.45, 0.1, -0.9], 0.85, 0.25, -0.15], [0.72, null]] } };
+  1: { a: 9945, dur: 0.74, knots: [[0, 2], [0.3, 32], [0.57, 52], [0.74, 62]], cut: [0.4, 0.55], blade: [[0.003,0.417,0.909],[0.003,0.425,0.905],[0.003,0.438,0.899],[0.001,0.458,0.889],[-0.002,0.486,0.874],[-0.006,0.524,0.851],[-0.01,0.572,0.82],[-0.013,0.628,0.778],[-0.015,0.689,0.724],[-0.016,0.754,0.657],[-0.017,0.818,0.575],[-0.017,0.878,0.479],[-0.016,0.928,0.371],[-0.013,0.967,0.254],[-0.009,0.991,0.131],[-0.001,1.0,0.006],[0.01,0.993,-0.118],[0.022,0.971,-0.237],[0.034,0.936,-0.35],[0.044,0.891,-0.452],[0.051,0.838,-0.543],[0.056,0.782,-0.621],[0.059,0.727,-0.684],[0.06,0.677,-0.734],[0.061,0.632,-0.772],[0.06,0.595,-0.802],[0.059,0.564,-0.823],[0.058,0.541,-0.839],[0.058,0.523,-0.851],[0.059,0.508,-0.859],[0.06,0.496,-0.866],[0.061,0.485,-0.872],[0.06,0.475,-0.878],[0.057,0.468,-0.882],[0.048,0.464,-0.885],[0.03,0.466,-0.884],[-0.005,0.48,-0.877],[-0.062,0.516,-0.854],[-0.145,0.583,-0.799],[-0.249,0.686,-0.684],[-0.354,0.808,-0.471],[-0.419,0.898,-0.137],[-0.392,0.874,0.289],[-0.25,0.678,0.691],[-0.044,0.359,0.932],[0.141,0.041,0.989],[0.259,-0.203,0.944],[0.316,-0.371,0.873],[0.336,-0.482,0.809],[0.341,-0.554,0.759],[0.343,-0.597,0.725],[0.342,-0.619,0.707],[0.343,-0.624,0.702],[0.347,-0.616,0.708],[0.355,-0.598,0.719],[0.365,-0.575,0.732],[0.377,-0.549,0.746],[0.389,-0.523,0.758],[0.401,-0.497,0.769],[0.411,-0.474,0.779],[0.418,-0.453,0.787],[0.425,-0.437,0.793],[0.431,-0.423,0.797],[0.436,-0.413,0.8],[0.439,-0.406,0.801],[0.442,-0.402,0.802]] },
+  2: { a: 10011, dur: 0.76, knots: [[0, 2], [0.32, 35], [0.59, 53], [0.76, 64]], cut: [0.41, 0.56], blade: [[-0.003,0.412,0.911],[-0.003,0.417,0.909],[-0.005,0.425,0.905],[-0.009,0.438,0.899],[-0.015,0.456,0.89],[-0.022,0.481,0.877],[-0.031,0.515,0.857],[-0.04,0.557,0.83],[-0.048,0.607,0.793],[-0.056,0.664,0.745],[-0.063,0.728,0.683],[-0.069,0.792,0.606],[-0.073,0.855,0.514],[-0.076,0.91,0.407],[-0.079,0.955,0.285],[-0.082,0.985,0.152],[-0.089,0.996,0.011],[-0.1,0.986,-0.132],[-0.117,0.955,-0.271],[-0.137,0.906,-0.401],[-0.158,0.843,-0.515],[-0.176,0.771,-0.612],[-0.191,0.696,-0.692],[-0.202,0.62,-0.758],[-0.21,0.544,-0.813],[-0.215,0.471,-0.856],[-0.214,0.403,-0.89],[-0.206,0.34,-0.918],[-0.189,0.281,-0.941],[-0.162,0.225,-0.961],[-0.126,0.172,-0.977],[-0.082,0.122,-0.989],[-0.031,0.072,-0.997],[0.024,0.018,-1.0],[0.089,-0.046,-0.995],[0.17,-0.12,-0.978],[0.275,-0.203,-0.94],[0.407,-0.286,-0.868],[0.562,-0.358,-0.745],[0.727,-0.408,-0.551],[0.867,-0.419,-0.269],[0.925,-0.368,0.089],[0.859,-0.236,0.455],[0.684,-0.026,0.729],[0.472,0.234,0.85],[0.3,0.495,0.816],[0.204,0.706,0.678],[0.173,0.842,0.51],[0.178,0.913,0.368],[0.194,0.942,0.274],[0.203,0.953,0.226],[0.194,0.958,0.211],[0.17,0.961,0.217],[0.141,0.962,0.234],[0.115,0.96,0.255],[0.096,0.957,0.275],[0.082,0.953,0.292],[0.073,0.949,0.307],[0.069,0.946,0.316],[0.066,0.945,0.322],[0.065,0.943,0.325],[0.063,0.943,0.328],[0.061,0.942,0.331],[0.059,0.941,0.333],[0.057,0.941,0.334],[0.057,0.942,0.332],[0.059,0.943,0.328],[0.06,0.944,0.326]] } };
+const ATK_IN = 0.09, ATK_OUT = 0.2;
+const _aq = [];
+// lays the cut over the pose from locomotion: the whole body when standing, from the waist up when moving
+function attackLayer(A, dt) {
+  const a = A.atk; if (!a || a.t >= a.dur || !A.limbs.armR) { A.atkW = 0; return; }
+  a.t += dt; const C = ATTACKS[a.type], K = C.knots, t = Math.min(a.t, a.dur); let i = 0; while (i < K.length - 2 && t > K[i + 1][0]) i++;
+  const fr = K[i][1] + (K[i + 1][1] - K[i][1]) * clamp((t - K[i][0]) / (K[i + 1][0] - K[i][0]), 0, 1);
+  const sm = x => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }, w = Math.min(sm(t / ATK_IN), sm((a.dur - t) / ATK_OUT));
+  const nb = DB.nb; if (!_aq.length) for (let k = 0; k < nb; k++) _aq.push(new THREE.Quaternion());
+  const ro = [0, 0, 0]; samplePose(C.a + fr, _aq, ro, null);
+  const wl = w * (1 - (A.wWalk || 0)), shield = (A.char.cfgWeapon || 'none') === 'shield', names = MM_META.bones;
+  for (let k = 0; k < nb; k++) {
+    const n = names[k]; let wk = w;
+    if (n === 'root' || /leg|foot/.test(n)) wk = wl;
+    else if (shield && /\.L$/.test(n)) wk = 0;                 // the shield arm keeps the shield up
+    A.outQ[k].slerp(_aq[k], wk);
+  }
+  for (let j = 0; j < 3; j++) A.ro[j] += (ro[j] - A.ro[j]) * wl;
+  A.atkW = w; a.fr = fr;
+}
 export const COMBAT_HOLD = 3;      // seconds the fighting stance is kept after the last cut, block or hit
 // starts a cut if the previous one is over (the cooldown is the animation itself). Standing: a random cut, then they
 // alternate. Running: the cut that continues the arm's motion - sword arm behind -> 1 (down from above), in front -> 2 (flat).
@@ -517,7 +530,7 @@ function combat(A, dt) {
   if (A.guardHeld) A.combatT = COMBAT_HOLD;
   A.combatT = Math.max(0, (A.combatT || 0) - dt);
   A.stance = (A.stance || 0) + ((A.combatT > 0 ? 1 : 0) - (A.stance || 0)) * (1 - Math.exp(-dt * LN2 / 0.14));
-  const st = A.stance, still = 1 - (A.wWalk || 0);
+  const st = A.stance * (1 - (A.atkW || 0)), still = 1 - (A.wWalk || 0);
   A.stanceFeet = st * still;
   if (st > 0.01) {
     const X = new THREE.Vector3(1, 0, 0).applyQuaternion(gq), Z = new THREE.Vector3(0, 0, 1).applyQuaternion(gq);
@@ -554,39 +567,13 @@ function combat(A, dt) {
     }
     else if (A.limbs.armR) { aim('upperarm01.R', 'lowerarm01.R', B([0.15, -0.55, 0.82]), gw); aim('lowerarm01.R', 'wrist.R', B([-0.5, 0.45, 0.74]), gw); blade(B([-0.6, 0.78, 0.15]), gw); }
   }
-  // cut. The power comes from the ground up, link after link, each a little later than the one below it:
-  // the legs shift the weight, the hips turn first, the chest follows them, then the shoulder and the arm, and the
-  // wrist with the blade comes through last. So the pelvis is evaluated slightly ahead of the chest and the arm.
-  const a = A.atk; if (!a || a.t >= a.dur || !A.limbs.armR) { A.plantW = 0; return; }
-  a.t += dt; const K = ATTACKS[a.type].k;
-  const at = tt => { let i = 0; while (i < K.length - 2 && tt > K[i + 1][0]) i++;
-    const k0 = K[i], k1 = K[i + 1], u = clamp((tt - k0[0]) / (k1[0] - k0[0]), 0, 1), s = u * u * (3 - 2 * u);
-    // entering and leaving the cut the pose is blended with the body's own; between the keys everything follows one
-    // smooth curve through them (Catmull-Rom), so the arm sweeps through without stopping anywhere
-    const w = k0[1] && k1[1] ? 1 : k1[1] ? s : 1 - s, on = j => K[clamp(j, 1, K.length - 2)];
-    const cr = j => { if (!k0[1] || !k1[1]) return (k1[1] ? k1 : k0)[j];
-      const p0 = on(i - 1)[j], p1 = k0[j], p2 = k1[j], p3 = on(i + 2)[j], f = (a0, a1, a2, a3) => 0.5 * (2 * a1 + (a2 - a0) * u + (2 * a0 - 5 * a1 + 4 * a2 - a3) * u * u + (3 * a1 - a0 - 3 * a2 + a3) * u * u * u);
-      return typeof p1 === 'number' ? f(p0, p1, p2, p3) : [0, 1, 2].map(c => f(p0[c], p1[c], p2[c], p3[c])); };
-    return { w, cr }; };
-  const now = at(a.t), lead = at(Math.min(a.dur, a.t + 0.055)), w = now.w, cr = now.cr;
-  const stl = 1 - (A.wWalk || 0) * 0.6, yawN = clamp(cr(4) / 0.85, -1, 1), hipYaw = lead.cr(4) * lead.w * 0.42 * stl;
-  // feet stay where they were while the pelvis turns over them (footIK re-plants them): the legs take the twist
-  A.plant = {}; for (const s of ['L', 'R']) { const fb = H.bone('foot.' + s); if (fb) A.plant[s] = P(fb); }
-  A.plantW = w * (1 - (A.wWalk || 0));
-  { const rb = H.bone('root'); if (rb) rotateWorld(rb, new THREE.Quaternion().setFromAxisAngle(Y, -hipYaw)); }
-  // weight: back and onto the rear side while winding up, then driven forward and across; the knees give as the cut lands
-  const through = 1 - yawN * yawN;
-  H.root.position.x -= 0.05 * yawN * w * stl; H.root.position.z += (0.25 * cr(6) + 0.045 * through) * w * stl; H.root.position.y -= (0.015 + 0.035 * through) * w;
-  H.root.updateMatrixWorld(true);
-  twist(cr(4) * w * 0.75);
-  { const Zb = new THREE.Vector3(0, 0, 1).applyQuaternion(gq), Xb = new THREE.Vector3(1, 0, 0).applyQuaternion(gq), roll = cr(5) * w, pitch = cr(6) * w;
-    for (const n of ['spine05', 'spine03']) { const b = H.bone(n); if (b) { rotateWorld(b, new THREE.Quaternion().setFromAxisAngle(Zb, roll * 0.5)); rotateWorld(b, new THREE.Quaternion().setFromAxisAngle(Xb, pitch * 0.5)); } } }
-  aim('upperarm01.R', 'lowerarm01.R', B(cr(1)), w); aim('lowerarm01.R', 'wrist.R', B(cr(2)), w); blade(B(cr(3)), w);
-  // the free arm balances the sword arm: forward while the sword is drawn back, thrown back and out as the cut goes through
-  if (A.limbs.armL && (A.char.cfgWeapon || 'none') !== 'shield') { aim('upperarm01.L', 'lowerarm01.L', B([-0.4, -0.78, 0.05 + 0.45 * yawN]), 0.7 * w); aim('lowerarm01.L', 'wrist.L', B([-0.15, -0.55, 0.6 + 0.3 * yawN]), 0.6 * w); }
-  // while the edge is travelling it leaves a streak in the air
-  const g = A.char.group.userData.weapon, C = ATTACKS[a.type].cut;
-  if (g && a.t > C[0] && a.t < C[1]) { g.updateWorldMatrix(true, false); (A.trail = A.trail || []).push(new THREE.Vector3(0, 0.8, 0).applyMatrix4(g.matrixWorld), new THREE.Vector3(0, 0.45, 0).applyMatrix4(g.matrixWorld)); }
+  // cut: the body is driven by the captured motion (attackLayer); here the blade is set in the hand and leaves its streak
+  const a = A.atk; A.plantW = 0; if (!a || a.t >= a.dur || !(A.atkW > 0)) return;
+  const C = ATTACKS[a.type], f0 = Math.min(C.blade.length - 1, Math.floor(a.fr)), f1 = Math.min(C.blade.length - 1, f0 + 1), u = a.fr - f0;
+  const bd = [0, 1, 2].map(c => C.blade[f0][c] * (1 - u) + C.blade[f1][c] * u);
+  blade(new THREE.Vector3(bd[0], bd[1], bd[2]).applyQuaternion(gq).normalize(), A.atkW);
+  const g = A.char.group.userData.weapon;
+  if (g && a.t > C.cut[0] - 0.05 && a.t < C.cut[1] + 0.03) { g.updateWorldMatrix(true, false); (A.trail = A.trail || []).push(new THREE.Vector3(0, 0.8, 0).applyMatrix4(g.matrixWorld), new THREE.Vector3(0, 0.45, 0).applyMatrix4(g.matrixWorld)); }
 }
 
 // ---------- anatomical joint limits ----------
@@ -628,10 +615,11 @@ function pinArms(A) {
   const gq = groupQ(A), H = A.H;
   for (const [s, w] of [['L', weapon === 'shield' ? 1 : 0], ['R', weapon === 'spear' || weapon === 'staff' ? 0.8 : 0.55]]) {
     if (w <= 0 || !A.limbs[s === 'L' ? 'armL' : 'armR']) continue;
+    const wp = s === 'R' ? w * (1 - (A.atkW || 0)) : w; if (wp <= 0.001) continue;
     for (const n of ARM_CHAIN) {
       const b = H.bone(n + '.' + s), rel = A.armRel[n + '.' + s]; if (!b || !rel) continue;
       const cur = b.getWorldQuaternion(new THREE.Quaternion()), tgt = gq.clone().multiply(rel);
-      cur.slerp(tgt, w);
+      cur.slerp(tgt, wp);
       b.quaternion.copy(b.parent.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(cur)); b.updateMatrixWorld(true);
     }
   }
@@ -652,6 +640,7 @@ function relaxArms(A) {
     const dW = P(el).sub(P(up)).normalize(), d = dW.clone().applyQuaternion(gi);
     const sign = s === 'L' ? 1 : -1, o = d.x * sign, r = Math.hypot(o, d.y), abd = Math.atan2(o, -d.y);
     const oneLeg = A.limbs.legL !== A.limbs.legR;
+    if ((A.atkW || 0) > 0.3) continue;            // a cut raises the arms on purpose
     if (!oneLeg && abd <= ARM_MAX) continue;
     const a2 = oneLeg ? Math.max(abd, 0.55 + 0.12 * Math.sin(A.hopPh)) : (ARM_MAX + 0.13 * (A.wRun || 0)) + Math.max(0, abd - ARM_MAX - 0.13 * (A.wRun || 0)) * ARM_SOFT;   // one leg: arms out for balance
     const d2 = new THREE.Vector3(Math.sin(a2) * r * sign, -Math.cos(a2) * r, d.z).normalize().applyQuaternion(gq);
@@ -687,7 +676,7 @@ function footIK(A, dt) {
     const target = ap.clone();
     if ((A.plantW || 0) > 0.01 && A.plant && A.plant[s]) { target.x += (A.plant[s].x - target.x) * A.plantW; target.z += (A.plant[s].z - target.z) * A.plantW; }
     if (F.rel > 0) { target.x += dxl * F.rel; target.z += dzl * F.rel; }
-    else if (A.narrow > 0) {
+    else if (A.narrow > 0 && !((A.atkW || 0) > 0.3)) {
       // feet under the hips: the mocap stance is wider than a relaxed one (not while side-stepping)
       const gq = g.getWorldQuaternion(new THREE.Quaternion()), al = ap.clone().sub(g.position).applyQuaternion(gq.clone().invert());
       const lim = Math.abs(hp.clone().sub(g.position).applyQuaternion(gq.clone().invert()).x), ax = Math.abs(al.x);

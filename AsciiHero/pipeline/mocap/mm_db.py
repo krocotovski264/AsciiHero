@@ -49,6 +49,17 @@ for fn, a, b in SPEC:
         rows['RM'].append(np.stack([c['fwd'][sl], c['lat'][sl], c['yawr'][sl]], 1)); rows['CON'].append(c['con'][sl])
         v = np.ones(m, dtype=bool); v[-31:] = False; v[:2] = False
         valid.append(v); ranges.append([total, total + m, fn + ('M' if mirror else '')]); total += m
+# sword cuts from the Bandai Namco Research Motiondataset (CC BY-NC 4.0): appended after the CMU frames and never
+# offered to motion matching (valid = 0); the game plays them by frame index
+import bandai, json as _json
+ATK = []
+for fn, a, b in (('dataset-1_slash_normal_001.bvh', 164, 230), ('dataset-1_slash_normal_002.bvh', 164, 232)):
+    c = bandai.process(fn, a, b); m = c['n']
+    rows['Q'].append(c['Q']); rows['RO'].append(c['RO']); rows['F'].append(np.zeros((m, 27)))
+    rows['RM'].append(np.zeros((m, 3))); rows['CON'].append(c['con'])
+    valid.append(np.zeros(m, dtype=bool)); ranges.append([total, total + m, 'bandai/' + fn])
+    ATK.append({'a': total, 'n': m, 'blade': np.round(c['blade'], 3).tolist()}); total += m
+_json.dump(ATK, open('/home/claude/mocap/atk.json', 'w'))
 print('frames', total)
 Q = np.concatenate(rows['Q']); RO = np.concatenate(rows['RO']); RM = np.concatenate(rows['RM']); CON = np.concatenate(rows['CON']); F = np.concatenate(rows['F']); V = np.concatenate(valid)
 # hemisphere continuity inside each range
