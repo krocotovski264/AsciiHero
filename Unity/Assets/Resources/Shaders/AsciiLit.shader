@@ -40,6 +40,17 @@ Shader "AsciiHero/Lit"
         TEXTURE2D(_MainTex); SAMPLER(sampler_MainTex);
         float _AsciiNDPass;
         float4 _DashShift;   // per renderer (world): during the dash the armour pieces lag behind the body
+        float4 _DashSpin;    // per renderer: xyz = axis, w = angle; the piece tumbles about _DashPivot while it flies
+        float4 _DashPivot;
+        float3 DashWS(float3 ws)
+        {
+            if (_DashSpin.w != 0.0)
+            {
+                float3 v = ws - _DashPivot.xyz; float cs = cos(_DashSpin.w), sn = sin(_DashSpin.w);
+                ws = _DashPivot.xyz + v * cs + cross(_DashSpin.xyz, v) * sn + _DashSpin.xyz * dot(_DashSpin.xyz, v) * (1.0 - cs);
+            }
+            return ws + _DashShift.xyz;
+        }
         ENDHLSL
 
         Pass
@@ -74,7 +85,7 @@ Shader "AsciiHero/Lit"
             {
                 Varyings o;
                 UNITY_SETUP_INSTANCE_ID(i);
-                float3 pWS = TransformObjectToWorld(i.positionOS.xyz) + _DashShift.xyz;
+                float3 pWS = DashWS(TransformObjectToWorld(i.positionOS.xyz));
                 VertexNormalInputs n = GetVertexNormalInputs(i.normalOS);
                 o.positionCS = TransformWorldToHClip(pWS);
                 o.positionWS = pWS;
@@ -143,7 +154,7 @@ Shader "AsciiHero/Lit"
             Varyings vert (Attributes i)
             {
                 Varyings o;
-                float3 positionWS = TransformObjectToWorld(i.positionOS.xyz) + _DashShift.xyz;
+                float3 positionWS = DashWS(TransformObjectToWorld(i.positionOS.xyz));
                 float3 normalWS = TransformObjectToWorldNormal(i.normalOS);
             #if _CASTING_PUNCTUAL_LIGHT_SHADOW
                 float3 lightDirectionWS = normalize(_LightPosition - positionWS);
@@ -175,7 +186,7 @@ Shader "AsciiHero/Lit"
             #pragma fragment frag
             struct Attributes { float4 positionOS : POSITION; };
             struct Varyings { float4 positionCS : SV_POSITION; };
-            Varyings vert (Attributes i) { Varyings o; o.positionCS = TransformWorldToHClip(TransformObjectToWorld(i.positionOS.xyz) + _DashShift.xyz); return o; }
+            Varyings vert (Attributes i) { Varyings o; o.positionCS = TransformWorldToHClip(DashWS(TransformObjectToWorld(i.positionOS.xyz))); return o; }
             half frag (Varyings i) : SV_Target { return i.positionCS.z; }
             ENDHLSL
         }
@@ -192,7 +203,7 @@ Shader "AsciiHero/Lit"
             #pragma fragment frag
             struct Attributes { float4 positionOS : POSITION; float3 normalOS : NORMAL; };
             struct Varyings { float4 positionCS : SV_POSITION; float3 normalWS : TEXCOORD0; };
-            Varyings vert (Attributes i) { Varyings o; o.positionCS = TransformWorldToHClip(TransformObjectToWorld(i.positionOS.xyz) + _DashShift.xyz); o.normalWS = TransformObjectToWorldNormal(i.normalOS); return o; }
+            Varyings vert (Attributes i) { Varyings o; o.positionCS = TransformWorldToHClip(DashWS(TransformObjectToWorld(i.positionOS.xyz))); o.normalWS = TransformObjectToWorldNormal(i.normalOS); return o; }
             half4 frag (Varyings i) : SV_Target { return half4(NormalizeNormalPerPixel(i.normalWS), 0); }
             ENDHLSL
         }

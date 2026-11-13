@@ -37,7 +37,7 @@ namespace AsciiHero
         public Transform model;         // scaled for height
         public Human human;
         public CharConfig cfg;
-        public Transform weapon, orb;
+        public Transform weapon, orb, shield;   // shield: local z = its face, local y = its top
         public List<Renderer> glyphs = new List<Renderer>();   // skinned glyph renderers (limb hiding)
         public static readonly string[] LIMBS = { "head", "armL", "armR", "legL", "legR" };
         public static readonly string[] LIMB_NAME = { "голова", "левая рука", "правая рука", "левая нога", "правая нога" };
@@ -378,6 +378,7 @@ namespace AsciiHero
             Part(MeshGen.Box(0.05f, 0.6f, 0.01f), "GOLD", g, new Vector3(0, -0.06f, 0.036f));
             Part(MeshGen.Box(0.4f, 0.05f, 0.01f), "GOLD", g, new Vector3(0, 0.08f, 0.034f));
             Attach("lowerarm02.L", g, model.InverseTransformPoint(c), Quaternion.Inverse(model.rotation) * Quaternion.LookRotation(outV, up));
+            shield = g;
         }
         static Mesh Bend(Mesh m, float dz)
         {

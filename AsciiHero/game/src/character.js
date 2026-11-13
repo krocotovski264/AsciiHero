@@ -309,4 +309,5 @@ function addShield(group, h, mats) {
   const ch = mesh(box(0.4, 0.05, 0.01), mats.GOLD); ch.position.set(0, 0.08, 0.034); g.add(ch);
   const m = new THREE.Matrix4().makeBasis(side, up, out).setPosition(c);
   attach(h, 'lowerarm02.L', g, m);
+  group.userData.shield = g;      // local z = the face of the shield, local y = its top
 }

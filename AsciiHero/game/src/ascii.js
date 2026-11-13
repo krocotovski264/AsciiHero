@@ -114,7 +114,8 @@ attribute float aseed;
 uniform sampler2D tLit, tDepth;
 uniform vec2 uCell;
 uniform float uRow, uActor, uExposure, uNear, uFar, uDepthRef, uEps, uScale, uMinGlyph, uSmoke, uTime, uBurn, uPuff, uLod;
-uniform vec3 uVel, uShift;
+uniform vec3 uVel, uShift, uPivot;
+uniform vec4 uSpin;
 varying vec2 vLocal;
 varying vec3 vCol;
 varying float vGi;
@@ -135,6 +136,11 @@ void main() {
   #include <skinning_vertex>
   bool gone = length(objectNormal) < 0.3;      // torn-off limb: its bones are scaled to nothing
   vec4 mv = modelViewMatrix * vec4(transformed, 1.0);
+  if (uSpin.w != 0.0) {      // dash: the piece tumbles about its own centre while it flies
+    vec3 wp = (modelMatrix * vec4(transformed, 1.0)).xyz - uPivot; float cs = cos(uSpin.w), sn = sin(uSpin.w);
+    wp = wp * cs + cross(uSpin.xyz, wp) * sn + uSpin.xyz * dot(uSpin.xyz, wp) * (1.0 - cs);
+    mv = viewMatrix * vec4(wp + uPivot, 1.0);
+  }
   mv.xyz += (viewMatrix * vec4(uShift, 0.0)).xyz;      // dash: armour pieces lag behind the body
   if (uSmoke > 0.5 && uPuff <= 0.0) mv.xyz -= (viewMatrix * vec4(uVel, 0.0)).xyz * (0.05 + 0.2 * wisp) * ph * ph;
   vec3 nV = normalize(normalMatrix * objectNormal);
@@ -147,7 +153,7 @@ void main() {
   mv.y += ember * ember * 0.35;
   // far camera: fewer, larger characters (uLod = how many times further than the close-up distance)
   bool lodKeep = uLod < 1.01 || fract(aseed * 31.7 + 0.37) < 1.7 / (uLod * uLod);
-  bool vis = lodKeep && !gone && ember < 0.999 && dot(nV, toCam) > -0.05 - ember - uPuff * 4.0 && myZ <= sceneZ + uEps + 0.002 * myZ && all(greaterThanEqual(suv, vec2(0.0))) && all(lessThanEqual(suv, vec2(1.0)));
+  bool vis = lodKeep && !gone && ember < 0.999 && dot(nV, toCam) > -0.05 - ember - uPuff * 4.0 - (uSpin.w != 0.0 ? 4.0 : 0.0) && myZ <= sceneZ + uEps + 0.002 * myZ && all(greaterThanEqual(suv, vec2(0.0))) && all(lessThanEqual(suv, vec2(1.0)));
   vec3 col = pow(max(texture2D(tLit, suv).rgb, 0.0), vec3(1.0 / 2.2));
   float lum = dot(col, vec3(0.299, 0.587, 0.114));
   float depthK = clamp(1.0 - (myZ - uDepthRef) * 0.09, 0.5, 1.2);          // nearer = brighter
@@ -178,12 +184,12 @@ void main() {
   float mk = texture2D(tGlyph, vec2((vGi + l.x) / 16.0, 1.0 - (uRow + 1.0) / uRows + l.y / uRows)).r;
   gl_FragColor = vec4(vCol * mk, 1.0);
 }`;
-const GMAT = new Map(), NO_SHIFT = { value: new THREE.Vector3() };
+const GMAT = new Map(), NO_SHIFT = { value: new THREE.Vector3() }, NO_SPIN = { value: new THREE.Vector4(0, 1, 0, 0) };
 function glyphMaterial(row, cell, actor, smoke = 0, burn = null, puff = null, shift = null) {
   const key = row + ':' + cell.x + ':' + actor + ':' + smoke;
   if (!burn && !puff && !shift && GMAT.has(key)) return GMAT.get(key);
   const m = new THREE.ShaderMaterial({
-    uniforms: Object.assign({}, GLYPH, { uRow: { value: row }, uCell: { value: cell }, uActor: { value: actor }, uSmoke: { value: smoke }, uBurn: burn || { value: 0 }, uPuff: puff || { value: 0 }, uShift: shift || NO_SHIFT }),
+    uniforms: Object.assign({}, GLYPH, { uRow: { value: row }, uCell: { value: cell }, uActor: { value: actor }, uSmoke: { value: smoke }, uBurn: burn || { value: 0 }, uPuff: puff || { value: 0 }, uShift: shift ? shift.shift : NO_SHIFT, uSpin: shift ? shift.spin : NO_SPIN, uPivot: shift ? shift.pivot : NO_SHIFT }),
     vertexShader: GLYPH_VS, fragmentShader: GLYPH_FS,
     depthTest: false, depthWrite: false, transparent: false, side: THREE.DoubleSide,
     blending: THREE.CustomBlending, blendEquation: THREE.MaxEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
@@ -328,13 +334,18 @@ export function makeGrass(points, seeds) {
 /** build the character layer for every mesh under root (once per mesh) */
 // gives a mesh its own world-space offset (lit pass and glyphs): used for the dash, where the armour pieces fly after the body
 export function enableShift(mesh) {
-  const src = mesh.material, sh = { value: new THREE.Vector3() }, id = src.userData.matId;
+  const src = mesh.material, id = src.userData.matId;
+  const U = { shift: { value: new THREE.Vector3() }, spin: { value: new THREE.Vector4(0, 1, 0, 0) }, pivot: { value: new THREE.Vector3() } };
   const m = src.clone(); m.userData = src.userData;
-  m.onBeforeCompile = s => { s.uniforms.uShift = sh;
-    s.vertexShader = 'uniform vec3 uShift;\n' + s.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n  mvPosition.xyz += (viewMatrix * vec4(uShift, 0.0)).xyz; gl_Position = projectionMatrix * mvPosition;');
+  m.onBeforeCompile = s => { s.uniforms.uShift = U.shift; s.uniforms.uSpin = U.spin; s.uniforms.uPivot = U.pivot;
+    s.vertexShader = 'uniform vec3 uShift, uPivot;\nuniform vec4 uSpin;\n' + s.vertexShader.replace('#include <project_vertex>', `
+  vec3 wpS = (modelMatrix * vec4(transformed, 1.0)).xyz - uPivot; float csS = cos(uSpin.w), snS = sin(uSpin.w);
+  wpS = wpS * csS + cross(uSpin.xyz, wpS) * snS + uSpin.xyz * dot(uSpin.xyz, wpS) * (1.0 - csS);
+  vec4 mvPosition = viewMatrix * vec4(wpS + uPivot + uShift, 1.0);
+  gl_Position = projectionMatrix * mvPosition;`);
     s.fragmentShader = s.fragmentShader.replace(/}\s*$/, `  gl_FragColor.a = ${(id / 255).toFixed(6)};\n}`); };
   m.customProgramCacheKey = () => 'matS' + id;
-  mesh.material = m; mesh.userData.shift = sh; return sh;
+  mesh.material = m; mesh.userData.shift = U; return U;
 }
 export function buildGlyphLayer(root) {
   root.updateMatrixWorld(true);

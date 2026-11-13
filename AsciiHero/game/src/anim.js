@@ -461,11 +461,21 @@ function bodyLife(A, t, dt) {
 // ---------- combat: two sword cuts and the guard ----------
 // Directions are in the body frame as [right, up, forward]. Each key: time, upper arm, forearm, blade, torso yaw (to the right +).
 // 1: from the upper right down to the lower left.  2: flat, from the left to the right.
+// A cut, not a chop: the hand leads and the blade trails behind it, the edge is drawn through the target in one long
+// arc that never stops at the "hit" - it keeps accelerating through and only then runs out at the far hip or shoulder.
 export const ATTACKS = {
-  1: { dur: 0.62, k: [[0, null], [0.2, [0.55, 0.65, -0.15], [0.05, 0.95, -0.45], [0.35, 0.55, -0.75], 0.4], [0.34, [0.25, 0.05, 0.95], [-0.25, 0.15, 0.95], [-0.35, 0.45, 0.82], -0.05],
-                      [0.44, [-0.35, -0.55, 0.75], [-0.8, -0.5, 0.35], [-0.75, -0.6, 0.25], -0.45], [0.62, null]] },
-  2: { dur: 0.58, k: [[0, null], [0.2, [-0.45, -0.25, 0.85], [-0.9, 0.15, 0.3], [-0.85, 0.25, -0.45], -0.45], [0.32, [0.15, -0.1, 1], [0, 0.02, 1], [0.05, 0.1, 1], 0],
-                      [0.42, [0.8, -0.15, 0.55], [0.9, 0, 0.25], [0.85, 0.1, -0.5], 0.45], [0.58, null]] } };
+  1: { dur: 0.7, cut: [0.25, 0.5], k: [[0, null],
+        [0.16, [0.5, 0.75, -0.1], [-0.1, 0.9, -0.3], [0.3, 0.5, -0.8], 0.45],
+        [0.26, [0.45, 0.45, 0.75], [0.2, 0.75, 0.6], [0.4, 0.85, -0.35], 0.25],
+        [0.33, [0.25, 0.1, 0.95], [0, 0.1, 1], [-0.1, 0.7, 0.7], 0],
+        [0.4, [-0.15, -0.4, 0.9], [-0.55, -0.35, 0.75], [-0.55, 0.05, 0.83], -0.3],
+        [0.48, [-0.4, -0.75, 0.5], [-0.85, -0.45, 0.1], [-0.7, -0.45, -0.55], -0.5], [0.7, null]] },
+  2: { dur: 0.68, cut: [0.25, 0.5], k: [[0, null],
+        [0.16, [-0.5, -0.2, 0.8], [-0.95, 0.2, 0.1], [-0.6, 0.2, -0.75], -0.5],
+        [0.26, [-0.25, -0.15, 0.95], [-0.6, 0.1, 0.8], [-0.95, 0.15, 0.1], -0.25],
+        [0.33, [0.1, -0.1, 1], [0.05, 0.05, 1], [-0.45, 0.1, 0.9], 0],
+        [0.4, [0.6, -0.12, 0.8], [0.7, 0, 0.7], [0.35, 0.1, 0.93], 0.3],
+        [0.48, [0.9, -0.2, 0.3], [0.95, 0, -0.1], [0.9, 0.1, -0.4], 0.5], [0.68, null]] } };
 // starts a cut if the previous one is over (the cooldown is the animation itself). Standing: a random cut, then they
 // alternate. Running: the cut that continues the arm's motion - sword arm behind -> 1 (down from above), in front -> 2 (flat).
 export function startAttack(A) {
@@ -492,17 +502,37 @@ function combat(A, dt) {
   if (gw > 0.01) {
     H.root.position.y -= 0.05 * gw; H.root.updateMatrixWorld(true);
     const X = new THREE.Vector3(1, 0, 0).applyQuaternion(gq); for (const n of ['spine05', 'spine03']) { const b = H.bone(n); if (b) rotateWorld(b, new THREE.Quaternion().setFromAxisAngle(X, 0.06 * gw)); }
-    if (shield && A.limbs.armL) { twist(0.25 * gw); aim('upperarm01.L', 'lowerarm01.L', B([-0.2, -0.5, 0.85]), gw); aim('lowerarm01.L', 'wrist.L', B([0.5, 0.6, 0.62]), gw); }
+    if (shield && A.limbs.armL) {
+      // the forearm lies across the chest and the shield is turned to stand upright, squarely facing forward
+      aim('upperarm01.L', 'lowerarm01.L', B([-0.3, -0.6, 0.74]), gw); aim('lowerarm01.L', 'wrist.L', B([0.8, 0.25, 0.45]), gw);
+      const g = A.char.group.userData.shield, fb = H.bone('lowerarm02.L');
+      if (g && fb) {
+        const gq2 = () => g.getWorldQuaternion(new THREE.Quaternion());
+        const q1 = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1).applyQuaternion(gq2()), B([0, 0.08, 1]));
+        rotateWorld(fb, new THREE.Quaternion().slerp(q1, gw));
+        const f = new THREE.Vector3(0, 0, 1).applyQuaternion(gq2()), up = new THREE.Vector3(0, 1, 0).applyQuaternion(gq2());
+        const want = Y.clone().addScaledVector(f, -Y.dot(f)).normalize(), ang = Math.atan2(new THREE.Vector3().crossVectors(up, want).dot(f), up.dot(want));
+        rotateWorld(fb, new THREE.Quaternion().setFromAxisAngle(f, ang * gw));
+      }
+    }
     else if (A.limbs.armR) { aim('upperarm01.R', 'lowerarm01.R', B([0.15, -0.55, 0.82]), gw); aim('lowerarm01.R', 'wrist.R', B([-0.5, 0.45, 0.74]), gw); blade(B([-0.6, 0.78, 0.15]), gw); }
   }
   // cut
   const a = A.atk; if (!a || a.t >= a.dur || !A.limbs.armR) return;
   a.t += dt; const K = ATTACKS[a.type].k; let i = 0; while (i < K.length - 2 && a.t > K[i + 1][0]) i++;
   const k0 = K[i], k1 = K[i + 1], u = clamp((a.t - k0[0]) / (k1[0] - k0[0]), 0, 1), s = u * u * (3 - 2 * u);
-  const w = k0[1] && k1[1] ? 1 : k1[1] ? s : 1 - s, e0 = k0[1] ? k0 : k1, e1 = k1[1] ? k1 : k0;
-  const mix = j => [0, 1, 2].map(c => e0[j][c] + (e1[j][c] - e0[j][c]) * s);
-  twist((e0[4] + (e1[4] - e0[4]) * s) * w);
-  aim('upperarm01.R', 'lowerarm01.R', B(mix(1)), w); aim('lowerarm01.R', 'wrist.R', B(mix(2)), w); blade(B(mix(3)), w);
+  // entering and leaving the cut the pose is blended with the body's own; between the keys the arm follows one smooth
+  // curve through them (Catmull-Rom), so it sweeps through without stopping anywhere
+  const w = k0[1] && k1[1] ? 1 : k1[1] ? s : 1 - s;
+  const on = j => K[clamp(j, 1, K.length - 2)];
+  const cr = j => { if (!k0[1] || !k1[1]) return (k1[1] ? k1 : k0)[j];
+    const p0 = on(i - 1)[j], p1 = k0[j], p2 = k1[j], p3 = on(i + 2)[j], f = (a0, a1, a2, a3) => 0.5 * (2 * a1 + (a2 - a0) * u + (2 * a0 - 5 * a1 + 4 * a2 - a3) * u * u + (3 * a1 - a0 - 3 * a2 + a3) * u * u * u);
+    return typeof p1 === 'number' ? f(p0, p1, p2, p3) : [0, 1, 2].map(c => f(p0[c], p1[c], p2[c], p3[c])); };
+  twist(cr(4) * w);
+  aim('upperarm01.R', 'lowerarm01.R', B(cr(1)), w); aim('lowerarm01.R', 'wrist.R', B(cr(2)), w); blade(B(cr(3)), w);
+  // while the edge is travelling it leaves a streak in the air
+  const g = A.char.group.userData.weapon, C = ATTACKS[a.type].cut;
+  if (g && a.t > C[0] && a.t < C[1]) { g.updateWorldMatrix(true, false); (A.trail = A.trail || []).push(new THREE.Vector3(0, 0.8, 0).applyMatrix4(g.matrixWorld), new THREE.Vector3(0, 0.45, 0).applyMatrix4(g.matrixWorld)); }
 }
 
 // ---------- anatomical joint limits ----------

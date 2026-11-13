@@ -143,7 +143,13 @@ function rebuild() {
   { const byKey = new Map(); char.pieces = [];
     char.group.updateMatrixWorld(true);
     char.group.traverse(o => { if (!o.isMesh || o.material === actorMats.SHADOW || o.material === actorMats.EYE) return;
-      const key = o.isSkinnedMesh ? o : o.parent; let pc = byKey.get(key); if (!pc) { pc = { shifts: [], delay: 0, dur: 0.15 }; byKey.set(key, pc); char.pieces.push(pc); }
+      const key = o.isSkinnedMesh ? o : o.parent; let pc = byKey.get(key);
+      if (!pc) { pc = { shifts: [], delay: 0, dur: 0.15, axis: new THREE.Vector3(0, 1, 0), turns: 1, side: 0 }; byKey.set(key, pc); char.pieces.push(pc);
+        // the point the piece tumbles about: its centre, carried by the nearest bone
+        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+        const c = o.geometry.boundingBox.getCenter(new THREE.Vector3()); if (!o.isSkinnedMesh) c.applyMatrix4(o.matrixWorld);
+        let best = null, bd = 1e9; for (const b of char.skeleton.bones) { const d = b.getWorldPosition(new THREE.Vector3()).distanceTo(c); if (d < bd) { bd = d; best = b; } }
+        pc.bone = best; pc.off = best.worldToLocal(c.clone()); }
       pc.shifts.push(enableShift(o)); }); }
   buildGlyphLayer(char.group);
   scene.add(char.group);
@@ -221,11 +227,11 @@ const SEG = s => ({
   arm: [['upperarm01.' + s, 'lowerarm01.' + s, 0.05], ['lowerarm01.' + s, 'wrist.' + s, 0.042], ['wrist.' + s, null, 'hand']],
   leg: [['upperleg01.' + s, 'lowerleg01.' + s, 0.078], ['lowerleg01.' + s, 'foot.' + s, 0.058], ['foot.' + s, null, 'foot']] });
 const DEBRIS_SEGS = { head: [['head', null, 'head']], armL: SEG('L').arm, armR: SEG('R').arm, legL: SEG('L').leg, legR: SEG('R').leg };
-function spawnPuff(p, size, v) {
+function spawnPuff(p, size, v, life) {
   const puff = { value: 0.001 };
   const m = new THREE.Mesh(new THREE.SphereGeometry(size, 10, 7), actorMats.SHADOW); m.userData.puff = puff; m.position.copy(p);
   scene.add(m); buildGlyphLayer(m);
-  puffs.push({ m, puff, t: 0, life: 0.9 + size * 4, v: v ? v.clone() : new THREE.Vector3() });
+  puffs.push({ m, puff, t: 0, life: life || 0.9 + size * 4, v: v ? v.clone() : new THREE.Vector3() });
 }
 function spawnDebris(l) {
   if (!char || mode !== 'world') return;
@@ -293,7 +299,7 @@ let moonLight = null;
 let heading = 0, heroLight = null, lockOn = false, lockFixed = null, labelT = 0;
 // Diablo-like isometric camera: fixed diagonal yaw, steep pitch, narrow FOV
 // MOBA camera: fixed (no rotation), high and far, looking down at about 55 degrees
-const ISO_LOD = 2.5;
+const ISO_LOD = 2.5 / 1.5;
 const ISO = { yaw: 0, pitch: 0.96, dist: 7.6 * ISO_LOD, fov: 30, yawT: 0, pitchT: 0.96 };
 const ISO_FOV = ISO.fov;
 const ISO_OFF = new THREE.Vector3();
@@ -395,14 +401,17 @@ function doDash() {
   if (mode !== 'world' || !player || dash.cd > 0 || !(body.limbs.legL || body.limbs.legR)) return;
   // moving: where the stick points; standing: where the hero looks
   const d = act.dir ? new THREE.Vector3(act.dir[0], 0, act.dir[1]) : new THREE.Vector3(Math.sin(player.heading), 0, Math.cos(player.heading));
-  dash.dir = d.normalize(); dash.t = 0; dash.cd = DASH_ANIM + 0.5; dash.from.copy(pos); dash.mist = 0;
-  // every piece of armour leaves at its own moment and takes its own time: all of them arrive within 0.2-0.3 s
-  for (const pc of char.pieces) { pc.delay = 0.03 + Math.random() * 0.11; pc.dur = 0.11 + Math.random() * 0.07; }
+  dash.dir = d.normalize(); dash.t = 0; dash.from.copy(pos); dash.mist = 0;
+  // the armour follows piece by piece, one after another, like a suit assembling itself; each piece tumbles on its way
+  const order = char.pieces.slice().sort(() => Math.random() - 0.5), gap = Math.min(0.04, 0.4 / Math.max(1, order.length));
+  order.forEach((pc, i) => { pc.delay = DASH_T * 0.6 + i * gap; pc.dur = 0.14 + Math.random() * 0.04;
+    pc.axis.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize(); pc.turns = (Math.random() < 0.5 ? -1 : 1) * (1 + Math.floor(Math.random() * 2)); pc.side = (Math.random() - 0.5) * 0.7; });
+  dash.anim = DASH_T * 0.6 + (order.length - 1) * gap + 0.18; dash.cd = dash.anim + 0.5;
   player.sim.h = player.heading = Math.atan2(d.x, d.z);
 }
 function updateDash(dt) {
   dash.cd = Math.max(0, dash.cd - dt);
-  if (dash.t > DASH_ANIM + 0.05) return;
+  if (dash.t > (dash.anim || 0) + 0.05) return;
   if (dash.t < DASH_T) {            // the shadow itself crosses the distance in a tenth of a second
     const k = Math.min(dt, DASH_T - dash.t) / DASH_T, bx = pos.x, bz = pos.z;
     pos.x += dash.dir.x * DASH_DIST * k; pos.z += dash.dir.z * DASH_DIST * k; collide(pos, 0.27);
@@ -410,9 +419,17 @@ function updateDash(dt) {
   }
   dash.t += dt;
   const back = dash.from.clone().sub(pos);
-  for (const pc of char.pieces) { const u = Math.max(0, Math.min(1, (dash.t - pc.delay) / pc.dur)), e = u * u * (3 - 2 * u); for (const sh of pc.shifts) sh.value.copy(back).multiplyScalar(1 - e); }
+  const sideV = new THREE.Vector3(-dash.dir.z, 0, dash.dir.x);
+  for (const pc of char.pieces) {
+    const u = Math.max(0, Math.min(1, (dash.t - pc.delay) / pc.dur)), e = u * u * (3 - 2 * u), arc = Math.sin(Math.PI * e);
+    const piv = pc.bone.localToWorld(pc.off.clone());
+    for (const U of pc.shifts) {
+      U.shift.value.copy(back).multiplyScalar(1 - e).addScaledVector(sideV, pc.side * arc); U.shift.value.y += 0.3 * arc;     // a low arc, a little to one side
+      U.pivot.value.copy(piv); U.spin.value.set(pc.axis.x, pc.axis.y, pc.axis.z, pc.turns * Math.PI * 2 * (1 - e) * (u > 0 ? 1 : 0));
+    }
+  }
   // mist hangs along the path
-  dash.mist -= dt; if (dash.mist <= 0 && dash.t < DASH_ANIM) { dash.mist = 0.035; const k = Math.random();
+  dash.mist -= dt; if (dash.mist <= 0 && dash.t < dash.anim) { dash.mist = 0.035; const k = Math.random();
     spawnPuff(new THREE.Vector3(pos.x + back.x * k, 0.35 + Math.random() * 1.1, pos.z + back.z * k), 0.07, new THREE.Vector3(0, 0.15, 0)); }
 }
 for (const [id, down, upF] of [['atk', doAttack, null], ['dash', doDash, null], ['def', () => { act.guard = true; }, () => { act.guard = false; }]]) {
@@ -440,6 +457,7 @@ function worldUpdate(dt, t) {
   const [ddx, ddz] = locomotion(player, dt, dir, mag, lockPos, pos, p => collide(p, 0.27));
   pos.x += ddx; pos.z += ddz;
   updateDash(dt);
+  if (player.trail && player.trail.length) { for (const q of player.trail) spawnPuff(q, 0.03, null, 0.3); player.trail.length = 0; }
   collide(pos, 0.27);
   heading = player.heading;
   char.group.position.set(pos.x, 0, pos.z);

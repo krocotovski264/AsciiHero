@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.18 · Unity";
+        public const string VERSION = "beta 0.19 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -64,7 +64,7 @@ namespace AsciiHero
 
         // world camera
         // MOBA camera: fixed (no rotation), high and far, looking down at about 55 degrees
-        const float ISO_LOD = 2.5f; float isoYaw = 0, isoPitch = 0.96f, isoYawT = 0, isoPitchT = 0.96f; const float ISO_DIST = 7.6f * ISO_LOD;
+        const float ISO_LOD = 2.5f / 1.5f; float isoYaw = 0, isoPitch = 0.96f, isoYawT = 0, isoPitchT = 0.96f; const float ISO_DIST = 7.6f * ISO_LOD;
         Vector3 pos, camTgt; bool lockOn; Vector3? lockFixed; float labelT; string animLabel = "idle";
 
         // UI
@@ -255,12 +255,12 @@ namespace AsciiHero
         static Seg[] LegSegs(string s) { return new[] { new Seg("upperleg01." + s, "lowerleg01." + s, 0.078f, 0), new Seg("lowerleg01." + s, "foot." + s, 0.058f, 0), new Seg("foot." + s, null, 0.04f, 3) }; }
         static readonly Seg[][] DEBRIS_SEGS = { new[] { new Seg("head", null, 0.13f, 1) }, ArmSegs("L"), ArmSegs("R"), LegSegs("L"), LegSegs("R") };
         static void GlyphsOf(GameObject go, List<Renderer> into) { foreach (var r in go.GetComponentsInChildren<Renderer>(true)) if (r.gameObject.layer == GlyphLayer.LAYER) into.Add(r); }
-        void SpawnPuff(Vector3 p, float size, Vector3 v)
+        void SpawnPuff(Vector3 p, float size, Vector3 v, float life = 0)
         {
-            if (puffs.Count > 40) return;
+            if (puffs.Count > 90) return;
             var go = MeshGen.Obj(MeshGen.Sphere(size, 10, 7), actorMats["SHADOW"], null, p, Quaternion.identity, false, "Puff");
             GlyphLayer.Build(go);
-            var f = new Puff { go = go, v = v, life = 0.9f + size * 4 }; GlyphsOf(go, f.glyphs);
+            var f = new Puff { go = go, v = v, life = life > 0 ? life : 0.9f + size * 4 }; GlyphsOf(go, f.glyphs);
             f.mpb.SetFloat("_GlyphPuff", 0.001f); foreach (var r in f.glyphs) if (r != null) r.SetPropertyBlock(f.mpb);
             puffs.Add(f);
         }
@@ -602,9 +602,9 @@ namespace AsciiHero
         static Vector3 Mirror(Vector3 v) { return new Vector3(-v.x, v.y, v.z); }
 
         // ---------- actions: attack, guard, dash ----------
-        class Piece { public List<Renderer> rs = new List<Renderer>(); public float delay, dur = 0.15f; }
+        class Piece { public List<Renderer> rs = new List<Renderer>(); public float delay, dur = 0.15f, turns = 1, side; public Vector3 axis = Vector3.up; }
         readonly List<Piece> pieces = new List<Piece>(); MaterialPropertyBlock shiftMpb;
-        const float DASH_DIST = 2.0f, DASH_T = 0.1f, DASH_ANIM = 0.32f;
+        const float DASH_DIST = 2.0f, DASH_T = 0.1f; float dashAnim = 0.4f;
         float dashT = 9, dashCd, dashMist; Vector3 dashFrom, dashDir; Vector2? moveDir; bool dashShifted;
         Rect atkRect, defRect, dashRect;
         void DoAttack() { if (world && player != null && dashT >= DASH_T) player.StartAttack(); }
@@ -613,22 +613,36 @@ namespace AsciiHero
             if (!world || player == null || dashCd > 0 || !(limbs[3] || limbs[4])) return;
             // moving: where the stick points; standing: where the hero looks
             Vector3 d = moveDir.HasValue ? new Vector3(moveDir.Value.x, 0, moveDir.Value.y) : new Vector3(Mathf.Sin(player.heading), 0, Mathf.Cos(player.heading));
-            dashDir = d.normalized; dashT = 0; dashCd = DASH_ANIM + 0.5f; dashFrom = pos; dashMist = 0;
-            // every piece of armour leaves at its own moment and takes its own time: all of them arrive within 0.2-0.3 s
-            foreach (var pc in pieces) { pc.delay = 0.03f + Random.value * 0.11f; pc.dur = 0.11f + Random.value * 0.07f; }
+            dashDir = d.normalized; dashT = 0; dashFrom = pos; dashMist = 0;
+            // the armour follows piece by piece, one after another, like a suit assembling itself; each piece tumbles on its way
+            var order = new List<Piece>(pieces);
+            for (int i = order.Count - 1; i > 0; i--) { int j = Random.Range(0, i + 1); var tmp = order[i]; order[i] = order[j]; order[j] = tmp; }
+            float gap = Mathf.Min(0.04f, 0.4f / Mathf.Max(1, order.Count));
+            for (int i = 0; i < order.Count; i++)
+            {
+                var pc = order[i]; pc.delay = DASH_T * 0.6f + i * gap; pc.dur = 0.14f + Random.value * 0.04f;
+                pc.axis = Random.onUnitSphere; pc.turns = (Random.value < 0.5f ? -1 : 1) * Random.Range(1, 3); pc.side = (Random.value - 0.5f) * 0.7f;
+            }
+            dashAnim = DASH_T * 0.6f + Mathf.Max(0, order.Count - 1) * gap + 0.18f; dashCd = dashAnim + 0.5f;
             player.Teleport(0, 0, Mathf.Atan2(dashDir.x, dashDir.z));
         }
-        void SetShift(Piece pc, Vector3 v)
+        void SetShift(Piece pc, Vector3 v, Vector4 spin)
         {
             if (shiftMpb == null) shiftMpb = new MaterialPropertyBlock();
-            foreach (var r in pc.rs) { if (r == null) continue; r.GetPropertyBlock(shiftMpb); shiftMpb.SetVector("_DashShift", v); r.SetPropertyBlock(shiftMpb); }
+            Vector3 piv = pc.rs.Count > 0 && pc.rs[0] != null ? pc.rs[0].bounds.center : pos;     // the piece tumbles about its own centre
+            foreach (var r in pc.rs)
+            {
+                if (r == null) continue; r.GetPropertyBlock(shiftMpb);
+                shiftMpb.SetVector("_DashShift", v); shiftMpb.SetVector("_DashSpin", spin); shiftMpb.SetVector("_DashPivot", piv);
+                r.SetPropertyBlock(shiftMpb);
+            }
         }
         void UpdateDash(float dt)
         {
             dashCd = Mathf.Max(0, dashCd - dt);
-            if (dashT > DASH_ANIM + 0.05f)
+            if (dashT > dashAnim + 0.05f)
             {
-                if (dashShifted) { foreach (var pc in pieces) SetShift(pc, Vector3.zero); dashShifted = false; }
+                if (dashShifted) { foreach (var pc in pieces) SetShift(pc, Vector3.zero, new Vector4(0, 1, 0, 0)); dashShifted = false; }
                 return;
             }
             if (dashT < DASH_T)
@@ -640,10 +654,16 @@ namespace AsciiHero
             }
             dashT += dt;
             Vector3 back = dashFrom - pos; dashShifted = true;
-            foreach (var pc in pieces) { float u = Mathf.Clamp01((dashT - pc.delay) / pc.dur), e = u * u * (3 - 2 * u); SetShift(pc, back * (1 - e)); }
+            Vector3 sideV = new Vector3(-dashDir.z, 0, dashDir.x);
+            foreach (var pc in pieces)
+            {
+                float u = Mathf.Clamp01((dashT - pc.delay) / pc.dur), e = u * u * (3 - 2 * u), arc = Mathf.Sin(Mathf.PI * e);
+                Vector3 sh = back * (1 - e) + sideV * (pc.side * arc) + Vector3.up * (0.3f * arc);       // a low arc, a little to one side
+                SetShift(pc, sh, new Vector4(pc.axis.x, pc.axis.y, pc.axis.z, u > 0 ? pc.turns * Mathf.PI * 2 * (1 - e) : 0));
+            }
             // mist hangs along the path
             dashMist -= dt;
-            if (dashMist <= 0 && dashT < DASH_ANIM) { dashMist = 0.035f; float rr = Random.value; SpawnPuff(new Vector3(pos.x + back.x * rr, 0.35f + Random.value * 1.1f, pos.z + back.z * rr), 0.07f, new Vector3(0, 0.15f, 0)); }
+            if (dashMist <= 0 && dashT < dashAnim) { dashMist = 0.035f; float rr = Random.value; SpawnPuff(new Vector3(pos.x + back.x * rr, 0.35f + Random.value * 1.1f, pos.z + back.z * rr), 0.07f, new Vector3(0, 0.15f, 0)); }
         }
 
         void WorldUpdate(float dt)
@@ -672,6 +692,7 @@ namespace AsciiHero
             var np = loc.Collide(new Vector2(pos.x + dd.x, pos.z + dd.y), 0.27f);
             pos = new Vector3(np.x, 0, np.y);
             UpdateDash(dt);
+            if (player.trail.Count > 0) { foreach (var q in player.trail) SpawnPuff(q, 0.03f, Vector3.zero, 0.3f); player.trail.Clear(); }
             hero.go.transform.position = pos;
             hero.go.transform.rotation = Quaternion.Euler(0, player.heading * Mathf.Rad2Deg, 0);
             loc.Update(tNow); Pickups(); UpdateDebris(dt);

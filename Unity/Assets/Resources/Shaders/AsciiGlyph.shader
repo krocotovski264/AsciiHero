@@ -37,7 +37,18 @@ Shader "AsciiHero/Glyph"
             TEXTURE2D(_AsciiLitTex); SAMPLER(sampler_AsciiLitTex);
             TEXTURE2D(_AsciiNDTex); SAMPLER(sampler_AsciiNDTex);
             float _AsciiRows, _AsciiExposure, _AsciiLinear, _AsciiDepthRef, _AsciiTime;
-            float4 _DashShift;    // per renderer (world): dash, the armour pieces lag behind the body
+            float4 _DashShift;   // per renderer (world): during the dash the armour pieces lag behind the body
+                float4 _DashSpin;    // per renderer: xyz = axis, w = angle; the piece tumbles about _DashPivot while it flies
+                float4 _DashPivot;
+                float3 DashWS(float3 ws)
+            {
+                if (_DashSpin.w != 0.0)
+                {
+                        float3 v = ws - _DashPivot.xyz; float cs = cos(_DashSpin.w), sn = sin(_DashSpin.w);
+                    ws = _DashPivot.xyz + v * cs + cross(_DashSpin.xyz, v) * sn + _DashSpin.xyz * dot(_DashSpin.xyz, v) * (1.0 - cs);
+                }
+                return ws + _DashShift.xyz;
+            }
             float _AsciiLod;      // far camera: fewer, larger characters (how many times further than the close-up distance)
             float _GlyphPuff;     // per renderer: 0..1, a burst of smoke flying apart
             float4 _AsciiHeroVel; // hero velocity (world): the wisps trail behind
@@ -60,7 +71,7 @@ Shader "AsciiHero/Glyph"
                 if (_GlyphSmoke > 0.5) pOS += i.normalOS * (0.004 + (0.07 + 0.09 * wisp) * ph * ph);
                 // puff (a burst of smoke where a limb is torn off): the glyphs fly apart from the centre, rise and thin out
                 if (_GlyphPuff > 0.0) pOS += i.normalOS * _GlyphPuff * (0.18 + 0.5 * i.seed.x);
-                float3 pWS = TransformObjectToWorld(pOS) + _DashShift.xyz;
+                float3 pWS = DashWS(TransformObjectToWorld(pOS));
                 float lod = max(1.0, _AsciiLod);
                 bool lodKeep = lod < 1.01 || frac(i.seed.x * 31.7 + 0.37) < 1.7 / (lod * lod);
                 if (_GlyphSmoke > 0.5) pWS.y += (0.15 + 0.4 * wisp) * ph * ph;
@@ -80,7 +91,7 @@ Shader "AsciiHero/Glyph"
                 float sceneZ = nd.b > 1e-4 ? nd.b * 12.0 : 1e5;
                 float myZ = -pVS.z;
                 bool inside = all(suv >= 0.0) && all(suv <= 1.0);
-                bool vis = lodKeep && !gone && ember < 0.999 && dot(nVS, toCam) > -0.05 - ember - _GlyphPuff * 4.0 && myZ <= sceneZ + 0.008 + 0.0035 * myZ && inside;
+                bool vis = lodKeep && !gone && ember < 0.999 && dot(nVS, toCam) > -0.05 - ember - _GlyphPuff * 4.0 - (_DashSpin.w != 0.0 ? 4.0 : 0.0) && myZ <= sceneZ + 0.008 + 0.0035 * myZ && inside;
                 float3 lit = SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, sampler_AsciiLitTex, suv, 0).rgb;
                 float3 col = _AsciiLinear > 0.5 ? pow(max(lit, 0.0), 1.0 / 2.2) : max(lit, 0.0);
                 float lum = dot(col, float3(0.299, 0.587, 0.114));

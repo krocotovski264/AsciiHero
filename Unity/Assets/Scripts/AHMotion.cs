@@ -8,6 +8,7 @@
 //  * two-bone foot IK with contact locking, knee pole from the toe direction
 // Unity conventions: heading h -> forward (sin h, cos h), right (cos h, -sin h); positive yaw = turning right.
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace AsciiHero
@@ -607,12 +608,27 @@ namespace AsciiHero
             public AtkKey(float t) { this.t = t; }
             public AtkKey(float t, Vector3 ua, Vector3 fa, Vector3 bl, float yaw) { this.t = t; this.ua = ua; this.fa = fa; this.bl = bl; this.yaw = yaw; on = true; } }
         static Vector3 V(float x, float y, float z) { return new Vector3(x, y, z); }
+        // A cut, not a chop: the hand leads and the blade trails behind it, the edge is drawn through the target in one long
+        // arc that never stops at the "hit" - it keeps going through and only then runs out at the far hip or shoulder.
         static readonly AtkKey[][] ATTACKS = {
             null,
-            new[] { new AtkKey(0), new AtkKey(0.2f, V(0.55f, 0.65f, -0.15f), V(0.05f, 0.95f, -0.45f), V(0.35f, 0.55f, -0.75f), 0.4f), new AtkKey(0.34f, V(0.25f, 0.05f, 0.95f), V(-0.25f, 0.15f, 0.95f), V(-0.35f, 0.45f, 0.82f), -0.05f),
-                    new AtkKey(0.44f, V(-0.35f, -0.55f, 0.75f), V(-0.8f, -0.5f, 0.35f), V(-0.75f, -0.6f, 0.25f), -0.45f), new AtkKey(0.62f) },
-            new[] { new AtkKey(0), new AtkKey(0.2f, V(-0.45f, -0.25f, 0.85f), V(-0.9f, 0.15f, 0.3f), V(-0.85f, 0.25f, -0.45f), -0.45f), new AtkKey(0.32f, V(0.15f, -0.1f, 1f), V(0f, 0.02f, 1f), V(0.05f, 0.1f, 1f), 0f),
-                    new AtkKey(0.42f, V(0.8f, -0.15f, 0.55f), V(0.9f, 0f, 0.25f), V(0.85f, 0.1f, -0.5f), 0.45f), new AtkKey(0.58f) } };
+            new[] { new AtkKey(0),
+                    new AtkKey(0.16f, V(0.5f, 0.75f, -0.1f), V(-0.1f, 0.9f, -0.3f), V(0.3f, 0.5f, -0.8f), 0.45f),
+                    new AtkKey(0.26f, V(0.45f, 0.45f, 0.75f), V(0.2f, 0.75f, 0.6f), V(0.4f, 0.85f, -0.35f), 0.25f),
+                    new AtkKey(0.33f, V(0.25f, 0.1f, 0.95f), V(0f, 0.1f, 1f), V(-0.1f, 0.7f, 0.7f), 0f),
+                    new AtkKey(0.4f, V(-0.15f, -0.4f, 0.9f), V(-0.55f, -0.35f, 0.75f), V(-0.55f, 0.05f, 0.83f), -0.3f),
+                    new AtkKey(0.48f, V(-0.4f, -0.75f, 0.5f), V(-0.85f, -0.45f, 0.1f), V(-0.7f, -0.45f, -0.55f), -0.5f), new AtkKey(0.7f) },
+            new[] { new AtkKey(0),
+                    new AtkKey(0.16f, V(-0.5f, -0.2f, 0.8f), V(-0.95f, 0.2f, 0.1f), V(-0.6f, 0.2f, -0.75f), -0.5f),
+                    new AtkKey(0.26f, V(-0.25f, -0.15f, 0.95f), V(-0.6f, 0.1f, 0.8f), V(-0.95f, 0.15f, 0.1f), -0.25f),
+                    new AtkKey(0.33f, V(0.1f, -0.1f, 1f), V(0.05f, 0.05f, 1f), V(-0.45f, 0.1f, 0.9f), 0f),
+                    new AtkKey(0.4f, V(0.6f, -0.12f, 0.8f), V(0.7f, 0f, 0.7f), V(0.35f, 0.1f, 0.93f), 0.3f),
+                    new AtkKey(0.48f, V(0.9f, -0.2f, 0.3f), V(0.95f, 0f, -0.1f), V(0.9f, 0.1f, -0.4f), 0.5f), new AtkKey(0.68f) } };
+        const float CUT_FROM = 0.25f, CUT_TO = 0.5f;
+        /// points the blade passed through this frame (tip and mid-blade): the game turns them into a streak in the air
+        public readonly List<Vector3> trail = new List<Vector3>();
+        static float CR(float a0, float a1, float a2, float a3, float u) { return 0.5f * (2 * a1 + (a2 - a0) * u + (2 * a0 - 5 * a1 + 4 * a2 - a3) * u * u + (3 * a1 - a0 - 3 * a2 + a3) * u * u * u); }
+        static Vector3 CR(Vector3 a0, Vector3 a1, Vector3 a2, Vector3 a3, float u) { return new Vector3(CR(a0.x, a1.x, a2.x, a3.x, u), CR(a0.y, a1.y, a2.y, a3.y, u), CR(a0.z, a1.z, a2.z, a3.z, u)); }
         int atkType, lastAtk; float atkT = 9, atkDur; float guard; public bool guardHeld;
         public bool Attacking => atkType != 0 && atkT < atkDur;
         /// starts a cut if the previous one is over (the cooldown is the animation itself). Standing: a random cut, then
@@ -648,16 +664,38 @@ namespace AsciiHero
             {
                 var rp = H.root.localPosition; rp.y -= 0.05f * gw; H.root.localPosition = rp;
                 Vector3 X = gq * Vector3.right; Rot("spine05", X, 0.06f * gw); Rot("spine03", X, 0.06f * gw);
-                if (shield && limbs[1]) { TwistRight(0.25f * gw); AimW("upperarm01.L", "lowerarm01.L", gq * V(-0.2f, -0.5f, 0.85f), gw); AimW("lowerarm01.L", "wrist.L", gq * V(0.5f, 0.6f, 0.62f), gw); }
+                if (shield && limbs[1])
+                {
+                    // the forearm lies across the chest and the shield is turned to stand upright, squarely facing forward
+                    AimW("upperarm01.L", "lowerarm01.L", gq * V(-0.3f, -0.6f, 0.74f), gw); AimW("lowerarm01.L", "wrist.L", gq * V(0.8f, 0.25f, 0.45f), gw);
+                    Transform sh = ch.shield, fb = H.Bone("lowerarm02.L");
+                    if (sh != null && fb != null)
+                    {
+                        fb.rotation = Quaternion.Slerp(Quaternion.identity, Quaternion.FromToRotation(sh.forward, (gq * V(0f, 0.08f, 1f)).normalized), gw) * fb.rotation;
+                        Vector3 f = sh.forward, up = sh.up, want = Vector3.up - f * Vector3.Dot(Vector3.up, f);
+                        if (want.sqrMagnitude > 1e-6f) fb.rotation = Quaternion.AngleAxis(Vector3.SignedAngle(up, want.normalized, f) * gw, f) * fb.rotation;
+                    }
+                }
                 else if (limbs[2]) { AimW("upperarm01.R", "lowerarm01.R", gq * V(0.15f, -0.55f, 0.82f), gw); AimW("lowerarm01.R", "wrist.R", gq * V(-0.5f, 0.45f, 0.74f), gw); BladeW(gq * V(-0.6f, 0.78f, 0.15f), gw); }
             }
             // cut
             if (!Attacking || !limbs[2]) return;
             atkT += dt; var K = ATTACKS[atkType]; int i = 0; while (i < K.Length - 2 && atkT > K[i + 1].t) i++;
             AtkKey k0 = K[i], k1 = K[i + 1]; float u = Mathf.Clamp01((atkT - k0.t) / (k1.t - k0.t)), s = u * u * (3 - 2 * u);
-            float w = k0.on && k1.on ? 1 : k1.on ? s : 1 - s; AtkKey e0 = k0.on ? k0 : k1, e1 = k1.on ? k1 : k0;
-            TwistRight(Mathf.Lerp(e0.yaw, e1.yaw, s) * w);
-            AimW("upperarm01.R", "lowerarm01.R", gq * Vector3.Lerp(e0.ua, e1.ua, s), w); AimW("lowerarm01.R", "wrist.R", gq * Vector3.Lerp(e0.fa, e1.fa, s), w); BladeW(gq * Vector3.Lerp(e0.bl, e1.bl, s), w);
+            // entering and leaving the cut the pose is blended with the body's own; between the keys the arm follows one
+            // smooth curve through them (Catmull-Rom), so it sweeps through without stopping anywhere
+            float w = k0.on && k1.on ? 1 : k1.on ? s : 1 - s;
+            Vector3 ua, fa, bl; float yaw;
+            if (k0.on && k1.on)
+            {
+                AtkKey p0 = K[Mathf.Clamp(i - 1, 1, K.Length - 2)], p3 = K[Mathf.Clamp(i + 2, 1, K.Length - 2)];
+                ua = CR(p0.ua, k0.ua, k1.ua, p3.ua, u); fa = CR(p0.fa, k0.fa, k1.fa, p3.fa, u); bl = CR(p0.bl, k0.bl, k1.bl, p3.bl, u); yaw = CR(p0.yaw, k0.yaw, k1.yaw, p3.yaw, u);
+            }
+            else { AtkKey e = k1.on ? k1 : k0; ua = e.ua; fa = e.fa; bl = e.bl; yaw = e.yaw; }
+            TwistRight(yaw * w);
+            AimW("upperarm01.R", "lowerarm01.R", gq * ua, w); AimW("lowerarm01.R", "wrist.R", gq * fa, w); BladeW(gq * bl, w);
+            // while the edge is travelling it leaves a streak in the air
+            if (ch.weapon != null && atkT > CUT_FROM && atkT < CUT_TO) { trail.Add(ch.weapon.TransformPoint(0, 0.8f, 0)); trail.Add(ch.weapon.TransformPoint(0, 0.45f, 0)); }
         }
         /// moves the simulated position (dash) without touching the velocity
         public void Teleport(float dx, float dz, float newHeading) { S.x += dx; S.z += dz; S.h = newHeading; heading = newHeading; }
