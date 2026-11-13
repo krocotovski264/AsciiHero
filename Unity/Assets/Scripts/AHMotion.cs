@@ -373,7 +373,7 @@ namespace AsciiHero
             idlePh = (idlePh + dt / LIdle.T) % 1f;
             // the body is moved by the controller; facing follows it smoothly
             float dx = S.x - myPos.x, dz = S.z - myPos.y;
-            heading += Wrap(S.h - heading) * (1 - Mathf.Exp(-dt * LN2 / 0.03f));
+            heading += Wrap(S.h - heading) * (1 - Mathf.Exp(-dt * LN2 / 0.045f));
             speed = v; narrow = 1; vel = Mathf.Sqrt(dx * dx + dz * dz) / Mathf.Max(dt, 1e-4f);
             label = (v < 0.08f ? "idle" : v < 1.6f ? "walk " + v.ToString("0.0") + " m/s" : "run " + v.ToString("0.0") + " m/s") + InjuryLabel();
             return new Vector2(dx, dz);
@@ -440,6 +440,7 @@ namespace AsciiHero
             if (Legs == 0) { Crawl(dt); return; }
             if (Legs == 1) HopBody(dt);
             PinArms();
+            if (loopMode) BodyLife(dt);
             ArmLean();
             RelaxArms();
             FootIK(dt);
@@ -495,6 +496,60 @@ namespace AsciiHero
             ro.x -= roAvg.x; ro.z -= roAvg.z;
         }
 
+        // ---------- body life (procedural layer over the loops) ----------
+        // What makes the figure read as a person rather than a cut-out:
+        //   * the torso leans with acceleration: forward on a start, back on a stop or a sharp reversal (with a dip of
+        //     the pelvis as the legs take the load), into the curve on a turn; it also leans a little with speed
+        //   * shoulders counter-rotate against the hips with every step; the head stays level and looks into the turn
+        //   * arms swing with the gait even when they carry a shield or a weapon, elbows bend more in a run
+        //   * standing still is not frozen: breathing, a slow shift of weight, the head drifting
+        float lp, lr, dip, look;
+        void Rot(string name, Vector3 axis, float ang)
+        {
+            var b = H.Bone(name); if (b == null || Mathf.Abs(ang) < 1e-5f) return;
+            b.rotation = Quaternion.AngleAxis(ang * Mathf.Rad2Deg, axis) * b.rotation;
+        }
+        void BodyLife(float dt)
+        {
+            float t = Time.time, wW = wWalk, wR = wRun;
+            Quaternion gq = ch.go.transform.rotation;
+            float c = Mathf.Cos(heading), sn = Mathf.Sin(heading);
+            // acceleration in the body frame (Unity: +x = right, +z = forward)
+            float aF = S.ax * sn + S.az * c, aS = S.ax * c - S.az * sn, v = Mathf.Sqrt(S.vx * S.vx + S.vz * S.vz);
+            float k = 1 - Mathf.Exp(-dt * LN2 / 0.11f);
+            float pitchT = Mathf.Clamp(aF * 0.024f, -0.2f, 0.17f) + 0.022f * v, rollT = Mathf.Clamp(aS * 0.02f, -0.11f, 0.11f);
+            lp += (pitchT - lp) * k; lr += (rollT - lr) * k;
+            float dipT = Mathf.Clamp((Mathf.Sqrt(S.ax * S.ax + S.az * S.az) - 3) * 0.008f, 0, 0.07f); dip += (dipT - dip) * k;
+            float lookT = Mathf.Clamp(S.w * 0.1f + Wrap(S.h - heading) * 0.6f, -0.45f, 0.45f); look += (lookT - look) * (1 - Mathf.Exp(-dt * LN2 / 0.15f));
+            Vector3 X = gq * Vector3.right, Y = Vector3.up, Z = gq * Vector3.forward;
+            float ph = phase * Mathf.PI * 2, cs = Mathf.Cos(ph), breath = Mathf.Sin(t * 1.7f), idle = 1 - wW;
+            // pelvis: dip under load, slow weight shift when standing
+            var rp = H.root.localPosition; rp.y -= dip; rp.x += idle * 0.012f * Mathf.Sin(t * 0.45f); H.root.localPosition = rp;
+            // torso: lean (root, lower and upper spine share it), counter-rotation, breathing
+            float twist = -(0.07f * wW + 0.07f * wR) * cs;
+            string[] chain = { "root", "spine05", "spine03" }; float[] share = { 0.3f, 0.3f, 0.4f };
+            for (int i = 0; i < 3; i++) { Rot(chain[i], X, lp * share[i]); Rot(chain[i], Z, -lr * share[i]); }
+            Rot("spine05", Y, twist * 0.4f + look * 0.15f); Rot("spine03", Y, twist * 0.6f + look * 0.2f);
+            Rot("spine03", X, -0.012f * breath - idle * 0.01f * Mathf.Sin(t * 0.6f));
+            // head: stays level, looks where the body is turning, drifts a little at rest
+            Rot("neck01", X, -lp * 0.35f); Rot("head", X, -lp * 0.25f + idle * 0.02f * Mathf.Sin(t * 0.8f));
+            Rot("neck01", Y, -twist * 0.5f + look * 0.3f + idle * 0.06f * Mathf.Sin(t * 0.37f)); Rot("head", Y, -twist * 0.35f + look * 0.35f + idle * 0.05f * Mathf.Sin(t * 0.23f + 1));
+            // arms: swing opposite to the legs (phase 0 = left foot lands, so the right arm is forward)
+            string W = ch.cfg.weapon;
+            for (int si = 0; si < 2; si++)
+            {
+                if (!limbs[1 + si]) continue;
+                string s = SIDES[si]; float sg = si == 0 ? -1f : 1f;      // Unity: left is -X
+                bool shield = si == 0 && W == "shield", carried = si == 0 ? shield : W != "none";
+                // free arms already swing in the mocap; carried arms get the swing here (the shield moves less than a weapon hand)
+                float amp = carried ? (shield ? 0.07f * wW + 0.1f * wR : 0.2f * wW + 0.3f * wR) : 0.05f * wW + 0.12f * wR;
+                float sw = sg * cs;                                       // +1 = this arm is forward
+                Rot("upperarm01." + s, X, -amp * sw + idle * 0.02f * breath);
+                Rot("lowerarm01." + s, X, -(carried && !shield ? 0.1f * wW + 0.5f * wR : 0.25f * wR) * Mathf.Max(0, sw) - (shield ? 0 : 0.35f * wR));
+                Rot("upperarm01." + s, Z, sg * (0.03f * breath * idle + 0.04f * wR * Mathf.Abs(cs)));
+            }
+        }
+
         // ---------- weapon arms ----------
         // An arm that carries something keeps the pose it was built with, relative to the body: fully for the shield
         // (it stays in front of the body instead of following the mocap arm swing), mostly for a weapon.
@@ -507,7 +562,7 @@ namespace AsciiHero
             Quaternion gq = ch.go.transform.rotation;
             for (int si = 0; si < 2; si++)
             {
-                float w = si == 0 ? (W == "shield" ? 1f : 0f) : (W == "spear" || W == "staff" ? 0.85f : 0.65f);
+                float w = si == 0 ? (W == "shield" ? 1f : 0f) : (W == "spear" || W == "staff" ? 0.8f : 0.55f);
                 if (w <= 0 || !limbs[1 + si]) continue;
                 for (int j = 0; j < ARM_CHAIN.Length; j++)
                 {

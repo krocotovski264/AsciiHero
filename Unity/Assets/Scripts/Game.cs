@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.13 · Unity";
+        public const string VERSION = "beta 0.14 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -137,7 +137,7 @@ namespace AsciiHero
             {
                 SetupEditorScene();
                 LoadCfg();
-                animMode = Mathf.Clamp(PlayerPrefs.GetInt("ascii_anim_mode2", 0), 0, 2); useAnimator = animMode == 2;
+                animMode = 0; useAnimator = false;   // only the phase-matched mode is offered (motion matching still serves lock-on strafing)
                 if (useAnimator) { locoCtrl = Resources.Load<RuntimeAnimatorController>("Locomotion"); if (locoCtrl == null) { useAnimator = false; animMode = 0; } }
             })) yield break;
             yield return null;
@@ -796,8 +796,7 @@ namespace AsciiHero
             // view buttons
             if (Button(new Rect(vr.xMax - 128 * k, T, 58 * k, 24 * k), "АВТО", autoRotate)) autoRotate = !autoRotate;
             if (Button(new Rect(vr.xMax - 66 * k, T, 58 * k, 24 * k), "СБРОС")) cam = CAM0;
-            if (Button(new Rect(vr.xMax - 128 * k, T + 28 * k, 120 * k, 24 * k), ANIM_NAME[animMode], animMode != 0)) ToggleAnimMode();
-            if (Button(new Rect(vr.xMax - 128 * k, T + 56 * k, 120 * k, 24 * k), ascii.surfaceGlyphs ? "Aa: НА МОДЕЛЯХ" : "Aa: СЕТКОЙ", ascii.surfaceGlyphs)) ToggleGlyphMode();
+            if (Button(new Rect(vr.xMax - 128 * k, T + 28 * k, 120 * k, 24 * k), ascii.surfaceGlyphs ? "Aa: НА МОДЕЛЯХ" : "Aa: СЕТКОЙ", ascii.surfaceGlyphs)) ToggleGlyphMode();
 
             // panel
             float px = vr.xMax, pw = W - px, right = safe.xMax;
@@ -859,8 +858,7 @@ namespace AsciiHero
             GUI.Label(new Rect(L, T + 38 * k, 420 * k, 50 * k), "<b>" + SEXNAME[si] + "</b> · " + cfg.height + " см\nСтик — шаг, палец за край — бег · свайп — камера\nЦелостность: " + hp + "% · " + animLabel, sBadge);
             float R = safe.xMax - 10 * k;
             if (Button(new Rect(R - 96 * k, T, 96 * k, 28 * k), "← ГЕРОЙ")) { LeaveWorld(); return; }
-            if (Button(new Rect(R - 200 * k, T + 32 * k, 200 * k, 26 * k), ANIM_NAME[animMode], animMode != 0)) ToggleAnimMode();
-            if (Button(new Rect(R - 200 * k, T + 62 * k, 200 * k, 26 * k), ascii.surfaceGlyphs ? "Aa: НА МОДЕЛЯХ" : "Aa: СЕТКОЙ", ascii.surfaceGlyphs)) ToggleGlyphMode();
+            if (Button(new Rect(R - 200 * k, T + 32 * k, 200 * k, 26 * k), ascii.surfaceGlyphs ? "Aa: НА МОДЕЛЯХ" : "Aa: СЕТКОЙ", ascii.surfaceGlyphs)) ToggleGlyphMode();
             if (Button(new Rect(R - 304 * k, T, 96 * k, 28 * k), "УРОН −10%")) Damage(10);
             if (Button(new Rect(R - 200 * k, T, 96 * k, 28 * k), "ЦЕЛЬ", lockOn))
             {

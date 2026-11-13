@@ -105,7 +105,7 @@ function loopLocomotion(A, dt, dir, myPos) {
   A.wWalk = wWalk; A.wRun = wRun;
   // the body is moved by the controller; facing follows it smoothly
   const dx = S.x - myPos.x, dz = S.z - myPos.z;
-  A.heading += wrap(S.h - A.heading) * (1 - Math.exp(-dt * LN2 / 0.03));
+  A.heading += wrap(S.h - A.heading) * (1 - Math.exp(-dt * LN2 / 0.045));
   A.speed = v; A.narrow = 1; A.vel = Math.hypot(dx, dz) / Math.max(dt, 1e-4);
   A.label = (v < 0.08 ? 'idle' : v < 1.6 ? 'walk ' + v.toFixed(1) + ' m/s' : 'run ' + v.toFixed(1) + ' m/s') + injuryLabel(A);
   return [dx, dz];
@@ -313,6 +313,7 @@ export function animateActor(A, t, dt = 1 / 60) {
   else {
     if (legsN === 1) hopBody(A, dt);
     pinArms(A);
+    if (A.loopMode) bodyLife(A, t, dt);
     armLean(A);
     relaxArms(A);
     footIK(A, dt);
@@ -377,6 +378,51 @@ function crawl(A, dt) {
   }
 }
 
+// ---------- body life (procedural layer over the loops) ----------
+// What makes the figure read as a person rather than a cut-out:
+//   * the torso leans with acceleration: forward on a start, back on a stop or a sharp reversal (with a dip of the
+//     pelvis as the legs take the load), into the curve on a turn; it also leans a little with speed
+//   * shoulders counter-rotate against the hips with every step; the head stays level and looks into the turn
+//   * arms swing with the gait even when they carry a shield or a weapon, elbows bend more in a run
+//   * standing still is not frozen: breathing, a slow shift of weight, the head drifting
+function bodyLife(A, t, dt) {
+  const H = A.H, S = A.sim, gq = groupQ(A), wW = A.wWalk || 0, wR = A.wRun || 0, L = A.limbs;
+  const c = Math.cos(A.heading), sn = Math.sin(A.heading);
+  // acceleration in the body frame (web: +x = left, +z = forward)
+  const aF = S.ax * sn + S.az * c, aL = S.ax * c - S.az * sn, v = Math.hypot(S.vx, S.vz);
+  const k = 1 - Math.exp(-dt * LN2 / 0.11);
+  const pitchT = clamp(aF * 0.024, -0.2, 0.17) + 0.022 * v, rollT = clamp(aL * 0.02, -0.11, 0.11);
+  A.lp = (A.lp || 0) + (pitchT - (A.lp || 0)) * k; A.lr = (A.lr || 0) + (rollT - (A.lr || 0)) * k;
+  const dipT = clamp((Math.hypot(S.ax, S.az) - 3) * 0.008, 0, 0.07); A.dip = (A.dip || 0) + (dipT - (A.dip || 0)) * k;
+  const lookT = clamp(S.w * 0.1 + wrap(S.h - A.heading) * 0.6, -0.45, 0.45); A.look = (A.look || 0) + (lookT - (A.look || 0)) * (1 - Math.exp(-dt * LN2 / 0.15));
+  const X = new THREE.Vector3(1, 0, 0).applyQuaternion(gq), Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(0, 0, 1).applyQuaternion(gq);
+  const rot = (name, axis, ang) => { const b = H.bone(name); if (b && Math.abs(ang) > 1e-5) rotateWorld(b, new THREE.Quaternion().setFromAxisAngle(axis, ang)); };
+  const ph = (A.phase || 0) * Math.PI * 2, cs = Math.cos(ph), breath = Math.sin(t * 1.7), idle = 1 - wW;
+  // pelvis: dip under load, slow weight shift when standing
+  H.root.position.y -= A.dip; H.root.position.x += idle * 0.012 * Math.sin(t * 0.45); H.root.updateMatrixWorld(true);
+  // torso: lean (root, lower and upper spine share it), counter-rotation, breathing
+  const twist = (0.07 * wW + 0.07 * wR) * cs;
+  for (const [n, f] of [['root', 0.3], ['spine05', 0.3], ['spine03', 0.4]]) { rot(n, X, A.lp * f); rot(n, Z, -A.lr * f); }
+  rot('spine05', Y, twist * 0.4 + A.look * 0.15); rot('spine03', Y, twist * 0.6 + A.look * 0.2);
+  rot('spine03', X, -0.012 * breath - idle * 0.01 * Math.sin(t * 0.6));
+  // head: stays level, looks where the body is turning, drifts a little at rest
+  rot('neck01', X, -A.lp * 0.35); rot('head', X, -A.lp * 0.25 + idle * 0.02 * Math.sin(t * 0.8));
+  rot('neck01', Y, -twist * 0.5 + A.look * 0.3 + idle * 0.06 * Math.sin(t * 0.37)); rot('head', Y, -twist * 0.35 + A.look * 0.35 + idle * 0.05 * Math.sin(t * 0.23 + 1));
+  // arms: swing opposite to the legs (phase 0 = left foot lands, so the right arm is forward)
+  const weapon = A.char.cfgWeapon || 'none';
+  for (const [s, sg, on] of [['L', 1, L.armL], ['R', -1, L.armR]]) {
+    if (!on) continue;
+    const carried = s === 'L' ? weapon === 'shield' : weapon !== 'none';
+    const shield = s === 'L' && weapon === 'shield';
+    // free arms already swing in the mocap; carried arms get the swing here (the shield moves less than a weapon hand)
+    const amp = carried ? (shield ? 0.07 * wW + 0.1 * wR : 0.2 * wW + 0.3 * wR) : 0.05 * wW + 0.12 * wR;
+    const sw = -sg * cs;                                   // +1 = this arm is forward
+    rot('upperarm01.' + s, X, -amp * sw + idle * 0.02 * breath);
+    rot('lowerarm01.' + s, X, -(carried && !shield ? 0.1 * wW + 0.5 * wR : 0.25 * wR) * Math.max(0, sw) - (shield ? 0 : 0.35 * wR));
+    rot('upperarm01.' + s, Z, sg * (0.03 * breath * idle + 0.04 * wR * Math.abs(cs)));
+  }
+}
+
 // ---------- weapon arms ----------
 // An arm that carries something keeps the pose it was built with, relative to the body: fully for the shield
 // (it stays in front of the body instead of following the mocap arm swing), mostly for a weapon.
@@ -385,7 +431,7 @@ const ARM_CHAIN = ['upperarm01', 'upperarm02', 'lowerarm01', 'lowerarm02', 'wris
 function pinArms(A) {
   const weapon = A.char.cfgWeapon || 'none'; if (weapon === 'none') return;
   const gq = groupQ(A), H = A.H;
-  for (const [s, w] of [['L', weapon === 'shield' ? 1 : 0], ['R', weapon === 'spear' || weapon === 'staff' ? 0.85 : 0.65]]) {
+  for (const [s, w] of [['L', weapon === 'shield' ? 1 : 0], ['R', weapon === 'spear' || weapon === 'staff' ? 0.8 : 0.55]]) {
     if (w <= 0 || !A.limbs[s === 'L' ? 'armL' : 'armR']) continue;
     for (const n of ARM_CHAIN) {
       const b = H.bone(n + '.' + s), rel = A.armRel[n + '.' + s]; if (!b || !rel) continue;
