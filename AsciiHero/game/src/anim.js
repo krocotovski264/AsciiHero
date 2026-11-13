@@ -203,6 +203,7 @@ export function locomotion(A, dt, dir, mag, lockPos, myPos, collide) {
     A.sprint = smooth01(0.7, 1.7, A.sprintT);
     if (mag > 1.6) speed += SPRINT_EXTRA * A.sprint;
     if (lockPos) speed = Math.min(speed, 1.7);
+    if (A.guardHeld) speed = Math.min(speed, 1.1);          // behind the shield you only walk
     const legs = (A.limbs.legL ? 1 : 0) + (A.limbs.legR ? 1 : 0), arms = (A.limbs.armL ? 1 : 0) + (A.limbs.armR ? 1 : 0);
     if (legs === 1) speed = Math.min(speed, 1.15);                       // hopping on one leg
     if (legs === 0) speed = Math.min(speed, arms === 2 ? 0.5 : arms === 1 ? 0.35 : 0.18);   // crawling
@@ -324,6 +325,7 @@ export function animateActor(A, t, dt = 1 / 60) {
     if (A.loopMode && !A.noLife) bodyLife(A, t, dt);
     armLean(A);
     relaxArms(A);
+    combat(A, dt);
     jointLimits(A);
     footIK(A, dt);
   }
@@ -445,14 +447,62 @@ function bodyLife(A, t, dt) {
     const aw = Math.min(1, 0.8 * wR + 0.2 * sp) * (shield ? 0.45 : 1);
     if (aw > 0.01) {
       const u = 0.5 + 0.5 * sw;                              // 0 = arm back, 1 = arm in front
-      const a = -0.4 + 0.5 * u, b = 0.75 + 1.65 * u;         // upper arm and forearm angles from straight down, forwards
+      // behind: the arm is driven well back and opens almost straight (the elbow keeps only a slight bend), away from the ribs
+      const a = -0.95 + 1.05 * u, b = -0.7 + 3.1 * u;        // upper arm and forearm angles from straight down, forwards
       const W3 = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(gq);
       const part = (bn, cn, dirW) => { const ba = H.bone(bn), bb = H.bone(cn); if (!ba || !bb) return;
         const q = new THREE.Quaternion().setFromUnitVectors(P(bb).sub(P(ba)).normalize(), dirW.normalize()); rotateWorld(ba, new THREE.Quaternion().slerp(q, aw)); };
-      part('upperarm01.' + s, 'lowerarm01.' + s, W3(sg * 0.1, -Math.cos(a), Math.sin(a)));
-      part('lowerarm01.' + s, 'wrist.' + s, W3(-sg * (0.05 + 0.5 * u), -Math.cos(b), Math.sin(b)));
+      part('upperarm01.' + s, 'lowerarm01.' + s, W3(sg * (0.2 - 0.1 * u), -Math.cos(a), Math.sin(a)));
+      part('lowerarm01.' + s, 'wrist.' + s, W3(sg * (0.12 - 0.62 * u), -Math.cos(b), Math.sin(b)));
     }
   }
+}
+
+// ---------- combat: two sword cuts and the guard ----------
+// Directions are in the body frame as [right, up, forward]. Each key: time, upper arm, forearm, blade, torso yaw (to the right +).
+// 1: from the upper right down to the lower left.  2: flat, from the left to the right.
+export const ATTACKS = {
+  1: { dur: 0.62, k: [[0, null], [0.2, [0.55, 0.65, -0.15], [0.05, 0.95, -0.45], [0.35, 0.55, -0.75], 0.4], [0.34, [0.25, 0.05, 0.95], [-0.25, 0.15, 0.95], [-0.35, 0.45, 0.82], -0.05],
+                      [0.44, [-0.35, -0.55, 0.75], [-0.8, -0.5, 0.35], [-0.75, -0.6, 0.25], -0.45], [0.62, null]] },
+  2: { dur: 0.58, k: [[0, null], [0.2, [-0.45, -0.25, 0.85], [-0.9, 0.15, 0.3], [-0.85, 0.25, -0.45], -0.45], [0.32, [0.15, -0.1, 1], [0, 0.02, 1], [0.05, 0.1, 1], 0],
+                      [0.42, [0.8, -0.15, 0.55], [0.9, 0, 0.25], [0.85, 0.1, -0.5], 0.45], [0.58, null]] } };
+// starts a cut if the previous one is over (the cooldown is the animation itself). Standing: a random cut, then they
+// alternate. Running: the cut that continues the arm's motion - sword arm behind -> 1 (down from above), in front -> 2 (flat).
+export function startAttack(A) {
+  if (A.atk && A.atk.t < A.atk.dur) return false;
+  if (!A.limbs.armR) return false;
+  let type;
+  if ((A.vel || 0) > 0.5) type = Math.cos((A.phase || 0) * Math.PI * 2) > 0 ? 2 : 1;
+  else type = A.lastAtk ? 3 - A.lastAtk : (Math.random() < 0.5 ? 1 : 2);
+  A.lastAtk = type; A.atk = { type, t: 0, dur: ATTACKS[type].dur };
+  return true;
+}
+function combat(A, dt) {
+  const H = A.H, gq = groupQ(A), Y = new THREE.Vector3(0, 1, 0);
+  const B = v => new THREE.Vector3(-v[0], v[1], v[2]).applyQuaternion(gq).normalize();      // web: +x is the left side
+  const aim = (bn, cn, dirW, w) => { const ba = H.bone(bn), bb = H.bone(cn); if (!ba || !bb || w <= 0) return;
+    const q = new THREE.Quaternion().setFromUnitVectors(P(bb).sub(P(ba)).normalize(), dirW); rotateWorld(ba, new THREE.Quaternion().slerp(q, w)); };
+  const blade = (dirW, w) => { const g = A.char.group.userData.weapon, wb = H.bone('wrist.R'); if (!g || !wb || w <= 0) return;
+    const cur = new THREE.Vector3(0, 1, 0).applyQuaternion(g.getWorldQuaternion(new THREE.Quaternion()));
+    rotateWorld(wb, new THREE.Quaternion().slerp(new THREE.Quaternion().setFromUnitVectors(cur, dirW), w)); };
+  const twist = a => { for (const [n, f] of [['spine05', 0.4], ['spine03', 0.6]]) { const b = H.bone(n); if (b) rotateWorld(b, new THREE.Quaternion().setFromAxisAngle(Y, -a * f)); } };
+  // guard
+  A.guard = (A.guard || 0) + ((A.guardHeld ? 1 : 0) - (A.guard || 0)) * (1 - Math.exp(-dt * LN2 / 0.06));
+  const gw = A.guard, shield = (A.char.cfgWeapon || 'none') === 'shield';
+  if (gw > 0.01) {
+    H.root.position.y -= 0.05 * gw; H.root.updateMatrixWorld(true);
+    const X = new THREE.Vector3(1, 0, 0).applyQuaternion(gq); for (const n of ['spine05', 'spine03']) { const b = H.bone(n); if (b) rotateWorld(b, new THREE.Quaternion().setFromAxisAngle(X, 0.06 * gw)); }
+    if (shield && A.limbs.armL) { twist(0.25 * gw); aim('upperarm01.L', 'lowerarm01.L', B([-0.2, -0.5, 0.85]), gw); aim('lowerarm01.L', 'wrist.L', B([0.5, 0.6, 0.62]), gw); }
+    else if (A.limbs.armR) { aim('upperarm01.R', 'lowerarm01.R', B([0.15, -0.55, 0.82]), gw); aim('lowerarm01.R', 'wrist.R', B([-0.5, 0.45, 0.74]), gw); blade(B([-0.6, 0.78, 0.15]), gw); }
+  }
+  // cut
+  const a = A.atk; if (!a || a.t >= a.dur || !A.limbs.armR) return;
+  a.t += dt; const K = ATTACKS[a.type].k; let i = 0; while (i < K.length - 2 && a.t > K[i + 1][0]) i++;
+  const k0 = K[i], k1 = K[i + 1], u = clamp((a.t - k0[0]) / (k1[0] - k0[0]), 0, 1), s = u * u * (3 - 2 * u);
+  const w = k0[1] && k1[1] ? 1 : k1[1] ? s : 1 - s, e0 = k0[1] ? k0 : k1, e1 = k1[1] ? k1 : k0;
+  const mix = j => [0, 1, 2].map(c => e0[j][c] + (e1[j][c] - e0[j][c]) * s);
+  twist((e0[4] + (e1[4] - e0[4]) * s) * w);
+  aim('upperarm01.R', 'lowerarm01.R', B(mix(1)), w); aim('lowerarm01.R', 'wrist.R', B(mix(2)), w); blade(B(mix(3)), w);
 }
 
 // ---------- anatomical joint limits ----------

@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.17 · Unity";
+        public const string VERSION = "beta 0.18 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -63,7 +63,8 @@ namespace AsciiHero
         float pinchD0, pinchDist0, pinchMy0, pinchTy0; bool pinching;
 
         // world camera
-        float isoYaw = Mathf.PI / 4, isoPitch = 0.86f, isoYawT = Mathf.PI / 4, isoPitchT = 0.86f; const float ISO_DIST = 7.6f;
+        // MOBA camera: fixed (no rotation), high and far, looking down at about 55 degrees
+        const float ISO_LOD = 2.5f; float isoYaw = 0, isoPitch = 0.96f, isoYawT = 0, isoPitchT = 0.96f; const float ISO_DIST = 7.6f * ISO_LOD;
         Vector3 pos, camTgt; bool lockOn; Vector3? lockFixed; float labelT; string animLabel = "idle";
 
         // UI
@@ -413,6 +414,19 @@ namespace AsciiHero
             var hc = cfg.Clone(); hc.shadow = true;       // the hero is a shadow wearing armour
             hero = Character.Build(hc, actorMats, "Hero");
             hero.glyphs = GlyphLayer.Build(hero.go, Character.LimbOfBone());
+            // armour pieces (every shell, the weapon, the shield...) can be offset on their own: the dash sends the shadow ahead and the armour after it
+            pieces.Clear();
+            {
+                var byKey = new Dictionary<Object, Piece>();
+                foreach (var kv in GlyphLayer.pairs)
+                {
+                    var r = kv.Key; var sm = r.sharedMaterial;
+                    if (sm == actorMats["SHADOW"] || sm == actorMats["EYE"]) continue;
+                    Object key = r is SkinnedMeshRenderer ? (Object)r : r.transform.parent;
+                    Piece pc; if (!byKey.TryGetValue(key, out pc)) { pc = new Piece(); byKey[key] = pc; pieces.Add(pc); }
+                    pc.rs.Add(r); if (kv.Value != null) pc.rs.Add(kv.Value);
+                }
+            }
             player = new MotionActor(hero);
             player.useMM = animMode == 1;
             player.SetLimbs(limbs);
@@ -437,11 +451,11 @@ namespace AsciiHero
             pos = loc.spawn; heroTrail = pos; player.heading = Mathf.PI; player.ResetSim(); player.noLock = false;
             hero.go.transform.position = pos; hero.go.transform.rotation = Quaternion.Euler(0, 180, 0);
             camTgt = new Vector3(pos.x, 0.6f, pos.z);
-            sceneCam.fieldOfView = 30; ascii.exposure = 1.3f; ascii.actorBoost = 1;
+            sceneCam.fieldOfView = 30; ascii.exposure = 1.3f; ascii.actorBoost = 1; Shader.SetGlobalFloat("_AsciiLod", ISO_LOD);
             if (toField) SetAmbient(Mats.Hex(0x8fa4d8) * 0.55f, Mats.Hex(0x4a5a58) * 0.55f, Mats.Hex(0x1a2414) * 0.55f);
             else SetAmbient(Mats.Hex(0x50465a) * 0.45f, Mats.Hex(0x342b32) * 0.45f, Mats.Hex(0x18100a) * 0.45f);
-            SetShadowDistance(20);
-            ShowToast(toField ? "Тестовое поле\nКучи брони возвращают оторванные части" : "Трактир «Пьяный дракон»\nСтик — шаг, палец за край — бег · свайп — камера");
+            SetShadowDistance(40);
+            ShowToast(toField ? "Тестовое поле\nКучи брони возвращают оторванные части" : "Трактир «Пьяный дракон»\nСтик — шаг, палец за край — бег");
         }
         void LeaveWorld()
         {
@@ -452,7 +466,7 @@ namespace AsciiHero
             Shader.SetGlobalVector("_AsciiHeroA", new Vector4(0, -99, 0, 0)); Shader.SetGlobalVector("_AsciiHeroB", new Vector4(0, -99, 0, 0));
             hero.go.transform.position = Vector3.zero; hero.go.transform.rotation = Quaternion.identity;
             player.speed = 0; player.heading = 0; player.ResetSim(); lockOn = false;
-            sceneCam.fieldOfView = 36; ascii.exposure = 1; ascii.actorBoost = 0;
+            sceneCam.fieldOfView = 36; ascii.exposure = 1; ascii.actorBoost = 0; Shader.SetGlobalFloat("_AsciiLod", 1);
             ApplyEditorAmbient();
             SetShadowDistance(14);
         }
@@ -502,6 +516,7 @@ namespace AsciiHero
             if (fpsAcc > 1) { fpsText = Mathf.RoundToInt(fpsN / fpsAcc) + " fps · " + (ascii.surfaceGlyphs ? GlyphLayer.count + " симв." : ascii.cols + "×" + ascii.rows); fpsAcc = 0; fpsN = 0; }
         }
 
+        static bool InCircle(Rect r, Vector2 p) { return r.width > 0 && (p - r.center).magnitude <= r.width * 0.56f; }
         bool InUi(Vector2 p) { foreach (var r in uiRectsPrev) if (r.Contains(p)) return true; return false; }
 
         void HandlePointers(float dt)
@@ -510,7 +525,10 @@ namespace AsciiHero
             {
                 if (!p.began) continue;
                 // floating stick: its centre appears under the finger anywhere in the left part of the screen
-                if (world && stickId == int.MinValue && !InUi(p.pos) && p.pos.x < Screen.width * 0.45f && p.pos.y > Screen.height * 0.22f)
+                if (world && InCircle(atkRect, p.pos)) { p.owner = "atk"; DoAttack(); }
+                else if (world && InCircle(defRect, p.pos)) p.owner = "def";
+                else if (world && InCircle(dashRect, p.pos)) { p.owner = "dash"; DoDash(); }
+                else if (world && stickId == int.MinValue && !InUi(p.pos) && p.pos.x < Screen.width * 0.45f && p.pos.y > Screen.height * 0.22f)
                 { p.owner = "stick"; stickId = p.id; stickCenter = ClampStickCenter(p.pos); }
                 else if (!world && sliderRect.Contains(p.pos)) p.owner = "slider";
                 else if (InUi(p.pos)) p.owner = "ui";
@@ -548,12 +566,7 @@ namespace AsciiHero
             float W = Screen.width, H = Screen.height;
             if (world)
             {
-                if (camPtrs.Count > 0)
-                {
-                    var d = camPtrs[0].Delta;
-                    isoYawT -= d.x * 5.0f / Mathf.Max(W, 320);
-                    isoPitchT = Mathf.Clamp(isoPitchT + d.y * 2.5f / Mathf.Max(H, 240), 0.55f, 1.35f);
-                }
+                // the world camera is fixed
             }
             else
             {
@@ -588,6 +601,51 @@ namespace AsciiHero
 
         static Vector3 Mirror(Vector3 v) { return new Vector3(-v.x, v.y, v.z); }
 
+        // ---------- actions: attack, guard, dash ----------
+        class Piece { public List<Renderer> rs = new List<Renderer>(); public float delay, dur = 0.15f; }
+        readonly List<Piece> pieces = new List<Piece>(); MaterialPropertyBlock shiftMpb;
+        const float DASH_DIST = 2.0f, DASH_T = 0.1f, DASH_ANIM = 0.32f;
+        float dashT = 9, dashCd, dashMist; Vector3 dashFrom, dashDir; Vector2? moveDir; bool dashShifted;
+        Rect atkRect, defRect, dashRect;
+        void DoAttack() { if (world && player != null && dashT >= DASH_T) player.StartAttack(); }
+        void DoDash()
+        {
+            if (!world || player == null || dashCd > 0 || !(limbs[3] || limbs[4])) return;
+            // moving: where the stick points; standing: where the hero looks
+            Vector3 d = moveDir.HasValue ? new Vector3(moveDir.Value.x, 0, moveDir.Value.y) : new Vector3(Mathf.Sin(player.heading), 0, Mathf.Cos(player.heading));
+            dashDir = d.normalized; dashT = 0; dashCd = DASH_ANIM + 0.5f; dashFrom = pos; dashMist = 0;
+            // every piece of armour leaves at its own moment and takes its own time: all of them arrive within 0.2-0.3 s
+            foreach (var pc in pieces) { pc.delay = 0.03f + Random.value * 0.11f; pc.dur = 0.11f + Random.value * 0.07f; }
+            player.Teleport(0, 0, Mathf.Atan2(dashDir.x, dashDir.z));
+        }
+        void SetShift(Piece pc, Vector3 v)
+        {
+            if (shiftMpb == null) shiftMpb = new MaterialPropertyBlock();
+            foreach (var r in pc.rs) { if (r == null) continue; r.GetPropertyBlock(shiftMpb); shiftMpb.SetVector("_DashShift", v); r.SetPropertyBlock(shiftMpb); }
+        }
+        void UpdateDash(float dt)
+        {
+            dashCd = Mathf.Max(0, dashCd - dt);
+            if (dashT > DASH_ANIM + 0.05f)
+            {
+                if (dashShifted) { foreach (var pc in pieces) SetShift(pc, Vector3.zero); dashShifted = false; }
+                return;
+            }
+            if (dashT < DASH_T)
+            {   // the shadow itself crosses the distance in a tenth of a second
+                float kk = Mathf.Min(dt, DASH_T - dashT) / DASH_T;
+                var dp = loc.Collide(new Vector2(pos.x + dashDir.x * DASH_DIST * kk, pos.z + dashDir.z * DASH_DIST * kk), 0.27f);
+                player.Teleport(dp.x - pos.x, dp.y - pos.z, player.heading);
+                pos = new Vector3(dp.x, 0, dp.y);
+            }
+            dashT += dt;
+            Vector3 back = dashFrom - pos; dashShifted = true;
+            foreach (var pc in pieces) { float u = Mathf.Clamp01((dashT - pc.delay) / pc.dur), e = u * u * (3 - 2 * u); SetShift(pc, back * (1 - e)); }
+            // mist hangs along the path
+            dashMist -= dt;
+            if (dashMist <= 0 && dashT < DASH_ANIM) { dashMist = 0.035f; float rr = Random.value; SpawnPuff(new Vector3(pos.x + back.x * rr, 0.35f + Random.value * 1.1f, pos.z + back.z * rr), 0.07f, new Vector3(0, 0.15f, 0)); }
+        }
+
         void WorldUpdate(float dt)
         {
             float ix = stick.x, iy = stick.y;
@@ -605,9 +663,15 @@ namespace AsciiHero
             }
             Vector2? lockPos = null;
             if (lockOn) { var lp = lockFixed ?? (loc == tavern ? bartenderChar.go.transform.position : loc.spawn); lockPos = new Vector2(lp.x, lp.z); }
+            moveDir = dir;
+            bool guardPtr = false; foreach (var ap in InputHub.active.Values) if (ap.owner == "def") guardPtr = true;
+            player.guardHeld = guardPtr || InputHub.Key("Guard");
+            if (InputHub.Key("Attack")) DoAttack();
+            if (InputHub.Key("Dash")) DoDash();
             var dd = player.Locomotion(dt, dir, mag, lockPos, new Vector2(pos.x, pos.z), p => loc.Collide(p, 0.27f));
             var np = loc.Collide(new Vector2(pos.x + dd.x, pos.z + dd.y), 0.27f);
             pos = new Vector3(np.x, 0, np.y);
+            UpdateDash(dt);
             hero.go.transform.position = pos;
             hero.go.transform.rotation = Quaternion.Euler(0, player.heading * Mathf.Rad2Deg, 0);
             loc.Update(tNow); Pickups(); UpdateDebris(dt);
@@ -630,6 +694,14 @@ namespace AsciiHero
             loc.Cutaway(off);
             camTgt = Vector3.Lerp(camTgt, new Vector3(pos.x, 0.6f, pos.z), Mathf.Min(1, dt * 5));
             sceneCam.transform.position = camTgt + off; sceneCam.transform.LookAt(camTgt);
+        }
+
+        void ActionButton(Rect r, string text, bool on)
+        {
+            var old = GUI.color;
+            GUI.color = new Color(0.93f, 0.74f, 0.33f, on ? 0.45f : 0.16f); GUI.DrawTexture(r, texDisc);
+            GUI.color = new Color(0.93f, 0.74f, 0.33f, 0.85f); GUI.DrawTexture(r, texRing);
+            GUI.color = old; GUI.Label(r, text, sBtn);
         }
 
         Rect ViewRect()
@@ -908,7 +980,7 @@ namespace AsciiHero
             GUI.Label(new Rect(L, T, 360 * k, 22 * k), loc == field ? "ТЕСТОВОЕ ПОЛЕ" : "«ПЬЯНЫЙ ДРАКОН»", sTitle);
             GUI.Label(new Rect(L, T + 20 * k, 360 * k, 14 * k), (loc == field ? "трава · кучи брони · " : "трактир · ") + VERSION, sSmall);
             int si = cfg.sex == 'f' ? 1 : 0;
-            GUI.Label(new Rect(L, T + 38 * k, 420 * k, 50 * k), "<b>" + SEXNAME[si] + "</b> · " + cfg.height + " см\nСтик — шаг, палец за край — бег · свайп — камера\nЦелостность: " + hp + "% · " + animLabel, sBadge);
+            GUI.Label(new Rect(L, T + 38 * k, 420 * k, 50 * k), "<b>" + SEXNAME[si] + "</b> · " + cfg.height + " см\nСтик — шаг, палец за край — бег\nЦелостность: " + hp + "% · " + animLabel, sBadge);
             float R = safe.xMax - 10 * k;
             if (Button(new Rect(R - 96 * k, T, 96 * k, 28 * k), "← ГЕРОЙ")) { LeaveWorld(); return; }
             if (Button(new Rect(R - 200 * k, T + 32 * k, 200 * k, 26 * k), ascii.surfaceGlyphs ? "Aa: НА МОДЕЛЯХ" : "Aa: СЕТКОЙ", ascii.surfaceGlyphs)) ToggleGlyphMode();
@@ -930,6 +1002,13 @@ namespace AsciiHero
             var kc = stickCenter + stick * stickR * 0.78f; float kr = stickR * 0.42f;
             GUI.DrawTexture(new Rect(kc.x - kr, kc.y - kr, kr * 2, kr * 2), texDisc);
             GUI.color = old;
+            // action buttons, bottom right: attack (big), guard to its left, dash above
+            float bx = safe.xMax - 22 * k, by = safe.yMax - 22 * k, ra = 46 * k, rb = 34 * k;
+            atkRect = new Rect(bx - ra * 2, by - ra * 2, ra * 2, ra * 2);
+            defRect = new Rect(bx - ra * 2 - 14 * k - rb * 2, by - rb * 2, rb * 2, rb * 2);
+            dashRect = new Rect(bx - ra - rb, by - ra * 2 - 14 * k - rb * 2, rb * 2, rb * 2);
+            bool defOn = player != null && player.guardHeld, atkOn = player != null && player.Attacking, dashOn = dashCd > 0;
+            ActionButton(atkRect, "АТАКА", atkOn); ActionButton(defRect, "БЛОК", defOn); ActionButton(dashRect, "РЫВОК", dashOn);
         }
     }
 }

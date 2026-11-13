@@ -174,6 +174,7 @@ namespace AsciiHero
                 sprint = Smooth01(0.7f, 1.7f, sprintT);
                 if (mag > 1.6f) spd += SPRINT_EXTRA * sprint;
                 if (lockPos.HasValue) spd = Mathf.Min(spd, 1.7f);
+                if (guardHeld) spd = Mathf.Min(spd, 1.1f);          // behind the shield you only walk
                 int legsC = Legs, armsC = (limbs[1] ? 1 : 0) + (limbs[2] ? 1 : 0);
                 if (legsC == 1) spd = Mathf.Min(spd, 1.15f);                                        // hopping on one leg
                 if (legsC == 0) spd = Mathf.Min(spd, armsC == 2 ? 0.5f : armsC == 1 ? 0.35f : 0.18f);   // crawling
@@ -458,6 +459,7 @@ namespace AsciiHero
             if (loopMode) BodyLife(dt);
             ArmLean();
             RelaxArms();
+            Combat(dt);
             JointLimits();
             FootIK(dt);
         }
@@ -590,12 +592,75 @@ namespace AsciiHero
                 if (aw > 0.01f)
                 {
                     float u = 0.5f + 0.5f * sw;                              // 0 = arm back, 1 = arm in front
-                    float a = -0.4f + 0.5f * u, b2 = 0.75f + 1.65f * u;      // upper arm and forearm angles from straight down, forwards
-                    SprintPart("upperarm01." + s, "lowerarm01." + s, gq * new Vector3(sg * 0.1f, -Mathf.Cos(a), Mathf.Sin(a)), aw);
-                    SprintPart("lowerarm01." + s, "wrist." + s, gq * new Vector3(-sg * (0.05f + 0.5f * u), -Mathf.Cos(b2), Mathf.Sin(b2)), aw);
+                    // behind: the arm is driven well back and opens almost straight (only a slight bend in the elbow), away from the ribs
+                    float a = -0.95f + 1.05f * u, b2 = -0.7f + 3.1f * u;     // upper arm and forearm angles from straight down, forwards
+                    SprintPart("upperarm01." + s, "lowerarm01." + s, gq * new Vector3(sg * (0.2f - 0.1f * u), -Mathf.Cos(a), Mathf.Sin(a)), aw);
+                    SprintPart("lowerarm01." + s, "wrist." + s, gq * new Vector3(sg * (0.12f - 0.62f * u), -Mathf.Cos(b2), Mathf.Sin(b2)), aw);
                 }
             }
         }
+
+        // ---------- combat: two sword cuts and the guard ----------
+        // Directions are in the body frame as (right, up, forward). Each key: time, upper arm, forearm, blade, torso yaw (to the right +).
+        // 1: from the upper right down to the lower left.  2: flat, from the left to the right.
+        class AtkKey { public float t, yaw; public bool on; public Vector3 ua, fa, bl;
+            public AtkKey(float t) { this.t = t; }
+            public AtkKey(float t, Vector3 ua, Vector3 fa, Vector3 bl, float yaw) { this.t = t; this.ua = ua; this.fa = fa; this.bl = bl; this.yaw = yaw; on = true; } }
+        static Vector3 V(float x, float y, float z) { return new Vector3(x, y, z); }
+        static readonly AtkKey[][] ATTACKS = {
+            null,
+            new[] { new AtkKey(0), new AtkKey(0.2f, V(0.55f, 0.65f, -0.15f), V(0.05f, 0.95f, -0.45f), V(0.35f, 0.55f, -0.75f), 0.4f), new AtkKey(0.34f, V(0.25f, 0.05f, 0.95f), V(-0.25f, 0.15f, 0.95f), V(-0.35f, 0.45f, 0.82f), -0.05f),
+                    new AtkKey(0.44f, V(-0.35f, -0.55f, 0.75f), V(-0.8f, -0.5f, 0.35f), V(-0.75f, -0.6f, 0.25f), -0.45f), new AtkKey(0.62f) },
+            new[] { new AtkKey(0), new AtkKey(0.2f, V(-0.45f, -0.25f, 0.85f), V(-0.9f, 0.15f, 0.3f), V(-0.85f, 0.25f, -0.45f), -0.45f), new AtkKey(0.32f, V(0.15f, -0.1f, 1f), V(0f, 0.02f, 1f), V(0.05f, 0.1f, 1f), 0f),
+                    new AtkKey(0.42f, V(0.8f, -0.15f, 0.55f), V(0.9f, 0f, 0.25f), V(0.85f, 0.1f, -0.5f), 0.45f), new AtkKey(0.58f) } };
+        int atkType, lastAtk; float atkT = 9, atkDur; float guard; public bool guardHeld;
+        public bool Attacking => atkType != 0 && atkT < atkDur;
+        /// starts a cut if the previous one is over (the cooldown is the animation itself). Standing: a random cut, then
+        /// they alternate. Running: the cut that continues the arm's motion - sword arm behind -> 1, in front -> 2.
+        public bool StartAttack()
+        {
+            if (Attacking || !limbs[2]) return false;
+            int type;
+            if (Velocity.magnitude > 0.5f) type = Mathf.Cos(phase * Mathf.PI * 2) > 0 ? 2 : 1;
+            else type = lastAtk != 0 ? 3 - lastAtk : (UnityEngine.Random.value < 0.5f ? 1 : 2);
+            lastAtk = type; atkType = type; atkT = 0; var K = ATTACKS[type]; atkDur = K[K.Length - 1].t;
+            return true;
+        }
+        void AimW(string an, string bn, Vector3 dirW, float w)
+        {
+            if (w <= 0) return; Transform ba = H.Bone(an), bb = H.Bone(bn); if (ba == null || bb == null) return;
+            Vector3 cur = bb.position - ba.position; if (cur.sqrMagnitude < 1e-8f) return;
+            ba.rotation = Quaternion.Slerp(Quaternion.identity, Quaternion.FromToRotation(cur.normalized, dirW.normalized), w) * ba.rotation;
+        }
+        void BladeW(Vector3 dirW, float w)
+        {
+            var wb = H.Bone("wrist.R"); if (w <= 0 || wb == null || ch.weapon == null) return;
+            wb.rotation = Quaternion.Slerp(Quaternion.identity, Quaternion.FromToRotation(ch.weapon.up, dirW.normalized), w) * wb.rotation;
+        }
+        void TwistRight(float a) { Rot("spine05", Vector3.up, a * 0.4f); Rot("spine03", Vector3.up, a * 0.6f); }
+        void Combat(float dt)
+        {
+            Quaternion gq = ch.go.transform.rotation;
+            // guard
+            guard += ((guardHeld ? 1f : 0f) - guard) * (1 - Mathf.Exp(-dt * LN2 / 0.06f));
+            float gw = guard; bool shield = ch.cfg.weapon == "shield";
+            if (gw > 0.01f)
+            {
+                var rp = H.root.localPosition; rp.y -= 0.05f * gw; H.root.localPosition = rp;
+                Vector3 X = gq * Vector3.right; Rot("spine05", X, 0.06f * gw); Rot("spine03", X, 0.06f * gw);
+                if (shield && limbs[1]) { TwistRight(0.25f * gw); AimW("upperarm01.L", "lowerarm01.L", gq * V(-0.2f, -0.5f, 0.85f), gw); AimW("lowerarm01.L", "wrist.L", gq * V(0.5f, 0.6f, 0.62f), gw); }
+                else if (limbs[2]) { AimW("upperarm01.R", "lowerarm01.R", gq * V(0.15f, -0.55f, 0.82f), gw); AimW("lowerarm01.R", "wrist.R", gq * V(-0.5f, 0.45f, 0.74f), gw); BladeW(gq * V(-0.6f, 0.78f, 0.15f), gw); }
+            }
+            // cut
+            if (!Attacking || !limbs[2]) return;
+            atkT += dt; var K = ATTACKS[atkType]; int i = 0; while (i < K.Length - 2 && atkT > K[i + 1].t) i++;
+            AtkKey k0 = K[i], k1 = K[i + 1]; float u = Mathf.Clamp01((atkT - k0.t) / (k1.t - k0.t)), s = u * u * (3 - 2 * u);
+            float w = k0.on && k1.on ? 1 : k1.on ? s : 1 - s; AtkKey e0 = k0.on ? k0 : k1, e1 = k1.on ? k1 : k0;
+            TwistRight(Mathf.Lerp(e0.yaw, e1.yaw, s) * w);
+            AimW("upperarm01.R", "lowerarm01.R", gq * Vector3.Lerp(e0.ua, e1.ua, s), w); AimW("lowerarm01.R", "wrist.R", gq * Vector3.Lerp(e0.fa, e1.fa, s), w); BladeW(gq * Vector3.Lerp(e0.bl, e1.bl, s), w);
+        }
+        /// moves the simulated position (dash) without touching the velocity
+        public void Teleport(float dx, float dz, float newHeading) { S.x += dx; S.z += dz; S.h = newHeading; heading = newHeading; }
 
         // ---------- anatomical joint limits ----------
         // Knees and elbows are hinges: they never bend the wrong way and never fold further than a real joint can.

@@ -78,6 +78,9 @@ namespace AsciiHero
                 case "D": return kb.dKey.isPressed || kb.rightArrowKey.isPressed;
                 case "Back": return kb.escapeKey.wasPressedThisFrame;
                 case "Run": return kb.leftShiftKey.isPressed || kb.rightShiftKey.isPressed;
+                case "Attack": return kb.jKey.wasPressedThisFrame;
+                case "Guard": return kb.kKey.isPressed;
+                case "Dash": return kb.spaceKey.wasPressedThisFrame;
             }
             return false;
 #else
@@ -89,6 +92,9 @@ namespace AsciiHero
                 case "D": return Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow);
                 case "Back": return Input.GetKeyDown(KeyCode.Escape);
                 case "Run": return Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+                case "Attack": return Input.GetKeyDown(KeyCode.J);
+                case "Guard": return Input.GetKey(KeyCode.K);
+                case "Dash": return Input.GetKeyDown(KeyCode.Space);
             }
             return false;
 #endif

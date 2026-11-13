@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { loadHuman, MAT } from './human.js';
 import { buildCharacter, ARMORS, WEAPONS, BUILDS } from './character.js';
-import { AsciiRenderer, makeMaterials, buildGlyphLayer, GLYPH, GLYPH_STATS } from './ascii.js';
+import { AsciiRenderer, makeMaterials, buildGlyphLayer, enableShift, GLYPH, GLYPH_STATS } from './ascii.js';
 import { buildTavern } from './tavern.js';
 import { buildField, LIMBS, LIMB_NAME } from './field.js';
 import { applyPose } from './pose.js';
-import { makeActor, animateActor, locomotion, loadMocap, setLimbs } from './anim.js';
+import { makeActor, animateActor, locomotion, loadMocap, setLimbs, startAttack } from './anim.js';
 
 const $ = id => document.getElementById(id);
 const DEF = { sex: 'm', height: 180, build: 1, armor: 'chain', weapon: 'shield' };
@@ -139,6 +139,12 @@ function rebuild() {
     char.group.traverse(o => { if (o.geometry) o.geometry.dispose(); });
   }
   char = buildCharacter(Object.assign({ shadow: true }, cfg), actorMats);
+  // armour pieces (every shell, the weapon, the shield...) can be offset on their own: the dash sends the shadow ahead and the armour after it
+  { const byKey = new Map(); char.pieces = [];
+    char.group.updateMatrixWorld(true);
+    char.group.traverse(o => { if (!o.isMesh || o.material === actorMats.SHADOW || o.material === actorMats.EYE) return;
+      const key = o.isSkinnedMesh ? o : o.parent; let pc = byKey.get(key); if (!pc) { pc = { shifts: [], delay: 0, dur: 0.15 }; byKey.set(key, pc); char.pieces.push(pc); }
+      pc.shifts.push(enableShift(o)); }); }
   buildGlyphLayer(char.group);
   scene.add(char.group);
   char.cfgWeapon = cfg.weapon;
@@ -161,8 +167,7 @@ canvas.addEventListener('pointermove', e => {
   if (mode === 'world') {
     if (e.pointerId !== camDrag.id) return;
     const dx = e.clientX - camDrag.x, dy = e.clientY - camDrag.y; camDrag.x = e.clientX; camDrag.y = e.clientY;
-    ISO.yawT -= dx * 5.0 / Math.max(W, 320);
-    ISO.pitchT = Math.max(0.55, Math.min(1.35, ISO.pitchT + dy * 2.5 / Math.max(H, 240)));
+
     return;
   }
   const p = ptr.get(e.pointerId); if (!p) return;
@@ -287,7 +292,9 @@ const pos = new THREE.Vector3(), camPos = new THREE.Vector3(), camTgt = new THRE
 let moonLight = null;
 let heading = 0, heroLight = null, lockOn = false, lockFixed = null, labelT = 0;
 // Diablo-like isometric camera: fixed diagonal yaw, steep pitch, narrow FOV
-const ISO = { yaw: Math.PI / 4, pitch: 0.86, dist: 7.6, fov: 30, yawT: Math.PI / 4, pitchT: 0.86 };
+// MOBA camera: fixed (no rotation), high and far, looking down at about 55 degrees
+const ISO_LOD = 2.5;
+const ISO = { yaw: 0, pitch: 0.96, dist: 7.6 * ISO_LOD, fov: 30, yawT: 0, pitchT: 0.96 };
 const ISO_FOV = ISO.fov;
 const ISO_OFF = new THREE.Vector3();
 function updIso() { ISO_OFF.set(Math.sin(ISO.yaw) * Math.cos(ISO.pitch), Math.sin(ISO.pitch), Math.cos(ISO.yaw) * Math.cos(ISO.pitch)).multiplyScalar(ISO.dist); }
@@ -323,9 +330,10 @@ function enterWorld(which = 'tavern') {
   floor.visible = false; editorLights.forEach(l => l.visible = false);
   pos.copy(loc.spawn); heading = Math.PI; player.heading = Math.PI; player.sim.init = false; player.noLock = false; placePlayerInWorld();
   camTgt.set(pos.x, 0.6, pos.z); camPos.copy(camTgt).add(ISO_OFF);
+  GLYPH.uLod.value = ISO_LOD;
   camera.fov = ISO_FOV; camera.updateProjectionMatrix(); AR.asciiMat.uniforms.exposure.value = 1.3; AR.asciiMat.uniforms.actorBoost.value = 1;
   $('title').innerHTML = loc === field ? '🌾 ТЕСТОВОЕ ПОЛЕ<small>трава · кучи брони</small>' : '🍺 «ПЬЯНЫЙ ДРАКОН»<small>трактир</small>';
-  $('badge').innerHTML = `<b>${sexName[cfg.sex]}</b> · ${cfg.height} см\nСтик — движение · свайп — камера`;
+  $('badge').innerHTML = `<b>${sexName[cfg.sex]}</b> · ${cfg.height} см\nСтик — движение`;
   $('hint').style.opacity = 0;
   resize();
 }
@@ -335,6 +343,7 @@ function leaveWorld() {
   GLYPH.uHeroA.value.set(0, -99, 0); GLYPH.uHeroB.value.set(0, -99, 0);
   floor.visible = true; editorLights.forEach(l => l.visible = true);
   char.group.position.set(0, 0, 0); char.group.rotation.y = 0; player.speed = 0; player.heading = 0; player.sim.init = false; lockOn = false; $('lock').classList.remove('on');
+  GLYPH.uLod.value = 1;
   camera.fov = 36; camera.updateProjectionMatrix(); AR.asciiMat.uniforms.exposure.value = 1.0; AR.asciiMat.uniforms.actorBoost.value = 0;
   $('title').innerHTML = '⚔ СОЗДАНИЕ ГЕРОЯ<small>beta 0.4</small>';
   syncUI(); resize();
@@ -377,6 +386,42 @@ function collide(p, r) {
   }
   const b = T.bounds; p.x = Math.max(b.minx, Math.min(b.maxx, p.x)); p.z = Math.max(b.minz, Math.min(b.maxz, p.z));
 }
+// ---------- actions: attack, guard, dash ----------
+const act = { guard: false };
+const dash = { t: 9, cd: 0, from: new THREE.Vector3(), mist: 0 };
+const DASH_DIST = 2.0, DASH_T = 0.1, DASH_ANIM = 0.32;
+function doAttack() { if (mode === 'world' && player && dash.t >= DASH_T) startAttack(player); }
+function doDash() {
+  if (mode !== 'world' || !player || dash.cd > 0 || !(body.limbs.legL || body.limbs.legR)) return;
+  // moving: where the stick points; standing: where the hero looks
+  const d = act.dir ? new THREE.Vector3(act.dir[0], 0, act.dir[1]) : new THREE.Vector3(Math.sin(player.heading), 0, Math.cos(player.heading));
+  dash.dir = d.normalize(); dash.t = 0; dash.cd = DASH_ANIM + 0.5; dash.from.copy(pos); dash.mist = 0;
+  // every piece of armour leaves at its own moment and takes its own time: all of them arrive within 0.2-0.3 s
+  for (const pc of char.pieces) { pc.delay = 0.03 + Math.random() * 0.11; pc.dur = 0.11 + Math.random() * 0.07; }
+  player.sim.h = player.heading = Math.atan2(d.x, d.z);
+}
+function updateDash(dt) {
+  dash.cd = Math.max(0, dash.cd - dt);
+  if (dash.t > DASH_ANIM + 0.05) return;
+  if (dash.t < DASH_T) {            // the shadow itself crosses the distance in a tenth of a second
+    const k = Math.min(dt, DASH_T - dash.t) / DASH_T, bx = pos.x, bz = pos.z;
+    pos.x += dash.dir.x * DASH_DIST * k; pos.z += dash.dir.z * DASH_DIST * k; collide(pos, 0.27);
+    player.sim.x += pos.x - bx; player.sim.z += pos.z - bz;
+  }
+  dash.t += dt;
+  const back = dash.from.clone().sub(pos);
+  for (const pc of char.pieces) { const u = Math.max(0, Math.min(1, (dash.t - pc.delay) / pc.dur)), e = u * u * (3 - 2 * u); for (const sh of pc.shifts) sh.value.copy(back).multiplyScalar(1 - e); }
+  // mist hangs along the path
+  dash.mist -= dt; if (dash.mist <= 0 && dash.t < DASH_ANIM) { dash.mist = 0.035; const k = Math.random();
+    spawnPuff(new THREE.Vector3(pos.x + back.x * k, 0.35 + Math.random() * 1.1, pos.z + back.z * k), 0.07, new THREE.Vector3(0, 0.15, 0)); }
+}
+for (const [id, down, upF] of [['atk', doAttack, null], ['dash', doDash, null], ['def', () => { act.guard = true; }, () => { act.guard = false; }]]) {
+  const el = $(id); if (!el) continue;
+  el.addEventListener('pointerdown', e => { e.preventDefault(); el.setPointerCapture(e.pointerId); el.classList.add('on'); down(); });
+  const up = () => { el.classList.remove('on'); if (upF) upF(); };
+  el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+}
+addEventListener('keydown', e => { if (e.repeat) return; if (e.code === 'KeyJ') doAttack(); if (e.code === 'Space') doDash(); });
 function worldUpdate(dt, t) {
   let ix = stick.x, iy = stick.y;
   if (keys.KeyW || keys.ArrowUp) iy = -1; if (keys.KeyS || keys.ArrowDown) iy = 1;
@@ -391,8 +436,10 @@ function worldUpdate(dt, t) {
   }
   // stick: light push = turn on the spot, more = walk -> jog -> sprint (blend tree)
   const lockPos = lockOn ? (lockFixed || (loc === tavern ? bartender.char.group.position : loc.spawn)) : null;
+  act.dir = dir; player.guardHeld = act.guard || !!keys.KeyK;
   const [ddx, ddz] = locomotion(player, dt, dir, mag, lockPos, pos, p => collide(p, 0.27));
   pos.x += ddx; pos.z += ddz;
+  updateDash(dt);
   collide(pos, 0.27);
   heading = player.heading;
   char.group.position.set(pos.x, 0, pos.z);
@@ -401,7 +448,7 @@ function worldUpdate(dt, t) {
   if (player) GLYPH.uVel.value.set(player.sim.vx, 0, player.sim.vz);
   GLYPH.uHeroA.value.set(pos.x, 0, pos.z); GLYPH.uHeroB.value.lerp(GLYPH.uHeroA.value, Math.min(1, dt * 2.2));
   if (moonLight) { moonLight.position.set(pos.x + 1, 7.5, pos.z - 7.5); moonLight.target.position.set(pos.x, 0, pos.z); }
-  labelT -= dt; if (labelT <= 0) { labelT = 0.25; $('badge').innerHTML = `<b>${sexName[cfg.sex]}</b> · ${cfg.height} см\nСтик — движение · свайп — камера\nЦелостность: ${body.hp}% · ${player.label}`; }
+  labelT -= dt; if (labelT <= 0) { labelT = 0.25; $('badge').innerHTML = `<b>${sexName[cfg.sex]}</b> · ${cfg.height} см\nСтик — движение\nЦелостность: ${body.hp}% · ${player.label}`; }
   if (loc === tavern) { locomotion(bartender, dt, null, 0, null, { x: bartender.char.group.position.x, z: bartender.char.group.position.z }); bartender.heading = 0; bartender.noLock = true; animateActor(bartender, t, dt); }
   // follow camera
   { const d = ISO_OFF.clone().setY(0).normalize(); heroLight.position.set(pos.x + d.x * 1.3 - d.z * 0.5, 2.3, pos.z + d.z * 1.3 + d.x * 0.5); }
@@ -443,7 +490,7 @@ function frame(now) {
   if (fpsAcc > 1) { $('fps').textContent = Math.round(fpsN / fpsAcc) + ' fps · ' + (GLYPH.uMode.value > 0.5 ? GLYPH_STATS.count + ' симв.' : AR.cols + '×' + AR.rows); fpsAcc = 0; fpsN = 0; }
   requestAnimationFrame(frame);
 }
-window.__dbg = { damage, body, debris, puffs, get loc() { return loc; }, cam, setCfg, enterWorld, leaveWorld, stick, get pos() { return pos; }, get player() { return player; }, get auto() { return autoRotate; }, set auto(v) { autoRotate = v; }, AR };
+window.__dbg = { damage, body, doAttack, doDash, act, dash, ISO, debris, puffs, get loc() { return loc; }, cam, setCfg, enterWorld, leaveWorld, stick, get pos() { return pos; }, get player() { return player; }, get auto() { return autoRotate; }, set auto(v) { autoRotate = v; }, AR };
 (async () => {
   try {
     await loadHuman(); await loadMocap();

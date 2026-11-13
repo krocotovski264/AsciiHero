@@ -305,7 +305,7 @@ namespace AsciiHero
             var fr = Pose.Hand(human, "R");
             // hand frame is in world space; the model sits at the origin while it is being built
             Vector3 grip = fr.W + fr.f * 0.075f - fr.n * 0.028f;
-            Vector3 up = -fr.a;
+            Vector3 up = fr.a;      // out of the thumb side of the fist: the blade is carried pointing up
             Vector3 fwd = Vector3.Cross(up, fr.f).normalized;
             var rot = Quaternion.LookRotation(fwd, up);
             var g = Group("Weapon");

@@ -27,8 +27,11 @@ namespace AsciiHero
         /// add the character layer to every renderer under root (once per renderer)
         /// limbOfBone (optional): bone index -> limb number 1..5 (0 = body); stored per glyph so torn-off limbs can be hidden.
         /// Returns the created skinned glyph renderers.
+        /// source renderer -> its glyph renderer, for the last Build call
+        public static readonly Dictionary<Renderer, Renderer> pairs = new Dictionary<Renderer, Renderer>();
         public static List<Renderer> Build(GameObject root, int[] limbOfBone = null)
         {
+            pairs.Clear();
             var made = new List<Renderer>();
             var list = new List<Renderer>(root.GetComponentsInChildren<Renderer>(true));
             foreach (var r in list)
@@ -52,7 +55,7 @@ namespace AsciiHero
                     g.sharedMesh = mesh; g.bones = smr.bones; g.rootBone = smr.rootBone; g.sharedMaterial = gm;
                     g.updateWhenOffscreen = true;
                     g.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; g.receiveShadows = false;
-                    made.Add(g);
+                    made.Add(g); pairs[r] = g;
                     // keep the pair together (visibility, destruction)
                     new GameObject("Glyphs").transform.SetParent(r.transform, false);
                 }
@@ -60,7 +63,7 @@ namespace AsciiHero
                 {
                     go.transform.SetParent(r.transform, false);
                     go.AddComponent<MeshFilter>().sharedMesh = mesh;
-                    var g = go.AddComponent<MeshRenderer>(); g.sharedMaterial = gm;
+                    var g = go.AddComponent<MeshRenderer>(); g.sharedMaterial = gm; pairs[r] = g;
                     g.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; g.receiveShadows = false;
                 }
             }

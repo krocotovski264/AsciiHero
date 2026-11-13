@@ -244,7 +244,7 @@ function addWeapon(group, h, mats, W) {
   const fr = handFrameWorld(h, 'R');
   // grip centre: inside the curled fingers
   const grip = fr.W.clone().addScaledVector(fr.f, 0.075).addScaledVector(fr.n, -0.028);
-  const up = fr.a.clone().multiplyScalar(-1); // weapon axis (from pinky side toward index/thumb side)
+  const up = fr.a.clone(); // weapon axis: out of the thumb side of the fist, so the blade is carried pointing up
   const fwd = new THREE.Vector3().crossVectors(up, fr.f).normalize();
   const side = new THREE.Vector3().crossVectors(fwd, up).normalize();
   const basis = new THREE.Matrix4().makeBasis(side, up, fwd).setPosition(grip);

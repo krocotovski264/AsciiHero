@@ -83,6 +83,12 @@
     #stick{width:118px;height:118px;left:max(18px,env(safe-area-inset-left));bottom:18px}
   }
   body.world #stick{display:block}
+  .act{display:none;position:absolute;border-radius:50%;border:2px solid var(--acc);background:rgba(20,16,10,.55);color:var(--acc);font:700 11px/1 monospace;letter-spacing:1px;touch-action:none;user-select:none;-webkit-user-select:none}
+  body.world .act{display:block}
+  .act.on{background:rgba(232,176,75,.35)}
+  #atk{right:max(22px,env(safe-area-inset-right));bottom:calc(26px + env(safe-area-inset-bottom));width:84px;height:84px}
+  #def{right:calc(max(22px,env(safe-area-inset-right)) + 96px);bottom:calc(18px + env(safe-area-inset-bottom));width:62px;height:62px}
+  #dash{right:calc(max(22px,env(safe-area-inset-right)) + 22px);bottom:calc(122px + env(safe-area-inset-bottom));width:62px;height:62px}
   body.world #auto, body.world #reset{display:none}
   #back,#lock,#dmg{display:none}
   body.world #dmg{display:inline-block}
@@ -110,6 +116,7 @@
       <div id="fps"></div>
       <div id="loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#f0b640;font-size:13px;letter-spacing:2px">ЗАГРУЗКА МОДЕЛЕЙ…</div>
       <div id="stick"><div class="lbl">ДВИЖЕНИЕ</div><div id="knob"></div></div>
+      <button class="act" id="atk">АТАКА</button><button class="act" id="def">БЛОК</button><button class="act" id="dash">РЫВОК</button>
       <div id="hint">☝ крути пальцем · ✌ щипок — зум · 2× тап — сброс</div>
     </div>
     <div id="panel">

@@ -37,6 +37,8 @@ Shader "AsciiHero/Glyph"
             TEXTURE2D(_AsciiLitTex); SAMPLER(sampler_AsciiLitTex);
             TEXTURE2D(_AsciiNDTex); SAMPLER(sampler_AsciiNDTex);
             float _AsciiRows, _AsciiExposure, _AsciiLinear, _AsciiDepthRef, _AsciiTime;
+            float4 _DashShift;    // per renderer (world): dash, the armour pieces lag behind the body
+            float _AsciiLod;      // far camera: fewer, larger characters (how many times further than the close-up distance)
             float _GlyphPuff;     // per renderer: 0..1, a burst of smoke flying apart
             float4 _AsciiHeroVel; // hero velocity (world): the wisps trail behind
             float _GlyphBurn;     // per renderer: 0..1, a torn-off limb burning away
@@ -58,7 +60,9 @@ Shader "AsciiHero/Glyph"
                 if (_GlyphSmoke > 0.5) pOS += i.normalOS * (0.004 + (0.07 + 0.09 * wisp) * ph * ph);
                 // puff (a burst of smoke where a limb is torn off): the glyphs fly apart from the centre, rise and thin out
                 if (_GlyphPuff > 0.0) pOS += i.normalOS * _GlyphPuff * (0.18 + 0.5 * i.seed.x);
-                float3 pWS = TransformObjectToWorld(pOS);
+                float3 pWS = TransformObjectToWorld(pOS) + _DashShift.xyz;
+                float lod = max(1.0, _AsciiLod);
+                bool lodKeep = lod < 1.01 || frac(i.seed.x * 31.7 + 0.37) < 1.7 / (lod * lod);
                 if (_GlyphSmoke > 0.5) pWS.y += (0.15 + 0.4 * wisp) * ph * ph;
                 if (_GlyphSmoke > 0.5 && _GlyphPuff <= 0.0) pWS -= _AsciiHeroVel.xyz * (0.05 + 0.2 * wisp) * ph * ph;
                 if (_GlyphPuff > 0.0) pWS.y += _GlyphPuff * _GlyphPuff * (0.15 + 0.5 * frac(i.seed.x * 5.3));
@@ -76,7 +80,7 @@ Shader "AsciiHero/Glyph"
                 float sceneZ = nd.b > 1e-4 ? nd.b * 12.0 : 1e5;
                 float myZ = -pVS.z;
                 bool inside = all(suv >= 0.0) && all(suv <= 1.0);
-                bool vis = !gone && ember < 0.999 && dot(nVS, toCam) > -0.05 - ember - _GlyphPuff * 4.0 && myZ <= sceneZ + 0.008 + 0.0035 * myZ && inside;
+                bool vis = lodKeep && !gone && ember < 0.999 && dot(nVS, toCam) > -0.05 - ember - _GlyphPuff * 4.0 && myZ <= sceneZ + 0.008 + 0.0035 * myZ && inside;
                 float3 lit = SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, sampler_AsciiLitTex, suv, 0).rgb;
                 float3 col = _AsciiLinear > 0.5 ? pow(max(lit, 0.0), 1.0 / 2.2) : max(lit, 0.0);
                 float lum = dot(col, float3(0.299, 0.587, 0.114));
@@ -95,7 +99,7 @@ Shader "AsciiHero/Glyph"
                 if (ember > 0.0) { o.col = lerp(o.col, float3(1.6, 0.62, 0.12), min(1.0, ember * 2.0)) * (1.0 - ember * ember); gi = floor(lerp(gi, 2.0, ember)); }
                 o.gi = gi;
                 o.local = i.corner + 0.5;
-                pVS.xy += i.corner * _GlyphCell.xy * GLYPH_SCALE;   // upright character in the view plane, slight overlap
+                pVS.xy += i.corner * _GlyphCell.xy * GLYPH_SCALE * lod;   // upright character in the view plane, slight overlap
                 o.positionCS = vis ? TransformWViewToHClip(pVS) : float4(2, 2, 2, 1);
                 return o;
             }

@@ -69,7 +69,7 @@ export const MATERIAL_DEFS = {
 export const GLYPH = {
   tGlyph: { value: null }, uRows: { value: RAMPS.length }, uExposure: { value: 1 }, uMode: { value: 1 },
   tLit: { value: null }, tDepth: { value: null }, uNear: { value: 0.05 }, uFar: { value: 30 }, uDepthRef: { value: 4 }, uEps: { value: 0.008 },
-  uScale: { value: 1.5 }, uMinGlyph: { value: 5 }, uTime: { value: 0 }, uVel: { value: new THREE.Vector3() },
+  uScale: { value: 1.5 }, uMinGlyph: { value: 5 }, uTime: { value: 0 }, uLod: { value: 1 }, uVel: { value: new THREE.Vector3() },
   uHeroA: { value: new THREE.Vector3(0, -99, 0) }, uHeroB: { value: new THREE.Vector3(0, -99, 0) },
 };
 let ATLAS = null;
@@ -113,8 +113,8 @@ attribute vec3 anormal;
 attribute float aseed;
 uniform sampler2D tLit, tDepth;
 uniform vec2 uCell;
-uniform float uRow, uActor, uExposure, uNear, uFar, uDepthRef, uEps, uScale, uMinGlyph, uSmoke, uTime, uBurn, uPuff;
-uniform vec3 uVel;
+uniform float uRow, uActor, uExposure, uNear, uFar, uDepthRef, uEps, uScale, uMinGlyph, uSmoke, uTime, uBurn, uPuff, uLod;
+uniform vec3 uVel, uShift;
 varying vec2 vLocal;
 varying vec3 vCol;
 varying float vGi;
@@ -135,6 +135,7 @@ void main() {
   #include <skinning_vertex>
   bool gone = length(objectNormal) < 0.3;      // torn-off limb: its bones are scaled to nothing
   vec4 mv = modelViewMatrix * vec4(transformed, 1.0);
+  mv.xyz += (viewMatrix * vec4(uShift, 0.0)).xyz;      // dash: armour pieces lag behind the body
   if (uSmoke > 0.5 && uPuff <= 0.0) mv.xyz -= (viewMatrix * vec4(uVel, 0.0)).xyz * (0.05 + 0.2 * wisp) * ph * ph;
   vec3 nV = normalize(normalMatrix * objectNormal);
   vec3 toCam = normalize(-mv.xyz);
@@ -144,7 +145,9 @@ void main() {
   float sceneZ = -perspectiveDepthToViewZ(texture2D(tDepth, suv).x, uNear, uFar);
   float myZ = -mv.z;
   mv.y += ember * ember * 0.35;
-  bool vis = !gone && ember < 0.999 && dot(nV, toCam) > -0.05 - ember - uPuff * 4.0 && myZ <= sceneZ + uEps + 0.002 * myZ && all(greaterThanEqual(suv, vec2(0.0))) && all(lessThanEqual(suv, vec2(1.0)));
+  // far camera: fewer, larger characters (uLod = how many times further than the close-up distance)
+  bool lodKeep = uLod < 1.01 || fract(aseed * 31.7 + 0.37) < 1.7 / (uLod * uLod);
+  bool vis = lodKeep && !gone && ember < 0.999 && dot(nV, toCam) > -0.05 - ember - uPuff * 4.0 && myZ <= sceneZ + uEps + 0.002 * myZ && all(greaterThanEqual(suv, vec2(0.0))) && all(lessThanEqual(suv, vec2(1.0)));
   vec3 col = pow(max(texture2D(tLit, suv).rgb, 0.0), vec3(1.0 / 2.2));
   float lum = dot(col, vec3(0.299, 0.587, 0.114));
   float depthK = clamp(1.0 - (myZ - uDepthRef) * 0.09, 0.5, 1.2);          // nearer = brighter
@@ -161,7 +164,7 @@ void main() {
   if (ember > 0.0) { vCol = mix(vCol, vec3(1.6, 0.62, 0.12), min(1.0, ember * 2.0)) * (1.0 - ember * ember); gi = floor(mix(gi, 2.0, ember)); }
   vGi = gi;
   vLocal = position.xy + 0.5;
-  mv.xy += position.xy * uCell * uScale;     // upright character in the view plane, never skewed; slight overlap
+  mv.xy += position.xy * uCell * uScale * uLod;     // upright character in the view plane, never skewed; slight overlap
   gl_Position = vis ? projectionMatrix * mv : vec4(2.0, 2.0, 2.0, 1.0);
 }`;
 const GLYPH_FS = `
@@ -175,17 +178,17 @@ void main() {
   float mk = texture2D(tGlyph, vec2((vGi + l.x) / 16.0, 1.0 - (uRow + 1.0) / uRows + l.y / uRows)).r;
   gl_FragColor = vec4(vCol * mk, 1.0);
 }`;
-const GMAT = new Map();
-function glyphMaterial(row, cell, actor, smoke = 0, burn = null, puff = null) {
+const GMAT = new Map(), NO_SHIFT = { value: new THREE.Vector3() };
+function glyphMaterial(row, cell, actor, smoke = 0, burn = null, puff = null, shift = null) {
   const key = row + ':' + cell.x + ':' + actor + ':' + smoke;
-  if (!burn && !puff && GMAT.has(key)) return GMAT.get(key);
+  if (!burn && !puff && !shift && GMAT.has(key)) return GMAT.get(key);
   const m = new THREE.ShaderMaterial({
-    uniforms: Object.assign({}, GLYPH, { uRow: { value: row }, uCell: { value: cell }, uActor: { value: actor }, uSmoke: { value: smoke }, uBurn: burn || { value: 0 }, uPuff: puff || { value: 0 } }),
+    uniforms: Object.assign({}, GLYPH, { uRow: { value: row }, uCell: { value: cell }, uActor: { value: actor }, uSmoke: { value: smoke }, uBurn: burn || { value: 0 }, uPuff: puff || { value: 0 }, uShift: shift || NO_SHIFT }),
     vertexShader: GLYPH_VS, fragmentShader: GLYPH_FS,
     depthTest: false, depthWrite: false, transparent: false, side: THREE.DoubleSide,
     blending: THREE.CustomBlending, blendEquation: THREE.MaxEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
   });
-  if (!burn && !puff) GMAT.set(key, m); return m;
+  if (!burn && !puff && !shift) GMAT.set(key, m); return m;
 }
 
 // lay points on the surface in rows: one point per glyph cell centre of the surface coordinates
@@ -256,7 +259,7 @@ function makeGlyphs(mesh) {
     ig.setAttribute('skinWeight', new THREE.InstancedBufferAttribute(new Float32Array(S.sw), 4));
   }
   ig.instanceCount = S.n;
-  const gm = glyphMaterial(info.row, info.cell, info.actor, info.smoke, mesh.userData.burn, mesh.userData.puff);   // userData.burn = { value } gives the mesh its own burn level
+  const gm = glyphMaterial(info.row, info.cell, info.actor, info.smoke, mesh.userData.burn, mesh.userData.puff, mesh.userData.shift);   // userData.burn = { value } gives the mesh its own burn level
   const o = skinned ? new THREE.SkinnedMesh(ig, gm) : new THREE.Mesh(ig, gm);
   if (skinned) o.bind(mesh.skeleton, mesh.bindMatrix);
   o.frustumCulled = false; o.castShadow = false; o.receiveShadow = false;
@@ -323,6 +326,16 @@ export function makeGrass(points, seeds) {
   return o;
 }
 /** build the character layer for every mesh under root (once per mesh) */
+// gives a mesh its own world-space offset (lit pass and glyphs): used for the dash, where the armour pieces fly after the body
+export function enableShift(mesh) {
+  const src = mesh.material, sh = { value: new THREE.Vector3() }, id = src.userData.matId;
+  const m = src.clone(); m.userData = src.userData;
+  m.onBeforeCompile = s => { s.uniforms.uShift = sh;
+    s.vertexShader = 'uniform vec3 uShift;\n' + s.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n  mvPosition.xyz += (viewMatrix * vec4(uShift, 0.0)).xyz; gl_Position = projectionMatrix * mvPosition;');
+    s.fragmentShader = s.fragmentShader.replace(/}\s*$/, `  gl_FragColor.a = ${(id / 255).toFixed(6)};\n}`); };
+  m.customProgramCacheKey = () => 'matS' + id;
+  mesh.material = m; mesh.userData.shift = sh; return sh;
+}
 export function buildGlyphLayer(root) {
   root.updateMatrixWorld(true);
   const list = [];
