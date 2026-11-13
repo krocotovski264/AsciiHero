@@ -138,6 +138,7 @@ export function makeActor(c) {
     limbs: { head: true, armL: true, armR: true, legL: true, legR: true }, hopPh: 0, crawlPh: 0, vel: 0,
   };
   A.restAnkle = Math.min(localY(H, 'foot.L'), localY(H, 'foot.R'));
+  { const u = P(H.bone('neck01')).sub(P(H.bone('root'))); A.restTrunk = Math.atan2(u.z, u.y); const w = P(H.bone('spine03')).sub(P(H.bone('root'))); A.restLower = Math.atan2(w.z, w.y); }   // upright trunk angle of the rest pose
   // weapon / shield arms: remember the built pose of the whole arm chain relative to the body
   const gqi = c.group.getWorldQuaternion(new THREE.Quaternion()).invert(); A.armRel = {};
   for (const s of ['L', 'R']) for (const n of ARM_CHAIN) { const b = H.bone(n + '.' + s); if (b) A.armRel[n + '.' + s] = gqi.clone().multiply(b.getWorldQuaternion(new THREE.Quaternion())); }
@@ -313,7 +314,7 @@ export function animateActor(A, t, dt = 1 / 60) {
   else {
     if (legsN === 1) hopBody(A, dt);
     pinArms(A);
-    if (A.loopMode) bodyLife(A, t, dt);
+    if (A.loopMode && !A.noLife) bodyLife(A, t, dt);
     armLean(A);
     relaxArms(A);
     footIK(A, dt);
@@ -391,13 +392,21 @@ function bodyLife(A, t, dt) {
   // acceleration in the body frame (web: +x = left, +z = forward)
   const aF = S.ax * sn + S.az * c, aL = S.ax * c - S.az * sn, v = Math.hypot(S.vx, S.vz);
   const k = 1 - Math.exp(-dt * LN2 / 0.11);
-  const pitchT = clamp(aF * 0.024, -0.2, 0.17) + 0.022 * v, rollT = clamp(aL * 0.02, -0.11, 0.11);
+  const pitchT = clamp(aF * 0.024, -0.2, 0.17), rollT = clamp(aL * 0.02, -0.11, 0.11);
   A.lp = (A.lp || 0) + (pitchT - (A.lp || 0)) * k; A.lr = (A.lr || 0) + (rollT - (A.lr || 0)) * k;
   const dipT = clamp((Math.hypot(S.ax, S.az) - 3) * 0.008, 0, 0.07); A.dip = (A.dip || 0) + (dipT - (A.dip || 0)) * k;
   const lookT = clamp(S.w * 0.1 + wrap(S.h - A.heading) * 0.6, -0.45, 0.45); A.look = (A.look || 0) + (lookT - (A.look || 0)) * (1 - Math.exp(-dt * LN2 / 0.15));
   const X = new THREE.Vector3(1, 0, 0).applyQuaternion(gq), Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(0, 0, 1).applyQuaternion(gq);
   const rot = (name, axis, ang) => { const b = H.bone(name); if (b && Math.abs(ang) > 1e-5) rotateWorld(b, new THREE.Quaternion().setFromAxisAngle(axis, ang)); };
   const ph = (A.phase || 0) * Math.PI * 2, cs = Math.cos(ph), breath = Math.sin(t * 1.7), idle = 1 - wW;
+  // posture: the mocap runner bends 17 degrees forward and throws the head back; bring the trunk to a normal
+  // carriage for the gait (upright at rest, about 3 degrees forward walking, 8 running) before adding the leans
+  const want = 0.01 + 0.045 * wW + 0.09 * wR;
+  { // the pelvis first (a pelvis tipped forward under an upright chest is what reads as an arched back); the legs keep their pose
+    const w = P(H.bone('spine03')).sub(P(H.bone('root'))), d = (want - (Math.atan2(w.dot(Z), w.y) - A.restLower)) * 0.8;
+    rot('root', X, d); rot('upperleg01.L', X, -d); rot('upperleg01.R', X, -d); }
+  { const u = P(H.bone('neck01')).sub(P(H.bone('root'))), cur = Math.atan2(u.dot(Z), u.y) - A.restTrunk;
+    const d = want - cur; rot('spine05', X, d * 0.5); rot('spine03', X, d * 0.5); }
   // pelvis: dip under load, slow weight shift when standing
   H.root.position.y -= A.dip; H.root.position.x += idle * 0.012 * Math.sin(t * 0.45); H.root.updateMatrixWorld(true);
   // torso: lean (root, lower and upper spine share it), counter-rotation, breathing
@@ -406,8 +415,10 @@ function bodyLife(A, t, dt) {
   rot('spine05', Y, twist * 0.4 + A.look * 0.15); rot('spine03', Y, twist * 0.6 + A.look * 0.2);
   rot('spine03', X, -0.012 * breath - idle * 0.01 * Math.sin(t * 0.6));
   // head: stays level, looks where the body is turning, drifts a little at rest
-  rot('neck01', X, -A.lp * 0.35); rot('head', X, -A.lp * 0.25 + idle * 0.02 * Math.sin(t * 0.8));
   rot('neck01', Y, -twist * 0.5 + A.look * 0.3 + idle * 0.06 * Math.sin(t * 0.37)); rot('head', Y, -twist * 0.35 + A.look * 0.35 + idle * 0.05 * Math.sin(t * 0.23 + 1));
+  // head: eyes on the path ahead, a touch below level, whatever the trunk does
+  { const hb = H.bone('head'); if (hb) { const f = new THREE.Vector3(0, 0, 1).applyQuaternion(hb.getWorldQuaternion(new THREE.Quaternion()));
+      const up = Math.asin(clamp(f.y, -1, 1)), d = (up - (-0.07 + idle * 0.02 * Math.sin(t * 0.8))) * 0.9; rot('neck01', X, d * 0.4); rot('head', X, d * 0.6); } }
   // arms: swing opposite to the legs (phase 0 = left foot lands, so the right arm is forward)
   const weapon = A.char.cfgWeapon || 'none';
   for (const [s, sg, on] of [['L', 1, L.armL], ['R', -1, L.armR]]) {

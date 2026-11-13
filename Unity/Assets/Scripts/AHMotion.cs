@@ -80,6 +80,14 @@ namespace AsciiHero
             }
             query = new float[MotionDB.nf];
             restAnkle = Mathf.Min(LocalY("foot.L"), LocalY("foot.R"));
+            {   // upright trunk and pelvis angles of the rest pose
+                Transform rt = H.Bone("root"), sp = H.Bone("spine03"), nk = H.Bone("neck01");
+                if (rt != null && sp != null && nk != null)
+                {
+                    Vector3 u = Quaternion.Inverse(c.go.transform.rotation) * (nk.position - rt.position), w = Quaternion.Inverse(c.go.transform.rotation) * (sp.position - rt.position);
+                    restTrunk = Mathf.Atan2(u.z, u.y); restLower = Mathf.Atan2(w.z, w.y);
+                }
+            }
             // weapon / shield arms: remember the built pose of the whole arm chain relative to the body
             Quaternion gi0 = Quaternion.Inverse(c.go.transform.rotation);
             for (int si = 0; si < 2; si++)
@@ -503,7 +511,7 @@ namespace AsciiHero
         //   * shoulders counter-rotate against the hips with every step; the head stays level and looks into the turn
         //   * arms swing with the gait even when they carry a shield or a weapon, elbows bend more in a run
         //   * standing still is not frozen: breathing, a slow shift of weight, the head drifting
-        float lp, lr, dip, look;
+        float lp, lr, dip, look, restTrunk, restLower;
         void Rot(string name, Vector3 axis, float ang)
         {
             var b = H.Bone(name); if (b == null || Mathf.Abs(ang) < 1e-5f) return;
@@ -517,12 +525,24 @@ namespace AsciiHero
             // acceleration in the body frame (Unity: +x = right, +z = forward)
             float aF = S.ax * sn + S.az * c, aS = S.ax * c - S.az * sn, v = Mathf.Sqrt(S.vx * S.vx + S.vz * S.vz);
             float k = 1 - Mathf.Exp(-dt * LN2 / 0.11f);
-            float pitchT = Mathf.Clamp(aF * 0.024f, -0.2f, 0.17f) + 0.022f * v, rollT = Mathf.Clamp(aS * 0.02f, -0.11f, 0.11f);
+            float pitchT = Mathf.Clamp(aF * 0.024f, -0.2f, 0.17f), rollT = Mathf.Clamp(aS * 0.02f, -0.11f, 0.11f);
             lp += (pitchT - lp) * k; lr += (rollT - lr) * k;
             float dipT = Mathf.Clamp((Mathf.Sqrt(S.ax * S.ax + S.az * S.az) - 3) * 0.008f, 0, 0.07f); dip += (dipT - dip) * k;
             float lookT = Mathf.Clamp(S.w * 0.1f + Wrap(S.h - heading) * 0.6f, -0.45f, 0.45f); look += (lookT - look) * (1 - Mathf.Exp(-dt * LN2 / 0.15f));
             Vector3 X = gq * Vector3.right, Y = Vector3.up, Z = gq * Vector3.forward;
             float ph = phase * Mathf.PI * 2, cs = Mathf.Cos(ph), breath = Mathf.Sin(t * 1.7f), idle = 1 - wW;
+            // posture: the mocap runner bends 17 degrees forward and throws the head back; bring the trunk to a normal
+            // carriage for the gait (upright at rest, about 3 degrees forward walking, 8 running) before adding the leans
+            float want = 0.01f + 0.045f * wW + 0.09f * wR;
+            Transform bRoot = H.Bone("root"), bSp = H.Bone("spine03"), bNk = H.Bone("neck01");
+            if (bRoot != null && bSp != null && bNk != null)
+            {
+                // the pelvis first (a pelvis tipped forward under an upright chest is what reads as an arched back); the legs keep their pose
+                Vector3 w3 = bSp.position - bRoot.position; float d0 = (want - (Mathf.Atan2(Vector3.Dot(w3, Z), w3.y) - restLower)) * 0.8f;
+                Rot("root", X, d0); Rot("upperleg01.L", X, -d0); Rot("upperleg01.R", X, -d0);
+                Vector3 u3 = bNk.position - bRoot.position; float d1 = want - (Mathf.Atan2(Vector3.Dot(u3, Z), u3.y) - restTrunk);
+                Rot("spine05", X, d1 * 0.5f); Rot("spine03", X, d1 * 0.5f);
+            }
             // pelvis: dip under load, slow weight shift when standing
             var rp = H.root.localPosition; rp.y -= dip; rp.x += idle * 0.012f * Mathf.Sin(t * 0.45f); H.root.localPosition = rp;
             // torso: lean (root, lower and upper spine share it), counter-rotation, breathing
@@ -532,8 +552,15 @@ namespace AsciiHero
             Rot("spine05", Y, twist * 0.4f + look * 0.15f); Rot("spine03", Y, twist * 0.6f + look * 0.2f);
             Rot("spine03", X, -0.012f * breath - idle * 0.01f * Mathf.Sin(t * 0.6f));
             // head: stays level, looks where the body is turning, drifts a little at rest
-            Rot("neck01", X, -lp * 0.35f); Rot("head", X, -lp * 0.25f + idle * 0.02f * Mathf.Sin(t * 0.8f));
             Rot("neck01", Y, -twist * 0.5f + look * 0.3f + idle * 0.06f * Mathf.Sin(t * 0.37f)); Rot("head", Y, -twist * 0.35f + look * 0.35f + idle * 0.05f * Mathf.Sin(t * 0.23f + 1));
+            // head: eyes on the path ahead, a touch below level, whatever the trunk does
+            var hb = H.Bone("head");
+            if (hb != null)
+            {
+                Vector3 f = hb.rotation * Vector3.forward;
+                float d = (Mathf.Asin(Mathf.Clamp(f.y, -1f, 1f)) - (-0.07f + idle * 0.02f * Mathf.Sin(t * 0.8f))) * 0.9f;
+                Rot("neck01", X, d * 0.4f); Rot("head", X, d * 0.6f);
+            }
             // arms: swing opposite to the legs (phase 0 = left foot lands, so the right arm is forward)
             string W = ch.cfg.weapon;
             for (int si = 0; si < 2; si++)
