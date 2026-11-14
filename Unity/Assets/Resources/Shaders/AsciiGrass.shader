@@ -35,13 +35,16 @@ Shader "AsciiHero/Grass"
                 float3 a = TransformObjectToWorld(i.positionOS.xyz);
                 float s = i.seed.x;
                 float h = 0.165 + 0.225 * s;          // (one and a half times the old blades)
-                // wind: the blades lean downwind, and gusts roll across the field as waves; each blade also flutters a little
-                float2 wd = _AsciiWind.xy; float ws = _AsciiWind.z;
-                float2 wp = float2(-wd.y, wd.x);
-                float gust = 0.5 + 0.5 * sin(dot(a.xz, wd) * 0.85 - _AsciiTime * 2.3 + 0.6 * sin(dot(a.xz, wp) * 0.4 + _AsciiTime * 0.5));
-                gust *= gust;
-                float2 wind = wd * ws * (0.1 + 0.42 * gust)
-                            + float2(sin(_AsciiTime * 4.3 + s * 40.0 + a.x * 3.0), cos(_AsciiTime * 3.7 + s * 23.0 + a.z * 3.0)) * (0.025 + 0.05 * ws * gust);
+                // wind: waves run across the field the way they do over a meadow or a wheat field - a band of grass is
+                // pressed flat downwind as a gust passes and rises again behind it; the bands are long and slightly
+                // curved, a second, shorter set crosses them, and every blade flutters a little on its own
+                float2 wd = _AsciiWind.xy; float ws = _AsciiWind.z; float2 wp = float2(-wd.y, wd.x);
+                float bend = 0.45 * sin(dot(a.xz, wp) * 0.33 + _AsciiTime * 0.21);
+                float w1 = 0.5 + 0.5 * sin(dot(a.xz, wd) * 0.85 - _AsciiTime * 2.5 + bend); w1 = w1 * w1; w1 = w1 * w1;
+                float w2 = 0.5 + 0.5 * sin(dot(a.xz, normalize(wd + wp * 0.45)) * 1.7 - _AsciiTime * 3.3 + 1.3); w2 = w2 * w2 * w2;
+                float wave = saturate(w1 + 0.45 * w2) * saturate(ws * 1.4);
+                float2 wind = wd * (0.06 * ws + 0.88 * wave)
+                            + float2(sin(_AsciiTime * 4.3 + s * 40.0 + a.x * 3.0), cos(_AsciiTime * 3.7 + s * 23.0 + a.z * 3.0)) * (0.02 + 0.04 * ws);
                 float2 lean = wind; float push = 0;
                 for (int k = 0; k < 4; k++)
                 {
@@ -68,6 +71,7 @@ Shader "AsciiHero/Grass"
                 float depthK = clamp(1.0 - (myZ - _AsciiDepthRef) * 0.09, 0.5, 1.2);
                 float3 green = lerp(float3(0.16, 0.50, 0.24), float3(0.50, 0.78, 0.36), frac(s * 13.7));
                 o.col = (green * (0.22 + 0.95 * lum) + lit * 0.5) * depthK * (1.0 - 0.35 * push);
+                o.col *= 1.0 + 0.45 * wave;      // the crest of a wave shows lighter (the blades turn their sides to the light)
                 o.local = i.corner + 0.5;
                 pVS.xy += i.corner * float2(h * 0.44, h * 1.1);       // the characters keep their width, the blades are taller
                 o.positionCS = vis ? TransformWViewToHClip(pVS) : float4(2, 2, 2, 1);

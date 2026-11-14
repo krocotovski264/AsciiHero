@@ -11,7 +11,8 @@ namespace AsciiHero
         public char sex = 'm'; public int build = 1; public float height = 178f;
         public string armor = "leather"; public string weapon = "sword";
         public bool shadow;   // the hero: a body of living darkness inside the armour
-        public CharConfig Clone() { return (CharConfig)MemberwiseClone(); }
+        public float[] body;  // the body customisation (Body.ALL; the height is 'height' above), null = defaults
+        public CharConfig Clone() { var c = (CharConfig)MemberwiseClone(); if (body != null) c.body = (float[])body.Clone(); return c; }
     }
 
     public class Character
@@ -51,7 +52,7 @@ namespace AsciiHero
                     for (int l = 0; l < 5; l++) if (HumanDB.bones[b] == LIMB_BONE[l]) { r[i] = l + 1; break; }
             return r;
         }
-        public float baseHeight;
+        public float baseHeight; public float[] meas, built;
         Mats mats;
 
         public static Character Build(CharConfig cfg, Mats mats, string name = "Character")
@@ -73,8 +74,17 @@ namespace AsciiHero
 
         void Construct()
         {
-            var h = human = new Human(cfg.sex, cfg.build);
-            baseHeight = h.v.height;
+            Human h;
+            if (cfg.body != null)
+            {
+                float bf = Body.BuildOf(cfg.sex, cfg.body[Body.Ix("weight")], cfg.height);
+                h = human = new Human(cfg.sex, bf, cfg.body); cfg.build = h.build;
+                // the sizes shown next to the sliders, measured on this body
+                meas = new float[Body.N]; built = (float[])cfg.body.Clone();
+                for (int i = 0; i < Body.N; i++) if (Body.ALL[i].factor) meas[i] = Body.Measure(h, i);
+            }
+            else h = human = new Human(cfg.sex, cfg.build);
+            baseHeight = h.height;
             h.MakeSkeleton(model);
             var R = h.region; var T = h.limbT; var P = h.pos;
             Func<int, float> X = i => P[i].x, Y = i => P[i].y, Z = i => P[i].z;

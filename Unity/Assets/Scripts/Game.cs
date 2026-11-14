@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.32 · Unity";
+        public const string VERSION = "beta 0.33 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -51,6 +51,28 @@ namespace AsciiHero
         GameObject editorRoot, worldLightsRoot; Light key, rim, fill, heroLight;
         GameObject floor;
         bool rebuildPending;
+        // body customisation UI
+        Rect bodyList; readonly List<Rect> bodyTracks = new List<Rect>(); readonly List<int> bodyTrackIx = new List<int>(); Rect bodyTrackHit;
+        float bodyScroll, bodyScrollMax, bodyBuiltAt; bool bodyDirty, setDev; readonly string[] devText = new string[64]; readonly string[] devShown = new string[64];
+        void SetBodyValue(int ix, float val)
+        {
+            if (ix == 0) { SetHeight(val); return; }
+            if (cfg.body == null) ResetBody();
+            if (cfg.body[ix] == val) return;
+            cfg.body[ix] = val; bodyDirty = true;
+        }
+        /// the number shown next to a slider: the size it stands for (cm on the built body) or the value itself
+        string BodyText(int ix, out float shown)
+        {
+            var bp = Body.ALL[ix]; float v = ix == 0 ? cfg.height : cfg.body[ix];
+            if (bp.factor && hero != null && hero.meas != null && hero.built != null && hero.built[ix] != 0)
+            {
+                float s = cfg.height / 100f / Mathf.Max(0.5f, hero.baseHeight), sc = bp.girth ? 1 + (s - 1) * 0.45f : s;
+                shown = hero.meas[ix] * (v / hero.built[ix]) * sc * 100f;
+                return shown.ToString("0.#") + " см";
+            }
+            shown = v; return (bp.unit == "°" && v > 0 ? "+" : "") + v.ToString("0.#") + " " + bp.unit;
+        }
         bool useAnimator; RuntimeAnimatorController locoCtrl;
         int animMode;   // 0 = phase-matched loops (default), 1 = motion matching, 2 = Animator Controller
         static readonly string[] ANIM_NAME = { "АНИМ: ПЛАВНАЯ", "АНИМ: MM", "АНИМ: ANIMATOR" };   // Animator Controller mode (Tools -> Patch Project Locomotion)
@@ -73,7 +95,7 @@ namespace AsciiHero
         readonly List<Rect> uiRects = new List<Rect>(); List<Rect> uiRectsPrev = new List<Rect>();
         readonly List<Vector2> taps = new List<Vector2>();
         Rect sliderRect, stickRect; Vector2 stickCenter, stick; float stickR, stickRun; int stickId = int.MinValue;
-        Texture2D texWhite, texDisc, texRing; GUIStyle sBig, sRight, sTitle, sSmall, sBtn, sBtnOn, sMono, sName, sDesc, sBadge, sToast;
+        Texture2D texWhite, texDisc, texRing; GUIStyle sBig, sRight, sRightSmall, sTitle, sSmall, sBtn, sBtnOn, sMono, sName, sDesc, sBadge, sToast;
         Font mono; float fpsAcc; int fpsN; string fpsText = "";
 
         static readonly string[] SEX = { "m", "f" }; static readonly string[] SEXNAME = { "Мужчина", "Женщина" };
@@ -521,26 +543,58 @@ namespace AsciiHero
                 foreach (var a in Character.ARMORS) if (a[0] == p[3]) cfg.armor = p[3];
                 foreach (var w in Character.WEAPONS) if (w[0] == p[4]) cfg.weapon = p[4];
             }
+            // body customisation: "sex;v0;v1;..." (dropped if it was saved for the other sex or another parameter set)
+            cfg.body = null;
+            var bs = PlayerPrefs.GetString("ascii_hero_body", "").Split(';');
+            if (bs.Length == Body.N + 1 && bs[0] == cfg.sex.ToString())
+            {
+                var b = new float[Body.N]; bool ok = true;
+                for (int i = 0; i < Body.N; i++) ok &= float.TryParse(bs[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out b[i]);
+                if (ok) cfg.body = b;
+            }
+            if (cfg.body == null) ResetBody();
+            cfg.body[Body.Ix("height")] = cfg.height;
+        }
+        void ResetBody()
+        {
+            cfg.body = Body.Defaults(cfg.sex); cfg.body[Body.Ix("height")] = cfg.height;
+            cfg.body[Body.Ix("weight")] = Mathf.Round(Body.DefaultWeight(cfg.sex, cfg.height));
         }
         void SaveCfg()
         {
             PlayerPrefs.SetString("ascii_hero3d", cfg.sex + "|" + cfg.build + "|" + cfg.height.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + cfg.armor + "|" + cfg.weapon);
+            if (cfg.body != null)
+            {
+                var sb = new System.Text.StringBuilder(cfg.sex.ToString());
+                foreach (var x in cfg.body) sb.Append(';').Append(x.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+                PlayerPrefs.SetString("ascii_hero_body", sb.ToString());
+            }
             PlayerPrefs.Save();
         }
-        void SetSex(char s) { if (cfg.sex != s) { cfg.sex = s; rebuildPending = true; SaveCfg(); } }
+        void SetSex(char s) { if (cfg.sex != s) { cfg.sex = s; cfg.height = s == 'f' ? 167 : 180; ResetBody(); rebuildPending = true; SaveCfg(); } }
         void SetBuild(int b) { if (cfg.build != b) { cfg.build = b; rebuildPending = true; SaveCfg(); } }
         void SetArmor(string a) { if (cfg.armor != a) { cfg.armor = a; rebuildPending = true; SaveCfg(); } }
         void SetWeapon(string w) { if (cfg.weapon != w) { cfg.weapon = w; rebuildPending = true; SaveCfg(); } }
         void SetHeight(float h)
         {
-            h = Mathf.Clamp(Mathf.Round(h), 150, 200); if (h == cfg.height) return;
-            cfg.height = h; if (hero != null) { hero.cfg.height = h; hero.ApplyHeight(); } SaveCfg();
+            h = setDev ? Mathf.Clamp(Mathf.Round(h), Body.DevMin(0), Body.DevMax(0)) : Mathf.Clamp(Mathf.Round(h), Body.ALL[0].min, Body.ALL[0].max);
+            if (h == cfg.height) return;
+            cfg.height = h; if (cfg.body != null) cfg.body[0] = h;
+            if (hero != null) { hero.cfg.height = h; hero.ApplyHeight(); }
+            bodyDirty = true;      // (the weight maps to the build relative to the height)
         }
         void Randomize()
         {
             cfg.sex = Random.value < 0.5f ? 'm' : 'f';
             cfg.height = Mathf.Round((cfg.sex == 'f' ? 155 : 168) + Random.value * 28);
             cfg.build = Random.Range(0, 4);
+            ResetBody();
+            for (int i = 1; i < Body.N; i++)
+            {   // a plausible person: around the defaults, now and then further out
+                var bp = Body.ALL[i]; float d = Body.Def(i, cfg.sex), g = (Random.value + Random.value + Random.value - 1.5f) / 1.5f;
+                cfg.body[i] = Mathf.Clamp(d + g * (g > 0 ? bp.max - d : d - bp.min) * 0.6f, bp.min, bp.max);
+            }
+            cfg.body[Body.Ix("weight")] = Mathf.Round(Body.DefaultWeight(cfg.sex, cfg.height) * (0.8f + 0.5f * Random.value));
             cfg.armor = Character.ARMORS[Random.Range(0, Character.ARMORS.Length)][0];
             cfg.weapon = Character.WEAPONS[Random.Range(0, Character.WEAPONS.Length)][0];
             rebuildPending = true; SaveCfg();
@@ -648,7 +702,7 @@ namespace AsciiHero
             bool phone = Application.isMobilePlatform;
             setQuality = PlayerPrefs.GetInt("set_quality", phone ? 1 : 2); setGrass = PlayerPrefs.GetInt("set_grass", 4); setRes = PlayerPrefs.GetInt("set_res", 4);
             setFps = PlayerPrefs.GetInt("set_fps", 1); setBloom = PlayerPrefs.GetInt("set_bloom", 1) == 1; setShowFps = PlayerPrefs.GetInt("set_showfps", 0) == 1;
-            setMusic = PlayerPrefs.GetInt("set_music", 70); setSound = PlayerPrefs.GetInt("set_sound", 80);
+            setMusic = PlayerPrefs.GetInt("set_music", 70); setSound = PlayerPrefs.GetInt("set_sound", 80); setDev = PlayerPrefs.GetInt("set_dev", 0) == 1;
         }
         void ApplySettings(bool save = true)
         {
@@ -658,7 +712,7 @@ namespace AsciiHero
             {
                 PlayerPrefs.SetInt("set_quality", setQuality); PlayerPrefs.SetInt("set_grass", setGrass); PlayerPrefs.SetInt("set_res", setRes); PlayerPrefs.SetInt("set_fps", setFps);
                 PlayerPrefs.SetInt("set_bloom", setBloom ? 1 : 0); PlayerPrefs.SetInt("set_showfps", setShowFps ? 1 : 0);
-                PlayerPrefs.SetInt("set_music", setMusic); PlayerPrefs.SetInt("set_sound", setSound); PlayerPrefs.Save();
+                PlayerPrefs.SetInt("set_music", setMusic); PlayerPrefs.SetInt("set_sound", setSound); PlayerPrefs.SetInt("set_dev", setDev ? 1 : 0); PlayerPrefs.Save();
             }
             Application.targetFrameRate = FPS[setFps];
             Shader.SetGlobalFloat("_AsciiGrassThin", 1 - GRASS[setGrass] / 100f);
@@ -712,8 +766,9 @@ namespace AsciiHero
             Row("Показывать FPS", setShowFps ? "да" : "нет", () => setShowFps = !setShowFps, () => setShowFps = !setShowFps);
             Row("Громкость музыки", setMusic + " %", () => setMusic -= 10, () => setMusic += 10);
             Row("Громкость звуков", setSound + " %", () => setSound -= 10, () => setSound += 10);
+            Row("Режим разработчика", setDev ? "вкл" : "выкл", () => setDev = !setDev, () => setDev = !setDev);
             if (changed) ApplySettings();
-            GUI.Label(new Rect(x0, y1 + row * rh + 2 * k, pw, 16 * k), "Звуков и музыки в игре пока нет — громкость сохранится на будущее", sSmall);
+            GUI.Label(new Rect(x0, y1 + row * rh + 2 * k, pw, 32 * k), "Звуков и музыки в игре пока нет — громкость сохранится на будущее.\nРежим разработчика: у параметров тела появляются поля для ввода чисел до ×50 за пределами ползунков", sSmall);
             if (Button(new Rect(cx - 70 * k, bottom - 36 * k, 140 * k, 30 * k), "НАЗАД")) menuPage = 0;
         }
         void OnDestroy() { if (ascii != null) ascii.Dispose(); }
@@ -760,6 +815,11 @@ namespace AsciiHero
                 else if (world && InCircle(dashRect, p.pos)) { p.owner = "dash"; DoDash(); }
                 else if (world && stickId == int.MinValue && !InUi(p.pos) && p.pos.x < Screen.width * 0.45f && p.pos.y > Screen.height * 0.22f)
                 { p.owner = "stick"; stickId = p.id; stickCenter = ClampStickCenter(p.pos); }
+                else if (!world && !inMenu && tab == 0 && bodyList.Contains(p.pos))
+                {   // body sliders: a finger on a track drags its value, anywhere else in the list scrolls it
+                    p.owner = "blist";
+                    for (int i = 0; i < bodyTracks.Count; i++) if (bodyTracks[i].Contains(p.pos)) { p.owner = "bs:" + bodyTrackIx[i]; bodyTrackHit = bodyTracks[i]; break; }
+                }
                 else if (!world && sliderRect.Contains(p.pos)) p.owner = "slider";
                 else if (InUi(p.pos)) p.owner = "ui";
                 else
@@ -779,8 +839,21 @@ namespace AsciiHero
                 if (p.id == stickId) { stickId = int.MinValue; stick = Vector2.zero; stickRun = 0; }
             }
             // slider
+            bool dragging = false;
             foreach (var p in InputHub.active.Values)
-                if (p.owner == "slider" && sliderRect.width > 0) SetHeight(150 + 50 * Mathf.Clamp01((p.pos.x - sliderRect.x) / sliderRect.width));
+            {
+                if (p.owner == "blist") bodyScroll = Mathf.Clamp(bodyScroll - p.Delta.y, 0, bodyScrollMax);
+                if (p.owner != null && p.owner.StartsWith("bs:"))
+                {
+                    int ix = int.Parse(p.owner.Substring(3)); var bp = Body.ALL[ix]; dragging = true;
+                    var tr = bodyTrackHit; float u = Mathf.Clamp01((p.pos.x - tr.x) / Mathf.Max(1, tr.width));
+                    float val = bp.min + (bp.max - bp.min) * u;
+                    val = bp.factor ? Mathf.Round(val * 100) / 100 : Mathf.Round(val);
+                    SetBodyValue(ix, val);
+                }
+            }
+            // the body is rebuilt while a slider is dragged (a few times a second) and once more when it is let go
+            if (bodyDirty && (!dragging || Time.time - bodyBuiltAt > 0.35f)) { bodyDirty = false; bodyBuiltAt = Time.time; rebuildPending = true; SaveCfg(); }
             // stick
             Pointer sp; if (stickId != int.MinValue && InputHub.active.TryGetValue(stickId, out sp))
             {
@@ -1141,6 +1214,7 @@ namespace AsciiHero
             sToast = new GUIStyle(GUI.skin.label) { fontSize = fs(12), alignment = TextAnchor.MiddleCenter, wordWrap = true }; sToast.normal.textColor = Color.white;
             sBig = new GUIStyle(GUI.skin.label) { fontSize = fs(34), fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter }; sBig.normal.textColor = gold;
             sRight = new GUIStyle(sSmall) { alignment = TextAnchor.LowerRight, wordWrap = false };
+            sRightSmall = new GUIStyle(sSmall) { alignment = TextAnchor.UpperRight, wordWrap = false }; sRightSmall.normal.textColor = new Color(0.93f, 0.74f, 0.33f);
         }
         void Fill(Rect r, Color c) { var old = GUI.color; GUI.color = c; GUI.DrawTexture(r, texWhite); GUI.color = old; }
         void Frame(Rect r, Color c, float w = 1)
@@ -1269,7 +1343,7 @@ namespace AsciiHero
             string an = "", wn = "";
             foreach (var a in Character.ARMORS) if (a[0] == cfg.armor) an = a[1];
             foreach (var w in Character.WEAPONS) if (w[0] == cfg.weapon) wn = w[1];
-            GUI.Label(new Rect(L, H - (H - safe.yMax) - 52 * k, 320 * k, 50 * k), "<b>" + SEXNAME[si] + "</b> · " + cfg.height + " см · " + Character.BUILDS[cfg.build] + "\n" + an + "\n" + wn, sBadge);
+            GUI.Label(new Rect(L, H - (H - safe.yMax) - 52 * k, 320 * k, 50 * k), "<b>" + SEXNAME[si] + "</b> · " + cfg.height + " см · " + (cfg.body != null ? Mathf.Round(cfg.body[1]) + " кг" : Character.BUILDS[cfg.build]) + "\n" + an + "\n" + wn, sBadge);
             // view buttons
             if (Button(new Rect(vr.xMax - 196 * k, T, 62 * k, 24 * k), "МЕНЮ")) { inMenu = true; menuPage = 0; }
             if (Button(new Rect(vr.xMax - 128 * k, T, 58 * k, 24 * k), "АВТО", autoRotate)) autoRotate = !autoRotate;
@@ -1287,27 +1361,60 @@ namespace AsciiHero
             y += 36 * k;
             float bottom = H - (H - safe.yMax) - 8 * k - 34 * k;
             sliderRect = Rect.zero;
+            bodyList = Rect.zero; bodyTracks.Clear(); bodyTrackIx.Clear();
             if (tab == 0)
             {
-                GUI.Label(new Rect(x0, y, cw, 16 * k), "ПОЛ", sSmall); y += 16 * k;
                 float hw = (cw - 6 * k) / 2;
-                if (Button(new Rect(x0, y, hw, 30 * k), SEXNAME[0], si == 0)) SetSex('m');
-                if (Button(new Rect(x0 + hw + 6 * k, y, hw, 30 * k), SEXNAME[1], si == 1)) SetSex('f');
-                y += 40 * k;
-                GUI.Label(new Rect(x0, y, cw, 16 * k), "РОСТ · " + cfg.height + " см", sSmall); y += 18 * k;
-                if (Button(new Rect(x0, y, 30 * k, 26 * k), "−")) SetHeight(cfg.height - 1);
-                if (Button(new Rect(x0 + cw - 30 * k, y, 30 * k, 26 * k), "+")) SetHeight(cfg.height + 1);
-                sliderRect = new Rect(x0 + 38 * k, y - 4 * k, cw - 76 * k, 34 * k);
-                var track = new Rect(sliderRect.x, y + 11 * k, sliderRect.width, 4 * k); Fill(track, new Color(0.25f, 0.24f, 0.22f));
-                float u = (cfg.height - 150) / 50f; Fill(new Rect(track.x, track.y, track.width * u, track.height), new Color(0.93f, 0.74f, 0.33f));
-                GUI.DrawTexture(new Rect(track.x + track.width * u - 9 * k, y + 4 * k, 18 * k, 18 * k), texDisc);
-                uiRects.Add(sliderRect);
-                y += 40 * k;
-                GUI.Label(new Rect(x0, y, cw, 16 * k), "ТЕЛОСЛОЖЕНИЕ", sSmall); y += 16 * k;
-                for (int b = 0; b < 4; b++)
+                if (Button(new Rect(x0, y, hw, 28 * k), SEXNAME[0], si == 0)) SetSex('m');
+                if (Button(new Rect(x0 + hw + 6 * k, y, hw, 28 * k), SEXNAME[1], si == 1)) SetSex('f');
+                y += 34 * k;
+                if (Button(new Rect(x0, y, cw, 24 * k), "ТЕЛО ПО УМОЛЧАНИЮ")) { ResetBody(); bodyDirty = true; }
+                y += 30 * k;
+                if (cfg.body == null) ResetBody();
+                // the list of sliders, scrolled by dragging
+                bodyList = new Rect(x0, y, cw, bottom - 6 * k - y); uiRects.Add(bodyList);
+                float rowH = 40 * k, headH = 22 * k, yy = 0; int grp = -1;
+                GUI.BeginGroup(bodyList);
+                for (int ix = 0; ix < Body.N; ix++)
                 {
-                    var r = new Rect(x0 + (b % 2) * (hw + 6 * k), y + (b / 2) * 36 * k, hw, 30 * k);
-                    if (Button(r, Character.BUILDS[b], cfg.build == b)) SetBuild(b);
+                    var bp = Body.ALL[ix];
+                    if (bp.group != grp) { grp = bp.group; float hy = yy - bodyScroll; if (hy > -headH && hy < bodyList.height) GUI.Label(new Rect(0, hy + 4 * k, cw, 16 * k), Body.GROUPS[grp], sTitle); yy += headH; }
+                    float ry = yy - bodyScroll; yy += rowH;
+                    if (ry < -rowH || ry > bodyList.height) continue;
+                    float shown; string txt = BodyText(ix, out shown);
+                    GUI.Label(new Rect(0, ry, cw * 0.62f, 16 * k), bp.label, sSmall);
+                    if (setDev)
+                    {   // developer: type any number, up to fifty times past the slider's range
+                        if (devShown[ix] != txt) { devShown[ix] = txt; devText[ix] = (ix == 0 ? cfg.height : cfg.body[ix]).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture); }
+                        var tf = new Rect(cw * 0.62f, ry - 2 * k, cw * 0.38f, 18 * k);
+                        string nt = GUI.TextField(tf, devText[ix] ?? "", sSmall);
+                        if (nt != devText[ix])
+                        {
+                            devText[ix] = nt; float fv;
+                            if (float.TryParse(nt.Replace(',', '.'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out fv))
+                                SetBodyValue(ix, Mathf.Clamp(fv, Body.DevMin(ix), Body.DevMax(ix)));
+                        }
+                        GUI.Label(new Rect(cw * 0.62f, ry + 14 * k, cw * 0.38f, 12 * k), txt, sRightSmall);
+                    }
+                    else GUI.Label(new Rect(cw * 0.62f, ry, cw * 0.38f, 16 * k), txt, sRightSmall);
+                    // slider
+                    float v = ix == 0 ? cfg.height : cfg.body[ix], u = Mathf.Clamp01((v - bp.min) / (bp.max - bp.min));
+                    var track = new Rect(8 * k, ry + 25 * k, cw - 16 * k, 4 * k);
+                    Fill(track, new Color(0.25f, 0.24f, 0.22f)); Fill(new Rect(track.x, track.y, track.width * u, track.height), new Color(0.93f, 0.74f, 0.33f));
+                    float d0 = Body.Def(ix, cfg.sex); if (ix == 1) d0 = Body.DefaultWeight(cfg.sex, cfg.height); if (ix == 0) d0 = cfg.sex == 'f' ? 167 : 180;
+                    Fill(new Rect(track.x + track.width * Mathf.Clamp01((d0 - bp.min) / (bp.max - bp.min)) - k, track.y - 3 * k, 2 * k, 10 * k), new Color(0.6f, 0.58f, 0.5f));   // the default
+                    bool outside = v < bp.min || v > bp.max;
+                    GUI.color = outside ? new Color(1f, 0.45f, 0.35f) : Color.white;
+                    GUI.DrawTexture(new Rect(track.x + track.width * u - 8 * k, track.y - 7 * k, 16 * k, 16 * k), texDisc); GUI.color = Color.white;
+                    var abs = new Rect(bodyList.x + track.x - 8 * k, bodyList.y + ry + 14 * k, track.width + 16 * k, 24 * k);
+                    if (abs.yMax > bodyList.y && abs.y < bodyList.yMax) { bodyTracks.Add(abs); bodyTrackIx.Add(ix); }
+                }
+                GUI.EndGroup();
+                bodyScrollMax = Mathf.Max(0, yy - bodyList.height); bodyScroll = Mathf.Clamp(bodyScroll, 0, bodyScrollMax);
+                if (bodyScrollMax > 0)
+                {   // scroll bar
+                    float bh = bodyList.height * bodyList.height / (bodyList.height + bodyScrollMax);
+                    Fill(new Rect(bodyList.xMax + 3 * k, bodyList.y + (bodyList.height - bh) * bodyScroll / bodyScrollMax, 3 * k, bh), new Color(0.93f, 0.74f, 0.33f, 0.6f));
                 }
             }
             else

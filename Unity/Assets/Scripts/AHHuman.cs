@@ -11,6 +11,7 @@ namespace AsciiHero
     public class Human
     {
         public HumanVariant v; public char sex; public int build;
+        public Vector3[] heads, tails; public float height;     // the joints (rest) and the height of this body (after the build blend and the morph)
         public int n; public Vector3[] pos, nor; public int[][] adj;
         public Region[] region; public float[] limbT; public Vector2[] gUV;
         public List<int>[] partTris = new List<int>[4];
@@ -20,15 +21,26 @@ namespace AsciiHero
         class Cache { public Vector3[] nor; public int[][] adj; public Region[] region; public float[] limbT; public Vector2[] gUV; }
         static readonly Dictionary<string, Cache> CACHE = new Dictionary<string, Cache>();
 
-        public Vector3 Head(string b) { return v.heads[HumanDB.BI[b]]; }
-        public Vector3 Tail(string b) { return v.tails[HumanDB.BI[b]]; }
+        public Vector3 Head(string b) { return heads[HumanDB.BI[b]]; }
+        public Vector3 Tail(string b) { return tails[HumanDB.BI[b]]; }
         public Transform Bone(string b) { int i; return HumanDB.BI.TryGetValue(b, out i) ? bones[i] : null; }
 
-        public Human(char sex, int build)
+        public Human(char sex, int build) : this(sex, (float)build, null) { }
+        /// buildF: a blend of the baked builds (0 thin .. 3 large; a little past either end is extrapolated);
+        /// body: the customisation (Body.ALL), null = none
+        public Human(char sex, float buildF, float[] body)
         {
             HumanDB.Load();
-            this.sex = sex; this.build = build; v = HumanDB.Variant(sex, build);
-            n = HumanDB.nverts; pos = (Vector3[])v.pos.Clone();
+            buildF = Mathf.Clamp(buildF, -0.8f, 3.8f);
+            int b0 = Mathf.Clamp(Mathf.FloorToInt(buildF), 0, 2); float bf = buildF - b0;
+            build = Mathf.Clamp(Mathf.RoundToInt(buildF), 0, 3);
+            this.sex = sex; v = HumanDB.Variant(sex, build);
+            var v0 = HumanDB.Variant(sex, b0); var v1 = HumanDB.Variant(sex, b0 + 1);
+            n = HumanDB.nverts; pos = new Vector3[n];
+            for (int i = 0; i < n; i++) pos[i] = Vector3.LerpUnclamped(v0.pos[i], v1.pos[i], bf);
+            int nb0 = v0.heads.Length; heads = new Vector3[nb0]; tails = new Vector3[nb0];
+            for (int i = 0; i < nb0; i++) { heads[i] = Vector3.LerpUnclamped(v0.heads[i], v1.heads[i], bf); tails[i] = Vector3.LerpUnclamped(v0.tails[i], v1.tails[i], bf); }
+            height = Mathf.LerpUnclamped(v0.height, v1.height, bf);
             for (int p = 0; p < 4; p++) partTris[p] = new List<int>();
             var T = HumanDB.tris;
             for (int t = 0; t < T.Length; t += 3)
@@ -37,8 +49,8 @@ namespace AsciiHero
                 partTris[part].Add(T[t]); partTris[part].Add(T[t + 1]); partTris[part].Add(T[t + 2]);
             }
             string key = sex.ToString() + build;
-            Cache c;
-            if (CACHE.TryGetValue(key, out c)) { nor = c.nor; adj = c.adj; region = c.region; limbT = c.limbT; gUV = c.gUV; }
+            Cache c; bool exact = Mathf.Abs(bf - Mathf.Round(bf)) < 1e-4f && body == null;
+            if (CACHE.TryGetValue(key, out c)) { nor = exact ? c.nor : VertexNormals(pos, partTris[0], n); adj = c.adj; region = c.region; limbT = c.limbT; gUV = c.gUV; }
             else
             {
                 nor = VertexNormals(pos, partTris[0], n);
@@ -47,7 +59,9 @@ namespace AsciiHero
                 ComputeGlyphUV();
                 CACHE[key] = new Cache { nor = nor, adj = adj, region = region, limbT = limbT, gUV = gUV };
             }
+            if (body != null) Body.Morph(this, body);
         }
+        public static Vector3[] Normals(Vector3[] p, List<int> idx, int count) { return VertexNormals(p, idx, count); }
 
         static Vector3[] VertexNormals(Vector3[] p, List<int> idx, int count)
         {
@@ -173,8 +187,8 @@ namespace AsciiHero
             {
                 var go = new GameObject(HumanDB.bones[i]); bones[i] = go.transform;
                 int p = HumanDB.parents[i];
-                if (p >= 0) { go.transform.SetParent(bones[p], false); go.transform.localPosition = v.heads[i] - v.heads[p]; }
-                else { go.transform.SetParent(parent, false); go.transform.localPosition = v.heads[i]; root = go.transform; }
+                if (p >= 0) { go.transform.SetParent(bones[p], false); go.transform.localPosition = heads[i] - heads[p]; }
+                else { go.transform.SetParent(parent, false); go.transform.localPosition = heads[i]; root = go.transform; }
                 go.transform.localRotation = Quaternion.identity;
             }
             bindposes = new Matrix4x4[nb];
