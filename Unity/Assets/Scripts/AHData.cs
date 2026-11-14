@@ -66,7 +66,7 @@ namespace AsciiHero
         }
     }
 
-    /// Motion Matching database (CMU mocap retargeted to the MakeHuman rig) + mirrored copy built on load.
+    /// Motion Matching database (mocap retargeted to the MakeHuman rig) + mirrored copy built on load.
     public static class MotionDB
     {
         public static int n, N2, nb, nf, fps;

@@ -13,5 +13,4 @@ ASCII Hero — бета 0.1 (создание персонажа)
 
 Credits:
 - Human body: MakeHuman (CC0) — makehumancommunity.org
-- Motion capture: CMU Graphics Lab Motion Capture Database, mocap.cs.cmu.edu (created with funding from NSF EIA-0196217); BVH conversion by B. Hahne (cgspeed)
 - Motion Matching runtime: own implementation of the algorithm by S. Clavet (Ubisoft) as described in D. Holden's open-source Motion-Matching (MIT) / "Code vs Data Driven Displacement"

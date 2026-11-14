@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the full locomotion library (v2) from CMU mocap clips."""
+"""Build the full locomotion library (v2) from mocap clips."""
 import numpy as np, json, base64, gzip
 from scipy.spatial.transform import Rotation as Rot
 import retarget as R

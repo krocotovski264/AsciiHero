@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Retarget CMU mocap (BVH, cgspeed conversion) onto the MakeHuman default skeleton.
+"""Retarget mocap (BVH) onto the MakeHuman default skeleton.
 Output: compact clips (local bone quaternions, root offset, root motion, foot contacts)."""
 import numpy as np, json, re, base64, gzip, sys
 from scipy.spatial.transform import Rotation as Rot
 from scipy.ndimage import gaussian_filter1d
 
-CMU = '/home/claude/mocap/cmu/data'
+BVH_DIR = 'PATH/TO/BVH/data'      # folder with the locomotion BVH clips
 HM = json.load(open('/home/claude/game3d/build/human.json'))
 BONES = HM['bones']; PAR = HM['parents']; BI = {b: i for i, b in enumerate(BONES)}
 VAR = next(v for v in HM['variants'] if v['sex'] == 'm' and v['build'] == 1)
@@ -121,7 +121,7 @@ OUT_BONES = ['root', 'spine05', 'spine03', 'spine01', 'neck01', 'head', 'clavicl
 # ---------------- per clip ----------------
 MIRROR_SWAP = lambda n: n.replace('Left', '#').replace('Right', 'Left').replace('#', 'Right').replace('LThumb', '#T').replace('RThumb', 'LThumb').replace('#T', 'RThumb').replace('LHipJoint', '#H').replace('RHipJoint', 'LHipJoint').replace('#H', 'RHipJoint')
 def process(fname, step=4, mirror=False):
-    joints, data, ft = parse_bvh(f'{CMU}/{fname}')
+    joints, data, ft = parse_bvh(f'{BVH_DIR}/{fname}')
     P0, E0 = fk_bvh(joints, data[:1]); RW0 = {k: v[0] for k, v in fk_bvh.R.items()}
     P, E = fk_bvh(joints, data[1:]); RW = {k: v[::step] for k, v in fk_bvh.R.items()}
     P = {k: v[::step] for k, v in P.items()}; E = {k: v[::step] for k, v in E.items()}

@@ -189,7 +189,7 @@ namespace AsciiHero.Editor
                 else AssetDatabase.CreateAsset(clip, path);
             }
             AssetDatabase.SaveAssets();
-            report.AppendLine("• Запечено клипов из mocap (CMU): " + idx.clips.Length + " → " + BAKE_FOLDER);
+            report.AppendLine("• Запечено клипов из mocap: " + idx.clips.Length + " → " + BAKE_FOLDER);
         }
 
         // ---------- 2. map project clips to roles ----------

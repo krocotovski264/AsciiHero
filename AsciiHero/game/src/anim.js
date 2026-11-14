@@ -1,5 +1,5 @@
 // Motion Matching locomotion (after Clavet 2015 / D. Holden's open-source Motion-Matching, MIT),
-// running on CMU Graphics Lab mocap retargeted to the MakeHuman rig.
+// running on motion capture retargeted to the MakeHuman rig.
 //  * critically-damped spring controller predicts the desired trajectory (0.33 / 0.66 / 1.0 s)
 //  * every 0.1 s (or on sharp input changes) the database is searched for the frame whose
 //    feet, hip velocity and future trajectory best continue the current motion
@@ -477,7 +477,7 @@ function bodyLife(A, t, dt) {
 }
 
 // ---------- combat: two sword cuts and the guard ----------
-// The cuts are motion capture (Bandai Namco Research Motiondataset, CC BY-NC 4.0 - not for commercial use), retargeted
+// The cuts are motion capture retargeted
 // to this skeleton and stored at the end of the motion database. 1: from overhead down to the lower left.
 // 2: wound up low behind the left side and drawn across to the upper right.
 // knots: [game time, clip frame] - the wind-up and the cut are played faster than they were performed.
@@ -488,7 +488,7 @@ export const ATTACKS = {
 // 3 and 4 are the same two cuts mirrored (the database keeps a mirrored copy of every frame): overhead down to the lower
 // right, and from low behind the right side across to the upper left. With a shield only 1 and 2 are used.
 ATTACKS[3] = Object.assign({}, ATTACKS[1], { mirror: true }); ATTACKS[4] = Object.assign({}, ATTACKS[2], { mirror: true });
-// guard with the weapon alone: CMU 76_04 "defensive guard pose" (free to use) - both hands come up in front of the face, the knees give
+// guard with the weapon alone (motion capture) - both hands come up in front of the face, the knees give
 const GUARD = { a: 10079, n: 22, y0: 0.09 };
 const ATK_IN = 0.09, ATK_OUT = 0.2;
 const _aq = [];

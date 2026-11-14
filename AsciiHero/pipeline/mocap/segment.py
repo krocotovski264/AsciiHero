@@ -57,7 +57,7 @@ for a in range(n - 100):
         if best is None or e < best[0]: best = (e, a, b)
 add('Idle', best[1], best[2], True)
 # idle breaker = tagged frames
-ib = np.where(D['idleB'] > 0)[0]; add('IdleBreaker', int(ib[0]) + 150, int(ib[0]) + 299, False)   # CMU 40_10 frames 1150-1300
+ib = np.where(D['idleB'] > 0)[0]; add('IdleBreaker', int(ib[0]) + 150, int(ib[0]) + 299, False)   # clip 40_10, frames 1150-1300
 
 # turns in place
 def turn(target, sign):

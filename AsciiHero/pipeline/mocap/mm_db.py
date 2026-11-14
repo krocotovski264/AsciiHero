@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Motion Matching database from CMU mocap (retargeted to MakeHuman).
+"""Motion Matching database from mocap clips (retargeted to MakeHuman).
 Features per frame (after D. Holden's open-source Motion-Matching, MIT):
   foot L/R position (3+3), foot L/R velocity (3+3), hip velocity (3),
   trajectory positions at +10/+20/+30 frames (2*3), trajectory facing dirs (2*3)  -> 27 dims"""
@@ -49,21 +49,21 @@ for fn, a, b in SPEC:
         rows['RM'].append(np.stack([c['fwd'][sl], c['lat'][sl], c['yawr'][sl]], 1)); rows['CON'].append(c['con'][sl])
         v = np.ones(m, dtype=bool); v[-31:] = False; v[:2] = False
         valid.append(v); ranges.append([total, total + m, fn + ('M' if mirror else '')]); total += m
-# sword cuts from the Bandai Namco Research Motiondataset (CC BY-NC 4.0): appended after the CMU frames and never
+# sword cuts: appended after the locomotion frames and never
 # offered to motion matching (valid = 0); the game plays them by frame index
-import bandai, json as _json
+import cuts, json as _json
 ATK = []
 for fn, a, b in (('dataset-1_slash_normal_001.bvh', 164, 230), ('dataset-1_slash_normal_002.bvh', 164, 232)):
-    c = bandai.process(fn, a, b); m = c['n']
+    c = cuts.process(fn, a, b); m = c['n']
     rows['Q'].append(c['Q']); rows['RO'].append(c['RO']); rows['F'].append(np.zeros((m, 27)))
     rows['RM'].append(np.zeros((m, 3))); rows['CON'].append(c['con'])
-    valid.append(np.zeros(m, dtype=bool)); ranges.append([total, total + m, 'bandai/' + fn])
+    valid.append(np.zeros(m, dtype=bool)); ranges.append([total, total + m, 'cut/' + fn])
     ATK.append({'a': total, 'n': m, 'blade': np.round(c['blade'], 3).tolist()}); total += m
-# guard with the sword: CMU 76_04 "defensive guard pose" - from standing to both hands raised in front of the face, knees giving
+# guard with the sword - from standing to both hands raised in front of the face, knees giving
 c = R.process('076/76_04.bvh'); ga, gb = 26, 48; m = gb - ga
 rows['Q'].append(c['Q'][ga:gb]); rows['RO'].append(c['RO'][ga:gb] - [c['RO'][ga][0], 0, c['RO'][ga][2]]); rows['F'].append(np.zeros((m, 27)))
 rows['RM'].append(np.zeros((m, 3))); rows['CON'].append(c['con'][ga:gb])
-valid.append(np.zeros(m, dtype=bool)); ranges.append([total, total + m, 'cmu-guard/76_04'])
+valid.append(np.zeros(m, dtype=bool)); ranges.append([total, total + m, 'guard'])
 ATK.append({'a': total, 'n': m, 'guard': True, 'roY': [round(float(c['RO'][ga][1]), 3), round(float(c['RO'][gb - 1][1]), 3)]}); total += m
 _json.dump(ATK, open('/home/claude/mocap/atk.json', 'w'))
 print('frames', total)

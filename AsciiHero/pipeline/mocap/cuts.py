@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Retarget Bandai Namco Research Motiondataset clips (BVH, CC BY-NC 4.0) onto the MakeHuman skeleton, in the same
+"""Retarget the sword-cut BVH clips onto the MakeHuman skeleton, in the same
 format as retarget.process(). The clips are in place (hips fixed), facing +Z, +X = left."""
 import numpy as np
 from scipy.spatial.transform import Rotation as Rot, Slerp
 from scipy.ndimage import gaussian_filter1d
 import retarget as R
-D = '/home/claude/bandai/repo/dataset/Bandai-Namco-Research-Motiondataset-1/data/'
+D = 'PATH/TO/CUT_CLIPS/'      # folder with the BVH clips of the cuts
 H = R.H; BI = R.BI
 
 def slerpM(A, B, t):
