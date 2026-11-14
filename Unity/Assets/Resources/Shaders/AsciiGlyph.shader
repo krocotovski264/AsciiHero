@@ -40,6 +40,7 @@ Shader "AsciiHero/Glyph"
             TEXTURE2D(_AsciiNDTex); SAMPLER(sampler_AsciiNDTex);
             SAMPLER(ascii_point_clamp_sampler);
             float _AsciiDepthLit;   // 1: the scene depth is in the alpha of the lit colour (no ND camera)
+            float4 _GlyphInk[224];  // per atlas glyph (row * 16 + column): the box its ink occupies inside the cell (x0, y0, x1, y1)
             float _AsciiActorLod;   // characters: 1 = every glyph, 1.41 = every second (checkerboard), 2 = every fourth; the glyphs grow to match
             float _AsciiRows, _AsciiExposure, _AsciiLinear, _AsciiDepthRef;
             float4 _DashShift;   // per renderer (world): during the dash the armour pieces lag behind the body
@@ -213,8 +214,12 @@ Shader "AsciiHero/Glyph"
                 if (scat) { o.col = float3(0.62, 0.67, 0.76) * (0.5 + 0.5 * frac(i.seed.x * 5.1)); gi = MIN_GLYPH + floor(frac(i.seed.x * 9.7) * (15.99 - MIN_GLYPH)); }
                 if (ember > 0.0) { o.col = lerp(o.col, float3(1.6, 0.62, 0.12), min(1.0, ember * 2.0)) * (1.0 - ember * ember); gi = floor(lerp(gi, 2.0, ember)); }
                 o.gi = gi;
-                o.local = i.corner + 0.5;
-                pVS.xy += i.corner * _GlyphCell.xy * GLYPH_SCALE * (_AsciiActor > 0.5 ? 1.18 * max(1.0, _AsciiActorLod) : lod);   // upright character in the view plane; on characters dense and overlapping so no gaps show
+                // the quad covers only the part of the cell the character's ink is in: the empty margins of a cell were most
+                // of the pixels this layer had to blend (a '.' fills a tenth of its cell)
+                float4 ink = _GlyphInk[(int)(clamp(_AsciiRow, 0.0, 13.0) * 16.0 + clamp(gi, 0.0, 15.0) + 0.5)];
+                float2 lc = lerp(ink.xy, ink.zw, i.corner + 0.5);
+                o.local = lc;
+                pVS.xy += (lc - 0.5) * _GlyphCell.xy * GLYPH_SCALE * (_AsciiActor > 0.5 ? 1.18 * max(1.0, _AsciiActorLod) : lod);   // upright character in the view plane; on characters dense and overlapping so no gaps show
                 o.positionCS = vis ? TransformWViewToHClip(pVS) : float4(2, 2, 2, 1);
                 return o;
             }

@@ -30,7 +30,7 @@ Shader "AsciiHero/Fire"
             TEXTURE2D(_AsciiLitTex); SAMPLER(sampler_AsciiLitTex);
             TEXTURE2D(_AsciiNDTex); SAMPLER(sampler_AsciiNDTex);
             SAMPLER(ascii_point_clamp_sampler); float _AsciiDepthLit;
-            float _AsciiRows, _AsciiTime;
+            float _AsciiRows, _AsciiTime; float4 _GlyphInk[224];
 
             struct Attributes { float4 positionOS : POSITION; float2 corner : TEXCOORD0; float2 seed : TEXCOORD1; };
             struct Varyings { float4 positionCS : SV_POSITION; float2 local : TEXCOORD0; float3 col : TEXCOORD1; float gi : TEXCOORD2; };
@@ -63,9 +63,11 @@ Shader "AsciiHero/Fire"
                 o.col = col * fade * (1.45 - 0.3 * spark);
                 o.gi = spark > 0.5 ? 5.0 + floor(frac(s * 5.3) * 3.0) : floor(lerp(15.0, 4.0, ph * ph * (3.0 - 2.0 * ph)) + frac(s * 9.1) * 1.5);
                 o.gi = clamp(o.gi, 0.0, 15.0);
-                o.local = i.corner + 0.5;
+                float4 ink = _GlyphInk[(int)(9.0 * 16.0 + o.gi + 0.5)];
+                float2 lc = lerp(ink.xy, ink.zw, i.corner + 0.5);
+                o.local = lc;
                 float size = _FireSize.y * (1.0 - 0.45 * ph) * (1.0 - 0.45 * spark);
-                pVS.xy += i.corner * float2(size, size * 1.65);
+                pVS.xy += (lc - 0.5) * float2(size, size * 1.65);
                 o.positionCS = vis && fade > 0.004 ? TransformWViewToHClip(pVS) : float4(2, 2, 2, 1);
                 return o;
             }

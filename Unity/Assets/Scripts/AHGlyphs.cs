@@ -142,26 +142,41 @@ namespace AsciiHero
             return go;
         }
 
+        /// Grass. The blades are split into tiles of 4 x 4 m, each its own mesh, so the tiles outside the view are not
+        /// sent to the GPU at all (as one mesh, every blade of the field ran the vertex shader every frame).
         public static GameObject MakeGrass(List<Vector3> pts, List<float> seedList, Transform parent)
         {
             var sh = Shader.Find("AsciiHero/Grass"); if (sh == null) { Debug.LogError("AsciiHero/Grass shader not found"); return null; }
-            var verts = new List<Vector3>(pts.Count * 4); var corners = new List<Vector2>(pts.Count * 4); var seeds = new List<Vector2>(pts.Count * 4); var tris = new List<int>(pts.Count * 6);
-            Vector2[] C = { new Vector2(-0.5f, -0.5f), new Vector2(0.5f, -0.5f), new Vector2(0.5f, 0.5f), new Vector2(-0.5f, 0.5f) };
+            var root = new GameObject("Grass"); root.layer = LAYER; root.transform.SetParent(parent, false);
+            var mat = new Material(sh);
+            const float TILE = 4f; var tiles = new Dictionary<long, List<int>>();
             for (int i = 0; i < pts.Count; i++)
             {
-                int o = verts.Count;
-                for (int k = 0; k < 4; k++) { verts.Add(pts[i]); corners.Add(C[k]); seeds.Add(new Vector2(seedList[i], 0)); }
-                tris.Add(o); tris.Add(o + 2); tris.Add(o + 1); tris.Add(o); tris.Add(o + 3); tris.Add(o + 2);
+                long key = (long)Mathf.FloorToInt(pts[i].x / TILE) * 100000L + Mathf.FloorToInt(pts[i].z / TILE);
+                List<int> l; if (!tiles.TryGetValue(key, out l)) { l = new List<int>(); tiles[key] = l; }
+                l.Add(i);
             }
-            var m = new Mesh { name = "grass", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
-            m.SetVertices(verts); m.SetUVs(0, corners); m.SetUVs(1, seeds); m.SetTriangles(tris, 0);
-            m.RecalculateBounds(); var b = m.bounds; b.Expand(2f); m.bounds = b;
-            var go = new GameObject("Grass"); go.layer = LAYER; go.transform.SetParent(parent, false);
-            go.AddComponent<MeshFilter>().sharedMesh = m;
-            var r = go.AddComponent<MeshRenderer>(); r.sharedMaterial = new Material(sh);
-            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; r.receiveShadows = false;
+            Vector2[] C = { new Vector2(-0.5f, -0.5f), new Vector2(0.5f, -0.5f), new Vector2(0.5f, 0.5f), new Vector2(-0.5f, 0.5f) };
+            foreach (var kv in tiles)
+            {
+                var ix = kv.Value; int n = ix.Count;
+                var verts = new List<Vector3>(n * 4); var corners = new List<Vector2>(n * 4); var seeds = new List<Vector2>(n * 4); var tris = new List<int>(n * 6);
+                foreach (int i in ix)
+                {
+                    int o = verts.Count;
+                    for (int k = 0; k < 4; k++) { verts.Add(pts[i]); corners.Add(C[k]); seeds.Add(new Vector2(seedList[i], 0)); }
+                    tris.Add(o); tris.Add(o + 2); tris.Add(o + 1); tris.Add(o); tris.Add(o + 3); tris.Add(o + 2);
+                }
+                var m = new Mesh { name = "grass", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+                m.SetVertices(verts); m.SetUVs(0, corners); m.SetUVs(1, seeds); m.SetTriangles(tris, 0);
+                m.RecalculateBounds(); var b = m.bounds; b.Expand(new Vector3(1.2f, 1.2f, 1.2f)); m.bounds = b;      // (the blades stand up and lean out of the tile)
+                var go = new GameObject("GrassTile"); go.layer = LAYER; go.transform.SetParent(root.transform, false);
+                go.AddComponent<MeshFilter>().sharedMesh = m;
+                var r = go.AddComponent<MeshRenderer>(); r.sharedMaterial = mat;
+                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; r.receiveShadows = false;
+            }
             count += pts.Count;
-            return go;
+            return root;
         }
 
         // rows of points: one per glyph cell centre of the surface coordinates

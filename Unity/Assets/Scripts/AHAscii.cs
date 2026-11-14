@@ -54,6 +54,7 @@ namespace AsciiHero
             atlas = new Texture2D(2, 2, TextureFormat.RGBA32, true, true);
             atlas.LoadImage(Resources.Load<TextAsset>("glyphs").bytes, false);
             atlas.filterMode = FilterMode.Trilinear; atlas.wrapMode = TextureWrapMode.Clamp;
+            InkBoxes();
             atlas.Apply(true, true);
             var rampMap = new float[32];
             for (int i = 0; i < MatId.RAMP.Length && i + 1 < 32; i++) rampMap[i + 1] = MatId.RAMP[i];
@@ -78,6 +79,35 @@ namespace AsciiHero
             cam.cullingMask = ~(1 << GlyphLayer.LAYER);
             RenderPipelineManager.beginCameraRendering += OnBeginCamera;
             RenderPipelineManager.endContextRendering += OnEndContext;
+        }
+
+        // Where the ink of every atlas glyph lies inside its cell. The glyph shaders draw only that box: the empty margins
+        // of the cells were about half of all the pixels the glyph layer blended (measured on the atlas: the surface
+        // glyphs fill 52 % of their cells on average with the safety margin, a '.' a tenth).
+        void InkBoxes()
+        {
+            const int COLS = 16, ROWS = 14; var ink = new Vector4[COLS * ROWS];
+            for (int k = 0; k < ink.Length; k++) ink[k] = new Vector4(0, 0, 1, 1);                 // (whole cells if the atlas cannot be read)
+            try
+            {
+                var px = atlas.GetPixels32(); int AW = atlas.width, AH = atlas.height, cw = AW / COLS, chh = AH / ROWS; int empty = 0; float area = 0;
+                for (int r = 0; r < ROWS; r++)
+                    for (int c = 0; c < COLS; c++)
+                    {
+                        int x0 = cw, x1 = -1, y0 = chh, y1 = -1, by = AH - (r + 1) * chh, bx = c * cw;      // (texture rows run upwards)
+                        for (int y = 0; y < chh; y++)
+                            for (int x = 0; x < cw; x++)
+                                if (px[(by + y) * AW + bx + x].r > 30) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+                        if (x1 < 0) { ink[r * COLS + c] = new Vector4(0.5f, 0.5f, 0.5f, 0.5f); empty++; continue; }
+                        var b = new Vector4(Mathf.Max(0, x0 - 4) / (float)cw, Mathf.Max(0, y0 - 5) / (float)chh, Mathf.Min(cw, x1 + 5) / (float)cw, Mathf.Min(chh, y1 + 6) / (float)chh);
+                        ink[r * COLS + c] = b; area += (b.z - b.x) * (b.w - b.y);
+                    }
+                // sanity: a readable atlas has a few blank glyphs (the spaces) and plenty of ink; anything else -> whole cells
+                if (empty > 60 || area < 20f) { for (int k = 0; k < ink.Length; k++) ink[k] = new Vector4(0, 0, 1, 1); Debug.LogWarning("Атлас символов прочитан странно (пустых " + empty + "): символы рисуются целыми клетками"); }
+                else Debug.Log("Символы рисуются по границам своих штрихов: в среднем " + (area / (ink.Length - empty) * 100).ToString("0") + " % клетки");
+            }
+            catch (System.Exception e) { Debug.LogWarning("Границы символов не посчитаны (" + e.Message + "): символы рисуются целыми клетками"); }
+            Shader.SetGlobalVectorArray("_GlyphInk", ink);
         }
 
         // Glyphs + bloom are composed right after the cameras have rendered, outside of OnGUI:

@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.36 · Unity";
+        public const string VERSION = "beta 0.37 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -820,7 +820,8 @@ namespace AsciiHero
             Debug.Log("ТЕСТ · символов на сцене " + GlyphLayer.count + " · на героях " + GlyphLayer.actorGlyphs + ", рисуется " + GlyphLayer.actorGlyphsDrawn + " (уровень " + GlyphLayer.actorLod + ") · " +
                       ascii.formats + " · глубина " + (ascii.depthFromLit ? "из альфы цвета" : "отдельной камерой"));
         }
-        void PerfReset() { perfT = 0; pSum = pMain = pRender = pGpu = accU = accA = accG = 0; pN = pFt = 0; pWorst = 0; }
+        int pMiss; float perfBaseGpu;
+        void PerfReset() { pMiss = 0; perfT = 0; pSum = pMain = pRender = pGpu = accU = accA = accG = 0; pN = pFt = 0; pWorst = 0; }
         void PerfSet(int ix, bool on)
         {
             switch (ix)
@@ -847,14 +848,17 @@ namespace AsciiHero
             float udt = Time.unscaledDeltaTime; perfT += udt;
             if (perfT > 1.2f)
             {
-                pSum += udt * 1000.0; pN++; pWorst = Mathf.Max(pWorst, udt * 1000f);
+                pSum += udt * 1000.0; pN++; pWorst = Mathf.Max(pWorst, udt * 1000f); if (udt > 0.0185f) pMiss++;
                 if (fFtFrame) { pMain += ftBuf[0].cpuMainThreadFrameTime; pRender += ftBuf[0].cpuRenderThreadFrameTime; pGpu += ftBuf[0].gpuFrameTime; pFt++; }
             }
             else { accU = accA = accG = 0; }
             if (perfT < 3.9f || pN == 0) return;
             float ms = (float)(pSum / pN); if (perfIx == 0) perfBase = ms;
             string line = "ТЕСТ · " + PERF[perfIx] + ": " + ms.ToString("0.0") + " мс (" + (1000f / ms).ToString("0") + " к/с), худший кадр " + pWorst.ToString("0") + " мс";
+            // (the screen shows a frame only on its refresh: a frame a little over 1/60 s waits for the next one and counts double)
+            line += ", кадров дольше 1/60 с: " + (100f * pMiss / pN).ToString("0") + " %";
             if (perfIx > 0) line += ", к базе " + (ms - perfBase).ToString("+0.0;-0.0") + " мс";
+            if (pFt > 0) { float g = (float)(pGpu / pFt); if (perfIx == 0) perfBaseGpu = g; else line += " (GPU " + (g - perfBaseGpu).ToString("+0.0;-0.0") + ")"; }
             if (pFt > 0) line += " · главный поток " + (pMain / pFt).ToString("0.0") + ", поток отрисовки " + (pRender / pFt).ToString("0.0") + ", GPU " + (pGpu / pFt).ToString("0.0") + " мс";
             line += " · скрипты: Update " + (accU / pN).ToString("0.00") + " (анимация и ткань " + (accA / pN).ToString("0.00") + "), интерфейс " + (accG / pN).ToString("0.00") + " мс";
             Debug.Log(line);

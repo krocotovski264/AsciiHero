@@ -22,6 +22,7 @@ Shader "AsciiHero/Grass"
             TEXTURE2D(_AsciiLitTex); SAMPLER(sampler_AsciiLitTex);
             TEXTURE2D(_AsciiNDTex); SAMPLER(sampler_AsciiNDTex);
             SAMPLER(ascii_point_clamp_sampler); float _AsciiDepthLit;
+            float4 _GlyphInk[224];   // per atlas glyph: the box its ink occupies inside the cell
             float _AsciiRows, _AsciiExposure, _AsciiLinear, _AsciiDepthRef, _AsciiTime;
             float4 _AsciiPush[4];      // points of the body that press the grass: xyz, radius (0 = none)
             float _AsciiGrassThin;     // settings: the share of blades that is not drawn (0 = all)
@@ -97,11 +98,12 @@ Shader "AsciiHero/Grass"
                 float3 green = lerp(float3(0.16, 0.50, 0.24), float3(0.50, 0.78, 0.36), frac(s * 13.7));
                 o.col = (green * (0.22 + 0.95 * lum) + lit * 0.5) * depthK * (1.0 - 0.35 * push);
                 o.col *= 1.0 + 0.5 * wave;       // a pressed-down band shows lighter (the blades turn their sides to the light)
-                // an upright blade '|' is only the middle third of its cell: its quad is that narrow, so the many blades
-                // lying over each other fill far fewer pixels (measured: the grass was a fifth of the GPU frame)
-                float wk = o.gi < 0.5 ? 0.36 : 1.0;
-                o.local = float2(0.5 + i.corner.x * wk, i.corner.y + 0.5);
-                pVS.xy += i.corner * float2(h * 0.44 * wk, h * 1.1);       // the characters keep their width, the blades are taller
+                // the quad covers only the part of the cell the stroke is in (an upright '|' is a third of its cell, a
+                // trodden '_' a fifth): the many blades lying over each other fill far fewer pixels
+                float4 ink = _GlyphInk[(int)(12.0 * 16.0 + o.gi + 0.5)];
+                float2 lc = lerp(ink.xy, ink.zw, i.corner + 0.5);
+                o.local = lc;
+                pVS.xy += (lc - 0.5) * float2(h * 0.44, h * 1.1);       // the characters keep their width, the blades are taller
                 o.positionCS = vis ? TransformWViewToHClip(pVS) : float4(2, 2, 2, 1);
                 return o;
             }

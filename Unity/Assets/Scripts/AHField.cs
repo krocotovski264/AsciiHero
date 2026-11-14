@@ -36,7 +36,21 @@ namespace AsciiHero
         {
             root = new GameObject("Field"); var T = root.transform; var R = new System.Random(20261112);
             float Rnd() { return (float)R.NextDouble(); }
-            MeshGen.Obj(Ground(HX * 2 + 6, HZ * 2 + 6), mats["GROUND"], T, Vector3.zero, Quaternion.identity, false, "Ground");
+            // the ground in tiles (their size is a whole number of glyph cells and the vertices are in field coordinates,
+            // so the rows of characters run on across the joins): tiles outside the view are culled with their characters
+            {
+                const float TS = 3.96f;
+                for (int ix = 0; ix < 7; ix++)
+                    for (int iz = 0; iz < 6; iz++)
+                    {
+                        float x0 = (ix - 3.5f) * TS, z0 = (iz - 3f) * TS;
+                        var gm = new Mesh();
+                        gm.vertices = new[] { new Vector3(x0, 0, z0), new Vector3(x0, 0, z0 + TS), new Vector3(x0 + TS, 0, z0 + TS), new Vector3(x0 + TS, 0, z0) };
+                        gm.uv = new[] { new Vector2(0, 0), new Vector2(0, 1), new Vector2(1, 1), new Vector2(1, 0) };
+                        gm.triangles = new[] { 0, 1, 2, 0, 2, 3 }; gm.RecalculateNormals(); gm.RecalculateBounds(); MeshGen.AddGlyphUV(gm, false);
+                        MeshGen.Obj(gm, mats["GROUND"], T, Vector3.zero, Quaternion.identity, false, "Ground");
+                    }
+            }
             spawn = new Vector3(0, 0, 1.5f);
             // two training dummies in the middle, 3.5 m apart (the game builds them): keep the spots clear
             foreach (var dp in DUMMY_SPOTS) colliders.Add(Collider2.Circle(dp.x, dp.z, 0.34f));
