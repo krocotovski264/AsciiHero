@@ -115,7 +115,7 @@ uniform sampler2D tLit, tDepth;
 uniform vec2 uCell;
 uniform float uRow, uActor, uExposure, uNear, uFar, uDepthRef, uEps, uScale, uMinGlyph, uSmoke, uTime, uBurn, uPuff, uLod;
 uniform vec3 uVel, uShift, uPivot;
-uniform vec4 uSpin;
+uniform vec4 uSpin, uScatter;
 varying vec2 vLocal;
 varying vec3 vCol;
 varying float vGi;
@@ -141,6 +141,14 @@ void main() {
     wp = wp * cs + cross(uSpin.xyz, wp) * sn + uSpin.xyz * dot(uSpin.xyz, wp) * (1.0 - cs);
     mv = viewMatrix * vec4(wp + uPivot, 1.0);
   }
+  // dash, chain mail: it comes apart into its links - every character flies on its own, a little later or sooner than its
+  // neighbours, on its own wobbling path, and they gather on the body again
+  bool scat = uScatter.w >= 0.0;
+  if (scat) {
+    float dl = fract(aseed * 17.3) * 0.42, u2 = clamp((uScatter.w - dl) / 0.4, 0.0, 1.0), e2 = u2 * u2 * (3.0 - 2.0 * u2), ar = sin(3.14159 * e2);
+    vec3 jit = (vec3(fract(aseed * 7.1), fract(aseed * 3.7), fract(aseed * 11.9)) - 0.5) * 0.9;
+    mv.xyz += (viewMatrix * vec4(uScatter.xyz * (1.0 - e2) + jit * ar + vec3(0.0, 0.3 * ar, 0.0), 0.0)).xyz;
+  } else
   mv.xyz += (viewMatrix * vec4(uShift, 0.0)).xyz;      // dash: armour pieces lag behind the body
   if (uSmoke > 0.5 && uPuff <= 0.0) mv.xyz -= (viewMatrix * vec4(uVel, 0.0)).xyz * (0.05 + 0.2 * wisp) * ph * ph;
   vec3 nV = normalize(normalMatrix * objectNormal);
@@ -153,7 +161,7 @@ void main() {
   mv.y += ember * ember * 0.35;
   // far camera: fewer, larger characters (uLod = how many times further than the close-up distance)
   bool lodKeep = uLod < 1.01 || fract(aseed * 31.7 + 0.37) < 1.7 / (uLod * uLod);
-  bool vis = lodKeep && !gone && ember < 0.999 && dot(nV, toCam) > -0.05 - ember - uPuff * 4.0 - (uSpin.w != 0.0 ? 4.0 : 0.0) && myZ <= sceneZ + uEps + 0.002 * myZ && all(greaterThanEqual(suv, vec2(0.0))) && all(lessThanEqual(suv, vec2(1.0)));
+  bool vis = scat ? lodKeep && !gone : lodKeep && !gone && ember < 0.999 && dot(nV, toCam) > -0.05 - ember - uPuff * 4.0 - (uSpin.w != 0.0 ? 4.0 : 0.0) && myZ <= sceneZ + uEps + 0.002 * myZ && all(greaterThanEqual(suv, vec2(0.0))) && all(lessThanEqual(suv, vec2(1.0)));
   vec3 col = pow(max(texture2D(tLit, suv).rgb, 0.0), vec3(1.0 / 2.2));
   float lum = dot(col, vec3(0.299, 0.587, 0.114));
   float depthK = clamp(1.0 - (myZ - uDepthRef) * 0.09, 0.5, 1.2);          // nearer = brighter
@@ -167,6 +175,7 @@ void main() {
     vCol = mix(vec3(0.42, 0.27, 0.80), vec3(0.10, 0.06, 0.24), ph) * (1.0 - ph * (0.8 - 0.25 * wisp)) * (0.75 + 0.25 * depthK);
     if (uPuff > 0.0) { gi = floor(mix(15.0, uMinGlyph, uPuff)); vCol = mix(vec3(0.55, 0.36, 0.95), vec3(0.10, 0.06, 0.22), uPuff) * (1.0 - uPuff) * (1.0 - uPuff * 0.5); }
   }
+  if (scat) { vCol = vec3(0.62, 0.67, 0.76) * (0.5 + 0.5 * fract(aseed * 5.1)); gi = uMinGlyph + floor(fract(aseed * 9.7) * (15.99 - uMinGlyph)); }
   if (ember > 0.0) { vCol = mix(vCol, vec3(1.6, 0.62, 0.12), min(1.0, ember * 2.0)) * (1.0 - ember * ember); gi = floor(mix(gi, 2.0, ember)); }
   vGi = gi;
   vLocal = position.xy + 0.5;
@@ -184,12 +193,12 @@ void main() {
   float mk = texture2D(tGlyph, vec2((vGi + l.x) / 16.0, 1.0 - (uRow + 1.0) / uRows + l.y / uRows)).r;
   gl_FragColor = vec4(vCol * mk, 1.0);
 }`;
-const GMAT = new Map(), NO_SHIFT = { value: new THREE.Vector3() }, NO_SPIN = { value: new THREE.Vector4(0, 1, 0, 0) };
+const GMAT = new Map(), NO_SHIFT = { value: new THREE.Vector3() }, NO_SPIN = { value: new THREE.Vector4(0, 1, 0, 0) }, NO_SCATTER = { value: new THREE.Vector4(0, 0, 0, -1) };
 function glyphMaterial(row, cell, actor, smoke = 0, burn = null, puff = null, shift = null) {
   const key = row + ':' + cell.x + ':' + actor + ':' + smoke;
   if (!burn && !puff && !shift && GMAT.has(key)) return GMAT.get(key);
   const m = new THREE.ShaderMaterial({
-    uniforms: Object.assign({}, GLYPH, { uRow: { value: row }, uCell: { value: cell }, uActor: { value: actor }, uSmoke: { value: smoke }, uBurn: burn || { value: 0 }, uPuff: puff || { value: 0 }, uShift: shift ? shift.shift : NO_SHIFT, uSpin: shift ? shift.spin : NO_SPIN, uPivot: shift ? shift.pivot : NO_SHIFT }),
+    uniforms: Object.assign({}, GLYPH, { uRow: { value: row }, uCell: { value: cell }, uActor: { value: actor }, uSmoke: { value: smoke }, uBurn: burn || { value: 0 }, uPuff: puff || { value: 0 }, uShift: shift ? shift.shift : NO_SHIFT, uSpin: shift ? shift.spin : NO_SPIN, uPivot: shift ? shift.pivot : NO_SHIFT, uScatter: shift ? shift.scatter : NO_SCATTER }),
     vertexShader: GLYPH_VS, fragmentShader: GLYPH_FS,
     depthTest: false, depthWrite: false, transparent: false, side: THREE.DoubleSide,
     blending: THREE.CustomBlending, blendEquation: THREE.MaxEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
@@ -335,7 +344,7 @@ export function makeGrass(points, seeds) {
 // gives a mesh its own world-space offset (lit pass and glyphs): used for the dash, where the armour pieces fly after the body
 export function enableShift(mesh) {
   const src = mesh.material, id = src.userData.matId;
-  const U = { shift: { value: new THREE.Vector3() }, spin: { value: new THREE.Vector4(0, 1, 0, 0) }, pivot: { value: new THREE.Vector3() } };
+  const U = { shift: { value: new THREE.Vector3() }, spin: { value: new THREE.Vector4(0, 1, 0, 0) }, pivot: { value: new THREE.Vector3() }, scatter: { value: new THREE.Vector4(0, 0, 0, -1) } };
   const m = src.clone(); m.userData = src.userData;
   m.onBeforeCompile = s => { s.uniforms.uShift = U.shift; s.uniforms.uSpin = U.spin; s.uniforms.uPivot = U.pivot;
     s.vertexShader = 'uniform vec3 uShift, uPivot;\nuniform vec4 uSpin;\n' + s.vertexShader.replace('#include <project_vertex>', `

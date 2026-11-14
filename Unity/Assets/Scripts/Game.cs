@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.24 · Unity";
+        public const string VERSION = "beta 0.25 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -407,7 +407,7 @@ namespace AsciiHero
                 float dx = pos.x - d.p.x, dz = pos.z - d.p.z, dist = Mathf.Sqrt(dx * dx + dz * dz), inv = 1f / Mathf.Max(dist, 1e-3f);
                 float fx = Mathf.Sin(player.heading), fz = Mathf.Cos(player.heading), facing = (-dx * fx - dz * fz) * inv;
                 // the hero's cut lands once, while the edge is travelling, on a dummy in reach and in front of him
-                if (player.Cutting && !player.atkHits.Contains(i) && dist < 1.75f && facing > 0.3f)
+                if (player.Cutting && !player.atkHits.Contains(i) && dist < player.Reach && (player.Around || facing > 0.3f))
                 { player.atkHits.Add(i); DummyDamage(d, DUMMY_HIT); if (d.dead > 0) continue; }
                 // the worse its state, the more it leans; a hit makes it shudder and rock for a moment
                 d.wob *= Mathf.Exp(-dt * 6);
@@ -558,7 +558,8 @@ namespace AsciiHero
                     var r = kv.Key; var sm = r.sharedMaterial;
                     if (sm == actorMats["SHADOW"] || sm == actorMats["EYE"]) continue;
                     Object key = r is SkinnedMeshRenderer ? (Object)r : r.transform.parent;
-                    Piece pc; if (!byKey.TryGetValue(key, out pc)) { pc = new Piece(); byKey[key] = pc; pieces.Add(pc); }
+                    string kind = sm == actorMats["CHAIN"] ? "chain" : cfg.armor == "robe" && (sm == actorMats["ROBE"] || sm == actorMats["ROBED"]) ? "robe" : "";
+                    Piece pc; if (!byKey.TryGetValue(key, out pc)) { pc = new Piece { kind = kind }; byKey[key] = pc; pieces.Add(pc); }
                     pc.rs.Add(r); if (kv.Value != null) pc.rs.Add(kv.Value);
                 }
             }
@@ -737,7 +738,7 @@ namespace AsciiHero
         static Vector3 Mirror(Vector3 v) { return new Vector3(-v.x, v.y, v.z); }
 
         // ---------- actions: attack, guard, dash ----------
-        class Piece { public List<Renderer> rs = new List<Renderer>(); public float delay, om = 11, zeta = 0.45f, lift = 0.3f, wob, turns = 1, side; public Vector3 axis = Vector3.up; }
+        class Piece { public string kind = ""; public List<Renderer> rs = new List<Renderer>(); public float delay, om = 11, zeta = 0.45f, lift = 0.3f, wob, turns = 1, side; public Vector3 axis = Vector3.up; }
         readonly List<Piece> pieces = new List<Piece>(); MaterialPropertyBlock shiftMpb;
         const float DASH_DIST = 2.0f, DASH_T = 0.1f; float dashAnim = 0.4f, dashSettle = 0;
         float dashT = 9, dashCd, dashMist; Vector3 dashFrom, dashDir; Vector2? moveDir; bool dashShifted;
@@ -762,6 +763,13 @@ namespace AsciiHero
                 pc.axis = Random.onUnitSphere; pc.turns = (Random.value < 0.5f ? -1 : 1) * (Random.value < 0.65f ? 1 : 2);
                 pc.side = (Random.value - 0.5f) * 0.9f; pc.lift = 0.12f + Random.value * 0.4f; pc.wob = (Random.value - 0.5f) * 1.6f;
             }
+            // a robe is not thrown about: it flies after the shadow in one piece, like a cloak with a will of its own - a slow
+            // sweep up and over, no tumbling. Chain mail leaves at once and comes apart into its links (see the glyph shader).
+            foreach (var pc in pieces)
+            {
+                if (pc.kind == "robe") { pc.delay = DASH_T * 0.9f; pc.om = 6.5f; pc.zeta = 0.62f; pc.turns = 0; pc.wob = 0; pc.side = 0.25f; pc.lift = 0.55f; }
+                if (pc.kind == "chain") pc.delay = DASH_T * 0.5f;
+            }
             dashAnim = at + 0.3f; dashSettle = at + 1.3f; dashCd = dashAnim + 0.5f;
             player.Teleport(0, 0, Mathf.Atan2(dashDir.x, dashDir.z));
         }
@@ -772,7 +780,7 @@ namespace AsciiHero
             foreach (var r in pc.rs)
             {
                 if (r == null) continue; r.GetPropertyBlock(shiftMpb);
-                shiftMpb.SetVector("_DashShift", v); shiftMpb.SetVector("_DashSpin", spin); shiftMpb.SetVector("_DashPivot", piv);
+                shiftMpb.SetVector("_DashShift", v); shiftMpb.SetVector("_DashSpin", spin); shiftMpb.SetVector("_DashPivot", piv); shiftMpb.SetVector("_DashScatter", Vector4.zero);
                 r.SetPropertyBlock(shiftMpb);
             }
         }
@@ -801,6 +809,27 @@ namespace AsciiHero
                 // spring response: 0 -> past 1 -> back -> 1
                 float p = last ? 1 : 1 - Mathf.Exp(-pc.zeta * pc.om * tau) * (Mathf.Cos(wd * tau) + pc.zeta * pc.om / wd * Mathf.Sin(wd * tau));
                 float u = Mathf.Min(1, tau / T1), sm = last ? 1 : u * u * u * (u * (u * 6 - 15) + 10), arc = Mathf.Sin(Mathf.PI * sm);
+                if (pc.kind == "chain")
+                {
+                    bool on = tau > 0 && tau < 0.86f && !last;
+                    if (shiftMpb == null) shiftMpb = new MaterialPropertyBlock();
+                    foreach (var r in pc.rs)
+                    {
+                        if (r == null) continue; bool gl = r.gameObject.layer == GlyphLayer.LAYER; r.GetPropertyBlock(shiftMpb);
+                        // while the links fly, the solid mail is taken away (it only feeds the glyphs their light)
+                        shiftMpb.SetVector("_DashShift", on ? (gl ? Vector3.zero : new Vector3(0, -60, 0)) : tau > 0 ? Vector3.zero : back);
+                        shiftMpb.SetVector("_DashScatter", on && gl ? new Vector4(back.x, back.y, back.z, Mathf.Max(tau, 1e-4f)) : Vector4.zero);
+                        shiftMpb.SetVector("_DashSpin", new Vector4(0, 1, 0, 0)); r.SetPropertyBlock(shiftMpb);
+                    }
+                    continue;
+                }
+                if (pc.kind == "robe")
+                {
+                    float fl = last ? 0 : (1 - sm) * Mathf.Min(1, tau * 6);
+                    Vector3 shR = back * (1 - p) + sideV * (pc.side * arc + 0.1f * Mathf.Sin(tau * 9) * fl) + Vector3.up * (pc.lift * arc + 0.07f * Mathf.Sin(tau * 13) * fl);
+                    SetShift(pc, shR, new Vector4(sideV.x, 0, sideV.z, tau > 0 && !last ? (0.5f * arc + 0.18f * Mathf.Sin(tau * 11)) * (1 - sm * sm) + 1e-4f : 0));     // it streams out behind and billows
+                    continue;
+                }
                 Vector3 sh = back * (1 - p) + sideV * (pc.side * arc) + Vector3.up * (pc.lift * arc);
                 SetShift(pc, sh, new Vector4(pc.axis.x, pc.axis.y, pc.axis.z, tau > 0 && !last ? pc.turns * Mathf.PI * 2 * (1 - sm) + pc.wob * (sm - p) * 3 : 0));
             }
@@ -829,6 +858,8 @@ namespace AsciiHero
             moveDir = dir;
             bool guardPtr = false; foreach (var ap in InputHub.active.Values) if (ap.owner == "def") guardPtr = true;
             player.guardHeld = guardPtr || InputHub.Key("Guard");
+            bool atkPtr = false; foreach (var ap in InputHub.active.Values) if (ap.owner == "atk") atkPtr = true;
+            player.atkHeld = atkPtr || InputHub.Key("AttackHeld");
             if (InputHub.Key("Attack")) DoAttack();
             if (InputHub.Key("Dash")) DoDash();
             var dd = player.Locomotion(dt, dir, mag, lockPos, new Vector2(pos.x, pos.z), p => loc.Collide(p, 0.27f));
@@ -837,7 +868,7 @@ namespace AsciiHero
             UpdateDash(dt);
             if (player.trail.Count > 0) { foreach (var q in player.trail) SpawnPuff(q, 0.03f, Vector3.zero, 0.3f); player.trail.Clear(); }
             hero.go.transform.position = pos;
-            hero.go.transform.rotation = Quaternion.Euler(0, player.heading * Mathf.Rad2Deg, 0);
+            hero.go.transform.rotation = Quaternion.Euler(0, (player.heading - player.spinYaw) * Mathf.Rad2Deg, 0);      // the full-turn sweep spins the whole figure
             loc.Update(tNow); Pickups(); UpdateDummies(dt, tNow); UpdateDebris(dt); UpdateDanger(tNow);
             if (respawnT > 0) { respawnT -= dt; if (respawnT <= 0) { RestoreBody(); pos = loc.spawn; player.ResetSim(); } }
             // grass: the hero and a point trailing behind him push the blades aside

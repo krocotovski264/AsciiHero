@@ -244,11 +244,14 @@ function addWeapon(group, h, mats, W) {
   const fr = handFrameWorld(h, 'R');
   // grip centre: inside the curled fingers
   const grip = fr.W.clone().addScaledVector(fr.f, 0.075).addScaledVector(fr.n, -0.028);
-  // the blade is carried low: pointing ahead and a little down, towards the ground
-  const up = new THREE.Vector3(0, -0.34, 0.94).normalize();
+  // sword and axe hang low along the leg, 10 degrees off it; the spear is carried level at its middle, point ahead; the staff stands upright
+  const up = (W === 'spear' ? new THREE.Vector3(0, 0.08, 1) : W === 'staff' ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, -0.985, 0.174)).normalize();
   const side = new THREE.Vector3(1, 0, 0), fwd = new THREE.Vector3().crossVectors(side, up).normalize();
   const basis = new THREE.Matrix4().makeBasis(side, up, fwd).setPosition(grip);
-  const g = new THREE.Group();
+  const g0 = new THREE.Group(); let g = g0;
+  // axe: turned on its haft so the head points ahead (down the line of the cut), not sideways. Spear: gripped at the middle.
+  // Staff: gripped a metre above its foot; the holder slides when the hand moves to the middle (running, fighting).
+  if (W === 'axe' || W === 'spear' || W === 'staff') { g = new THREE.Group(); g0.add(g); if (W === 'axe') g.rotation.y = Math.PI / 2; if (W === 'spear') g.position.y = -0.55; if (W === 'staff') { g.position.y = -0.5; g.userData.y0 = -0.5; g0.userData.slide = g; } }
   if (W === 'sword' || W === 'shield') {
     g.add(Object.assign(mesh(cyl(0.015, 0.014, 0.11, 10), mats.LEATHER2), {}));
     const pom = mesh(new THREE.SphereGeometry(0.024, 10, 8), mats.GOLD); pom.position.y = -0.07; g.add(pom);
@@ -276,11 +279,11 @@ function addWeapon(group, h, mats, W) {
     const shaft = mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, 0.02, 8), mats.WOOD); g.add(shaft);
     for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2; const c = new THREE.CatmullRomCurve3([new THREE.Vector3(0, 1.2, 0), new THREE.Vector3(Math.cos(a) * 0.05, 1.3, Math.sin(a) * 0.05), new THREE.Vector3(Math.cos(a) * 0.035, 1.42, Math.sin(a) * 0.035)]); g.add(mesh(new THREE.TubeGeometry(c, 8, 0.009, 5), mats.WOOD)); }
     const orb = mesh(new THREE.OctahedronGeometry(0.05, 1), mats.GLOW); orb.position.y = 1.33; orb.scale.set(0.8, 1.2, 0.8); g.add(orb);
-    g.userData.orb = orb;
+    g0.userData.orb = orb;
     const ring = mesh(new THREE.TorusGeometry(0.025, 0.006, 6, 16), mats.GOLD); ring.rotation.x = Math.PI / 2; ring.position.y = 1.2; g.add(ring);
   }
-  attach(h, 'wrist.R', g, basis);
-  group.userData.weapon = g;
+  attach(h, 'wrist.R', g0, basis);
+  group.userData.weapon = g0;
 }
 
 function addShield(group, h, mats) {

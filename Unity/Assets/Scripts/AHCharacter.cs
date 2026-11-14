@@ -37,7 +37,7 @@ namespace AsciiHero
         public Transform model;         // scaled for height
         public Human human;
         public CharConfig cfg;
-        public Transform weapon, orb, shield;   // shield: local z = its face, local y = its top
+        public Transform weapon, orb, shield, weaponSlide;   // shield: local z = its face, local y = its top
         public List<Renderer> glyphs = new List<Renderer>();   // skinned glyph renderers (limb hiding)
         public static readonly string[] LIMBS = { "head", "armL", "armR", "legL", "legR" };
         public static readonly string[] LIMB_NAME = { "голова", "левая рука", "правая рука", "левая нога", "правая нога" };
@@ -305,11 +305,20 @@ namespace AsciiHero
             var fr = Pose.Hand(human, "R");
             // hand frame is in world space; the model sits at the origin while it is being built
             Vector3 grip = fr.W + fr.f * 0.075f - fr.n * 0.028f;
-            // the blade is carried low: pointing ahead and a little down, towards the ground
-            Vector3 up = new Vector3(0, -0.34f, 0.94f).normalized;
+            // sword and axe hang low along the leg, 10 degrees off it; the spear is carried level at its middle, point ahead; the staff stands upright
+            Vector3 up = (W == "spear" ? new Vector3(0, 0.08f, 1f) : W == "staff" ? Vector3.up : new Vector3(0, -0.985f, 0.174f)).normalized;
             Vector3 fwd = Vector3.Cross(Vector3.right, up).normalized;
             var rot = Quaternion.LookRotation(fwd, up);
-            var g = Group("Weapon");
+            var g0 = Group("Weapon"); var g = g0;
+            // axe: turned on its haft so the head points ahead (down the line of the cut), not sideways. Spear: gripped at the
+            // middle. Staff: gripped a metre above its foot; the holder slides when the hand moves to the middle (running, fighting).
+            if (W == "axe" || W == "spear" || W == "staff")
+            {
+                g = Group("Holder"); g.SetParent(g0, false);
+                if (W == "axe") g.localRotation = Quaternion.Euler(0, 90, 0);
+                if (W == "spear") g.localPosition = new Vector3(0, -0.55f, 0);
+                if (W == "staff") { g.localPosition = new Vector3(0, -0.5f, 0); weaponSlide = g; }
+            }
             if (W == "sword" || W == "shield")
             {
                 Part(MeshGen.Cylinder(0.015f, 0.014f, 0.11f, 10), "LEATHER2", g, Vector3.zero);
@@ -356,8 +365,8 @@ namespace AsciiHero
                 Part(MeshGen.Torus(0.025f, 0.006f, 16, 6), "GOLD", g, new Vector3(0, 1.2f, 0), Quaternion.Euler(90, 0, 0));
             }
             // convert world placement into model space (model scale is 1 while building)
-            Attach("wrist.R", g, model.InverseTransformPoint(grip), Quaternion.Inverse(model.rotation) * rot);
-            weapon = g;
+            Attach("wrist.R", g0, model.InverseTransformPoint(grip), Quaternion.Inverse(model.rotation) * rot);
+            weapon = g0;
         }
 
         void AddShield()

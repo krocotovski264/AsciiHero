@@ -143,8 +143,9 @@ function rebuild() {
   { const byKey = new Map(); char.pieces = [];
     char.group.updateMatrixWorld(true);
     char.group.traverse(o => { if (!o.isMesh || o.material === actorMats.SHADOW || o.material === actorMats.EYE) return;
+      const kind = o.material === actorMats.CHAIN ? 'chain' : cfg.armor === 'robe' && (o.material === actorMats.ROBE || o.material === actorMats.ROBED) ? 'robe' : '';
       const key = o.isSkinnedMesh ? o : o.parent; let pc = byKey.get(key);
-      if (!pc) { pc = { shifts: [], delay: 0, om: 11, zeta: 0.45, lift: 0.3, wob: 0, axis: new THREE.Vector3(0, 1, 0), turns: 1, side: 0 }; byKey.set(key, pc); char.pieces.push(pc);
+      if (!pc) { pc = { kind, shifts: [], delay: 0, om: 11, zeta: 0.45, lift: 0.3, wob: 0, axis: new THREE.Vector3(0, 1, 0), turns: 1, side: 0 }; byKey.set(key, pc); char.pieces.push(pc);
         // the point the piece tumbles about: its centre, carried by the nearest bone
         if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
         const c = o.geometry.boundingBox.getCenter(new THREE.Vector3()); if (!o.isSkinnedMesh) c.applyMatrix4(o.matrixWorld);
@@ -339,9 +340,9 @@ function updateDummies(dt, t) {
     const dx = pos.x - d.x, dz = pos.z - d.z, dist = Math.hypot(dx, dz);
     // the hero's cut lands once, while the edge is travelling, on a dummy in reach and in front of him
     const a = player.atk;
-    if (a && a.t < a.dur && !a.hits.has(i) && a.t > ATTACKS[a.type].cut[0] && a.t < ATTACKS[a.type].cut[1] && dist < 1.75) {
+    if (a && a.t < a.dur && !a.hits.has(i) && a.t > ATTACKS[a.type].cut[0] && a.t < ATTACKS[a.type].cut[1] && dist < (ATTACKS[a.type].proc ? 2.3 : 1.75)) {
       const fx = Math.sin(player.heading), fz = Math.cos(player.heading);
-      if ((-dx * fx - dz * fz) / Math.max(dist, 1e-3) > 0.3) { a.hits.add(i); dummyDamage(d, DUMMY_HIT); if (d.dead > 0) continue; }
+      if (ATTACKS[a.type].around || (-dx * fx - dz * fz) / Math.max(dist, 1e-3) > 0.3) { a.hits.add(i); dummyDamage(d, DUMMY_HIT); if (d.dead > 0) continue; }
     }
     // the worse its state, the more it leans; a hit makes it shudder and rock for a moment
     d.wob *= Math.exp(-dt * 6);
@@ -509,6 +510,12 @@ function doDash() {
     pc.axis.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize(); pc.turns = (Math.random() < 0.5 ? -1 : 1) * (Math.random() < 0.65 ? 1 : 2);
     pc.side = (Math.random() - 0.5) * 0.9; pc.lift = 0.12 + Math.random() * 0.4; pc.wob = (Math.random() - 0.5) * 1.6;
   }
+  // a robe is not thrown about: it flies after the shadow in one piece, like a cloak with a will of its own - a slow
+  // sweep up and over, no tumbling. Chain mail leaves at once and comes apart into links (see the glyph shader).
+  for (const pc of char.pieces) {
+    if (pc.kind === 'robe') { pc.delay = DASH_T * 0.9; pc.om = 6.5; pc.zeta = 0.62; pc.turns = 0; pc.wob = 0; pc.side = 0.25; pc.lift = 0.55; }
+    if (pc.kind === 'chain') pc.delay = DASH_T * 0.5;
+  }
   dash.anim = at + 0.3; dash.settle = at + 1.3; dash.cd = dash.anim + 0.5;
   player.sim.h = player.heading = Math.atan2(d.x, d.z);
 }
@@ -530,6 +537,19 @@ function updateDash(dt) {
     const p = last ? 1 : 1 - Math.exp(-pc.zeta * pc.om * tau) * (Math.cos(wd * tau) + pc.zeta * pc.om / wd * Math.sin(wd * tau));
     const u = Math.min(1, tau / T1), sm = last ? 1 : u * u * u * (u * (u * 6 - 15) + 10), arc = Math.sin(Math.PI * sm);
     const piv = pc.bone.localToWorld(pc.off.clone());
+    if (pc.kind === 'chain') {
+      const on = tau > 0 && tau < 0.86 && !last;
+      for (const U of pc.shifts) { U.spin.value.w = 0; if (on) { U.scatter.value.set(back.x, back.y, back.z, tau); U.shift.value.set(0, -60, 0); } else { U.scatter.value.w = -1; U.shift.value.copy(back).multiplyScalar(tau > 0 ? 0 : 1); } }
+      continue;
+    }
+    if (pc.kind === 'robe') {
+      const fl = last ? 0 : (1 - sm) * Math.min(1, tau * 6);
+      for (const U of pc.shifts) {
+        U.shift.value.copy(back).multiplyScalar(1 - p).addScaledVector(sideV, (pc.side * arc + 0.1 * Math.sin(tau * 9) * fl)); U.shift.value.y += pc.lift * arc + 0.07 * Math.sin(tau * 13) * fl;
+        U.pivot.value.copy(piv); U.spin.value.set(sideV.x, 0, sideV.z, tau > 0 && !last ? (0.5 * arc + 0.18 * Math.sin(tau * 11)) * (1 - sm * sm) + 1e-4 : 0);      // it streams out behind and billows
+      }
+      continue;
+    }
     for (const U of pc.shifts) {
       U.shift.value.copy(back).multiplyScalar(1 - p).addScaledVector(sideV, pc.side * arc); U.shift.value.y += pc.lift * arc;
       U.pivot.value.copy(piv); U.spin.value.set(pc.axis.x, pc.axis.y, pc.axis.z, tau > 0 && !last ? pc.turns * Math.PI * 2 * (1 - sm) + pc.wob * (sm - p) * 3 : 0);
@@ -539,7 +559,7 @@ function updateDash(dt) {
   dash.mist -= dt; if (dash.mist <= 0 && dash.t < dash.anim) { dash.mist = 0.035; const k = Math.random();
     spawnPuff(new THREE.Vector3(pos.x + back.x * k, 0.35 + Math.random() * 1.1, pos.z + back.z * k), 0.07, new THREE.Vector3(0, 0.15, 0)); }
 }
-for (const [id, down, upF] of [['atk', doAttack, null], ['dash', doDash, null], ['def', () => { act.guard = true; }, () => { act.guard = false; }]]) {
+for (const [id, down, upF] of [['atk', () => { act.atk = true; doAttack(); }, () => { act.atk = false; }], ['dash', doDash, null], ['def', () => { act.guard = true; }, () => { act.guard = false; }]]) {
   const el = $(id); if (!el) continue;
   el.addEventListener('pointerdown', e => { e.preventDefault(); el.setPointerCapture(e.pointerId); el.classList.add('on'); down(); });
   const up = () => { el.classList.remove('on'); if (upF) upF(); };
@@ -560,7 +580,7 @@ function worldUpdate(dt, t) {
   }
   // stick: light push = turn on the spot, more = walk -> jog -> sprint (blend tree)
   const lockPos = lockOn ? (lockFixed || (loc === tavern ? bartender.char.group.position : loc.spawn)) : null;
-  act.dir = dir; player.guardHeld = act.guard || !!keys.KeyK;
+  act.dir = dir; player.guardHeld = act.guard || !!keys.KeyK; player.atkHeld = !!act.atk || !!keys.KeyJ;
   const [ddx, ddz] = locomotion(player, dt, dir, mag, lockPos, pos, p => collide(p, 0.27));
   pos.x += ddx; pos.z += ddz;
   updateDash(dt);
@@ -568,7 +588,7 @@ function worldUpdate(dt, t) {
   collide(pos, 0.27);
   heading = player.heading;
   char.group.position.set(pos.x, 0, pos.z);
-  char.group.rotation.y = heading;
+  char.group.rotation.y = heading + (player.spinYaw || 0);      // the full-turn sweep spins the whole figure
   loc.update(t); pickups(); updateDummies(dt, t); updateDebris(dt);
   if (player) GLYPH.uVel.value.set(player.sim.vx, 0, player.sim.vz);
   GLYPH.uHeroA.value.set(pos.x, 0, pos.z); GLYPH.uHeroB.value.lerp(GLYPH.uHeroA.value, Math.min(1, dt * 2.2));

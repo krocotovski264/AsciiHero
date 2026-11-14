@@ -569,13 +569,12 @@ namespace AsciiHero
             if (bRoot != null && bSp != null && bNk != null)
             {
                 // the pelvis first (a pelvis tipped forward under an upright chest is what reads as an arched back); the legs keep their pose
-                Vector3 w3 = bSp.position - bRoot.position; float d0 = (want - (Mathf.Atan2(Vector3.Dot(w3, Z), w3.y) - restLower)) * 0.8f * kw;
+                Vector3 w3 = bSp.position - bRoot.position; float d0 = (want * 0.3f - (Mathf.Atan2(Vector3.Dot(w3, Z), w3.y) - restLower)) * 0.8f * kw;      // the pelvis stays nearly upright: the lean is made by the spine, not by sticking the seat out
                 Rot("root", X, d0); Rot("upperleg01.L", X, -d0); Rot("upperleg01.R", X, -d0);
                 Vector3 u3 = bNk.position - bRoot.position; float d1 = (want - (Mathf.Atan2(Vector3.Dot(u3, Z), u3.y) - restTrunk)) * kw;
                 Rot("spine05", X, d1 * 0.5f); Rot("spine03", X, d1 * 0.5f);
             }
             // running, the back rounds forward over the stride (the head stays up, see below)
-            { float rb = (0.12f * wR + 0.05f * sp) * kw; Rot("spine05", X, rb * 0.4f); Rot("spine03", X, rb * 0.6f); }
             // pelvis: dip under load, slow weight shift when standing
             var rp = H.root.localPosition; rp.y -= dip; rp.x += idle * 0.012f * Mathf.Sin(t * 0.45f); H.root.localPosition = rp;
             // torso: lean (root, lower and upper spine share it), counter-rotation, breathing
@@ -612,7 +611,7 @@ namespace AsciiHero
                 float aw = Mathf.Min(1f, 0.8f * wR + 0.2f * sp) * (shield ? 0.45f : 1f) * kw;
                 if (aw > 0.01f)
                 {
-                    float u = 0.5f + 0.5f * sw;                              // 0 = arm back, 1 = arm in front
+                    float u = 0.5f + 0.5f * sw * (carried && !shield ? 0.5f : 1f);     // 0 = arm back, 1 = arm in front; the arm that carries the weapon swings half as far
                     // behind: the arm is driven well back and opens almost straight (only a slight bend in the elbow), away from the ribs
                     float a = -0.95f + 1.05f * u, b2 = -0.7f + 3.1f * u;     // upper arm and forearm angles from straight down, forwards
                     SprintPart("upperarm01." + s, "lowerarm01." + s, gq * new Vector3(sg * (0.3f - 0.07f * u), -Mathf.Cos(a), Mathf.Sin(a)), aw);   // elbows lifted 11-15 degrees off the trunk, travelling on a diagonal
@@ -626,52 +625,108 @@ namespace AsciiHero
         // left. 2: wound up low behind the left side and drawn across to the upper right.
         // knots: (game time, clip frame) - the wind-up and the cut are played faster than they were performed.
         // blade: the direction of the blade per clip frame in the body frame (x = right, y = up, z = forward).
-        class AtkClip { public int a; public float dur, cut0, cut1; public float[] kt, kf, blade; }
+        // Clips 1 and 2 are motion capture retargeted to this skeleton: 1 from overhead down to the lower left, 2 wound up low
+        // behind the left side and drawn across to the upper right; 3 and 4 are the same cuts mirrored (the database keeps
+        // a mirrored copy of every frame). knots (kt, kf): game time -> clip frame - the wind-up and the cut are played faster
+        // than they were performed. blade: the blade direction per clip frame in the body frame (x = right, y = up, z = forward).
+        // 5 and 6 are posed (spear and staff): 5 a thrust - the shaft drawn back level along the right side with the hips
+        // turned away, then driven straight out by the legs and the turn of the hips, the lunge carrying the body behind the
+        // point; 6 a sweep with a full turn of the whole body.
+        class ProcKey { public float t, yaw, pitch, fwd, drop; public Vector3 ua, fa, la, lf, sh;
+            public ProcKey(float t, Vector3 ua, Vector3 fa, Vector3 la, Vector3 lf, Vector3 sh, float yaw, float pitch, float fwd, float drop)
+            { this.t = t; this.ua = ua; this.fa = fa; this.la = la; this.lf = lf; this.sh = sh; this.yaw = yaw; this.pitch = pitch; this.fwd = fwd; this.drop = drop; } }
+        class AtkClip { public int a; public float dur, cut0, cut1, spin0 = -1, spin1; public float[] kt, kf, blade; public bool mirror, proc, around; public ProcKey[] k;
+            public AtkClip Mirrored() { var m = (AtkClip)MemberwiseClone(); m.mirror = true; return m; } }
         static Vector3 V(float x, float y, float z) { return new Vector3(x, y, z); }
-        static readonly AtkClip[] ATTACKS = {
-            null,
-            new AtkClip { a = 9945, dur = 0.74f, cut0 = 0.4f, cut1 = 0.55f, kt = new[] { 0f, 0.3f, 0.57f, 0.74f }, kf = new[] { 2f, 32f, 52f, 62f },
-                blade = new[] { -0.003f, 0.417f, 0.909f, -0.003f, 0.425f, 0.905f, -0.003f, 0.438f, 0.899f, -0.001f, 0.458f, 0.889f, 0.002f, 0.486f, 0.874f, 0.006f, 0.524f, 0.851f, 0.01f, 0.572f, 0.82f, 0.013f, 0.628f, 0.778f, 0.015f, 0.689f, 0.724f, 0.016f, 0.754f, 0.657f, 0.017f, 0.818f, 0.575f, 0.017f, 0.878f, 0.479f, 0.016f, 0.928f, 0.371f, 0.013f, 0.967f, 0.254f, 0.009f, 0.991f, 0.131f, 0.001f, 1f, 0.006f, -0.01f, 0.993f, -0.118f, -0.022f, 0.971f, -0.237f, -0.034f, 0.936f, -0.35f, -0.044f, 0.891f, -0.452f, -0.051f, 0.838f, -0.543f, -0.056f, 0.782f, -0.621f, -0.059f, 0.727f, -0.684f, -0.06f, 0.677f, -0.734f, -0.061f, 0.632f, -0.772f, -0.06f, 0.595f, -0.802f, -0.059f, 0.564f, -0.823f, -0.058f, 0.541f, -0.839f, -0.058f, 0.523f, -0.851f, -0.059f, 0.508f, -0.859f, -0.06f, 0.496f, -0.866f, -0.061f, 0.485f, -0.872f, -0.06f, 0.475f, -0.878f, -0.057f, 0.468f, -0.882f, -0.048f, 0.464f, -0.885f, -0.03f, 0.466f, -0.884f, 0.005f, 0.48f, -0.877f, 0.062f, 0.516f, -0.854f, 0.145f, 0.583f, -0.799f, 0.249f, 0.686f, -0.684f, 0.354f, 0.808f, -0.471f, 0.419f, 0.898f, -0.137f, 0.392f, 0.874f, 0.289f, 0.25f, 0.678f, 0.691f, 0.044f, 0.359f, 0.932f, -0.141f, 0.041f, 0.989f, -0.259f, -0.203f, 0.944f, -0.316f, -0.371f, 0.873f, -0.336f, -0.482f, 0.809f, -0.341f, -0.554f, 0.759f, -0.343f, -0.597f, 0.725f, -0.342f, -0.619f, 0.707f, -0.343f, -0.624f, 0.702f, -0.347f, -0.616f, 0.708f, -0.355f, -0.598f, 0.719f, -0.365f, -0.575f, 0.732f, -0.377f, -0.549f, 0.746f, -0.389f, -0.523f, 0.758f, -0.401f, -0.497f, 0.769f, -0.411f, -0.474f, 0.779f, -0.418f, -0.453f, 0.787f, -0.425f, -0.437f, 0.793f, -0.431f, -0.423f, 0.797f, -0.436f, -0.413f, 0.8f, -0.439f, -0.406f, 0.801f, -0.442f, -0.402f, 0.802f } },
-            new AtkClip { a = 10011, dur = 0.76f, cut0 = 0.41f, cut1 = 0.56f, kt = new[] { 0f, 0.32f, 0.59f, 0.76f }, kf = new[] { 2f, 35f, 53f, 64f },
-                blade = new[] { 0.003f, 0.412f, 0.911f, 0.003f, 0.417f, 0.909f, 0.005f, 0.425f, 0.905f, 0.009f, 0.438f, 0.899f, 0.015f, 0.456f, 0.89f, 0.022f, 0.481f, 0.877f, 0.031f, 0.515f, 0.857f, 0.04f, 0.557f, 0.83f, 0.048f, 0.607f, 0.793f, 0.056f, 0.664f, 0.745f, 0.063f, 0.728f, 0.683f, 0.069f, 0.792f, 0.606f, 0.073f, 0.855f, 0.514f, 0.076f, 0.91f, 0.407f, 0.079f, 0.955f, 0.285f, 0.082f, 0.985f, 0.152f, 0.089f, 0.996f, 0.011f, 0.1f, 0.986f, -0.132f, 0.117f, 0.955f, -0.271f, 0.137f, 0.906f, -0.401f, 0.158f, 0.843f, -0.515f, 0.176f, 0.771f, -0.612f, 0.191f, 0.696f, -0.692f, 0.202f, 0.62f, -0.758f, 0.21f, 0.544f, -0.813f, 0.215f, 0.471f, -0.856f, 0.214f, 0.403f, -0.89f, 0.206f, 0.34f, -0.918f, 0.189f, 0.281f, -0.941f, 0.162f, 0.225f, -0.961f, 0.126f, 0.172f, -0.977f, 0.082f, 0.122f, -0.989f, 0.031f, 0.072f, -0.997f, -0.024f, 0.018f, -1f, -0.089f, -0.046f, -0.995f, -0.17f, -0.12f, -0.978f, -0.275f, -0.203f, -0.94f, -0.407f, -0.286f, -0.868f, -0.562f, -0.358f, -0.745f, -0.727f, -0.408f, -0.551f, -0.867f, -0.419f, -0.269f, -0.925f, -0.368f, 0.089f, -0.859f, -0.236f, 0.455f, -0.684f, -0.026f, 0.729f, -0.472f, 0.234f, 0.85f, -0.3f, 0.495f, 0.816f, -0.204f, 0.706f, 0.678f, -0.173f, 0.842f, 0.51f, -0.178f, 0.913f, 0.368f, -0.194f, 0.942f, 0.274f, -0.203f, 0.953f, 0.226f, -0.194f, 0.958f, 0.211f, -0.17f, 0.961f, 0.217f, -0.141f, 0.962f, 0.234f, -0.115f, 0.96f, 0.255f, -0.096f, 0.957f, 0.275f, -0.082f, 0.953f, 0.292f, -0.073f, 0.949f, 0.307f, -0.069f, 0.946f, 0.316f, -0.066f, 0.945f, 0.322f, -0.065f, 0.943f, 0.325f, -0.063f, 0.943f, 0.328f, -0.061f, 0.942f, 0.331f, -0.059f, 0.941f, 0.333f, -0.057f, 0.941f, 0.334f, -0.057f, 0.942f, 0.332f, -0.059f, 0.943f, 0.328f, -0.06f, 0.944f, 0.326f } } };
-        // types 3 and 4 are the same two cuts mirrored (the database keeps a mirrored copy of every frame): overhead down to
-        // the lower right, and from low behind the right side across to the upper left. With a shield only 1 and 2 are used.
-        AtkClip Clip => ATTACKS[atkType > 2 ? atkType - 2 : atkType];
-        bool ClipMirror => atkType > 2;
+        static readonly AtkClip[] ATTACKS = MakeAttacks();
+        static AtkClip[] MakeAttacks()
+        {
+            var A = new AtkClip[7];
+            A[1] = new AtkClip { a = 9945, dur = 0.74f, cut0 = 0.4f, cut1 = 0.55f, kt = new[] { 0f, 0.3f, 0.57f, 0.74f }, kf = new[] { 2f, 32f, 52f, 62f },
+                blade = new[] { -0.003f, 0.417f, 0.909f, -0.003f, 0.425f, 0.905f, -0.003f, 0.438f, 0.899f, -0.001f, 0.458f, 0.889f, 0.002f, 0.486f, 0.874f, 0.006f, 0.524f, 0.851f, 0.01f, 0.572f, 0.82f, 0.013f, 0.628f, 0.778f, 0.015f, 0.689f, 0.724f, 0.016f, 0.754f, 0.657f, 0.017f, 0.818f, 0.575f, 0.017f, 0.878f, 0.479f, 0.016f, 0.928f, 0.371f, 0.013f, 0.967f, 0.254f, 0.009f, 0.991f, 0.131f, 0.001f, 1f, 0.006f, -0.01f, 0.993f, -0.118f, -0.022f, 0.971f, -0.237f, -0.034f, 0.936f, -0.35f, -0.044f, 0.891f, -0.452f, -0.051f, 0.838f, -0.543f, -0.056f, 0.782f, -0.621f, -0.059f, 0.727f, -0.684f, -0.06f, 0.677f, -0.734f, -0.061f, 0.632f, -0.772f, -0.06f, 0.595f, -0.802f, -0.059f, 0.564f, -0.823f, -0.058f, 0.541f, -0.839f, -0.058f, 0.523f, -0.851f, -0.059f, 0.508f, -0.859f, -0.06f, 0.496f, -0.866f, -0.061f, 0.485f, -0.872f, -0.06f, 0.475f, -0.878f, -0.057f, 0.468f, -0.882f, -0.048f, 0.464f, -0.885f, -0.03f, 0.466f, -0.884f, 0.005f, 0.48f, -0.877f, 0.062f, 0.516f, -0.854f, 0.145f, 0.583f, -0.799f, 0.249f, 0.686f, -0.684f, 0.354f, 0.808f, -0.471f, 0.419f, 0.898f, -0.137f, 0.392f, 0.874f, 0.289f, 0.25f, 0.678f, 0.691f, 0.044f, 0.359f, 0.932f, -0.141f, 0.041f, 0.989f, -0.259f, -0.203f, 0.944f, -0.316f, -0.371f, 0.873f, -0.336f, -0.482f, 0.809f, -0.341f, -0.554f, 0.759f, -0.343f, -0.597f, 0.725f, -0.342f, -0.619f, 0.707f, -0.343f, -0.624f, 0.702f, -0.347f, -0.616f, 0.708f, -0.355f, -0.598f, 0.719f, -0.365f, -0.575f, 0.732f, -0.377f, -0.549f, 0.746f, -0.389f, -0.523f, 0.758f, -0.401f, -0.497f, 0.769f, -0.411f, -0.474f, 0.779f, -0.418f, -0.453f, 0.787f, -0.425f, -0.437f, 0.793f, -0.431f, -0.423f, 0.797f, -0.436f, -0.413f, 0.8f, -0.439f, -0.406f, 0.801f, -0.442f, -0.402f, 0.802f } };
+            A[2] = new AtkClip { a = 10011, dur = 0.76f, cut0 = 0.41f, cut1 = 0.56f, kt = new[] { 0f, 0.32f, 0.59f, 0.76f }, kf = new[] { 2f, 35f, 53f, 64f },
+                blade = new[] { 0.003f, 0.412f, 0.911f, 0.003f, 0.417f, 0.909f, 0.005f, 0.425f, 0.905f, 0.009f, 0.438f, 0.899f, 0.015f, 0.456f, 0.89f, 0.022f, 0.481f, 0.877f, 0.031f, 0.515f, 0.857f, 0.04f, 0.557f, 0.83f, 0.048f, 0.607f, 0.793f, 0.056f, 0.664f, 0.745f, 0.063f, 0.728f, 0.683f, 0.069f, 0.792f, 0.606f, 0.073f, 0.855f, 0.514f, 0.076f, 0.91f, 0.407f, 0.079f, 0.955f, 0.285f, 0.082f, 0.985f, 0.152f, 0.089f, 0.996f, 0.011f, 0.1f, 0.986f, -0.132f, 0.117f, 0.955f, -0.271f, 0.137f, 0.906f, -0.401f, 0.158f, 0.843f, -0.515f, 0.176f, 0.771f, -0.612f, 0.191f, 0.696f, -0.692f, 0.202f, 0.62f, -0.758f, 0.21f, 0.544f, -0.813f, 0.215f, 0.471f, -0.856f, 0.214f, 0.403f, -0.89f, 0.206f, 0.34f, -0.918f, 0.189f, 0.281f, -0.941f, 0.162f, 0.225f, -0.961f, 0.126f, 0.172f, -0.977f, 0.082f, 0.122f, -0.989f, 0.031f, 0.072f, -0.997f, -0.024f, 0.018f, -1f, -0.089f, -0.046f, -0.995f, -0.17f, -0.12f, -0.978f, -0.275f, -0.203f, -0.94f, -0.407f, -0.286f, -0.868f, -0.562f, -0.358f, -0.745f, -0.727f, -0.408f, -0.551f, -0.867f, -0.419f, -0.269f, -0.925f, -0.368f, 0.089f, -0.859f, -0.236f, 0.455f, -0.684f, -0.026f, 0.729f, -0.472f, 0.234f, 0.85f, -0.3f, 0.495f, 0.816f, -0.204f, 0.706f, 0.678f, -0.173f, 0.842f, 0.51f, -0.178f, 0.913f, 0.368f, -0.194f, 0.942f, 0.274f, -0.203f, 0.953f, 0.226f, -0.194f, 0.958f, 0.211f, -0.17f, 0.961f, 0.217f, -0.141f, 0.962f, 0.234f, -0.115f, 0.96f, 0.255f, -0.096f, 0.957f, 0.275f, -0.082f, 0.953f, 0.292f, -0.073f, 0.949f, 0.307f, -0.069f, 0.946f, 0.316f, -0.066f, 0.945f, 0.322f, -0.065f, 0.943f, 0.325f, -0.063f, 0.943f, 0.328f, -0.061f, 0.942f, 0.331f, -0.059f, 0.941f, 0.333f, -0.057f, 0.941f, 0.334f, -0.057f, 0.942f, 0.332f, -0.059f, 0.943f, 0.328f, -0.06f, 0.944f, 0.326f } };
+            A[3] = A[1].Mirrored(); A[4] = A[2].Mirrored();
+            A[5] = new AtkClip { proc = true, dur = 0.66f, cut0 = 0.26f, cut1 = 0.4f, k = new[] {
+                new ProcKey(0f, V(0.25f, -0.8f, 0.3f), V(0.1f, -0.2f, 0.97f), V(-0.3f, -0.6f, 0.7f), V(0.25f, 0.05f, 0.96f), V(0, 0.03f, 1), 0, 0, 0, 0),
+                new ProcKey(0.2f, V(0.3f, -0.55f, -0.75f), V(0.05f, 0.05f, 1), V(-0.1f, -0.5f, 0.85f), V(0.45f, 0.05f, 0.9f), V(0, 0.02f, 1), 0.6f, -0.05f, -0.07f, 0.04f),
+                new ProcKey(0.32f, V(0.1f, -0.15f, 0.98f), V(0, -0.02f, 1), V(-0.25f, -0.35f, 0.9f), V(0.3f, -0.1f, 0.95f), V(0, -0.04f, 1), -0.5f, 0.3f, 0.2f, 0.1f),
+                new ProcKey(0.42f, V(0.1f, -0.15f, 0.98f), V(0, -0.02f, 1), V(-0.25f, -0.35f, 0.9f), V(0.3f, -0.1f, 0.95f), V(0, -0.04f, 1), -0.45f, 0.26f, 0.17f, 0.09f),
+                new ProcKey(0.66f, V(0.25f, -0.8f, 0.3f), V(0.1f, -0.2f, 0.97f), V(-0.3f, -0.6f, 0.7f), V(0.25f, 0.05f, 0.96f), V(0, 0.03f, 1), 0, 0, 0, 0) } };
+            A[6] = new AtkClip { proc = true, around = true, dur = 0.86f, cut0 = 0.2f, cut1 = 0.7f, spin0 = 0.12f, spin1 = 0.74f, k = new[] {
+                new ProcKey(0f, V(0.3f, -0.7f, 0.4f), V(0.3f, -0.1f, 0.9f), V(-0.3f, -0.6f, 0.7f), V(0.2f, 0, 0.98f), V(0.2f, 0.05f, 0.98f), 0, 0, 0, 0),
+                new ProcKey(0.14f, V(0.75f, -0.3f, -0.4f), V(0.95f, 0.05f, 0.1f), V(-0.05f, -0.45f, 0.88f), V(0.7f, 0.05f, 0.7f), V(0.95f, 0.08f, -0.3f), 0.55f, 0.05f, 0, 0.05f),
+                new ProcKey(0.4f, V(0.85f, -0.2f, 0.3f), V(0.9f, 0, 0.42f), V(-0.1f, -0.4f, 0.9f), V(0.6f, 0, 0.8f), V(0.92f, 0.02f, 0.38f), 0.1f, 0.12f, 0, 0.09f),
+                new ProcKey(0.72f, V(0.7f, -0.3f, 0.6f), V(0.6f, -0.05f, 0.8f), V(-0.2f, -0.45f, 0.87f), V(0.4f, 0, 0.9f), V(0.75f, -0.05f, 0.66f), -0.35f, 0.1f, 0, 0.06f),
+                new ProcKey(0.86f, V(0.3f, -0.7f, 0.4f), V(0.3f, -0.1f, 0.9f), V(-0.3f, -0.6f, 0.7f), V(0.2f, 0, 0.98f), V(0.2f, 0.05f, 0.98f), 0, 0, 0, 0) } };
+            return A;
+        }
+        // which attacks a weapon has
+        static int[] AttackList(string w)
+        {
+            return w == "shield" ? new[] { 1, 2 } : w == "spear" ? new[] { 5, 1, 6, 5, 3 } : w == "staff" ? new[] { 1, 6, 2, 3, 4 } : new[] { 1, 2, 3, 4 };
+        }
+        AtkClip Clip => ATTACKS[atkType];
         // guard with the weapon alone (motion capture) - both hands come up in front of the face, the knees give
         const int GUARD_A = 10079, GUARD_N = 22; const float GUARD_Y0 = 0.09f;
-        const float ATK_IN = 0.09f, ATK_OUT = 0.2f;
-        float atkW, grdW, ovW, atkFr; Quaternion[] atkQ;
+        const float ATK_IN = 0.09f, ATK_OUT = 0.2f, CHAIN_T0 = 0.07f, CHAIN_BLEND = 0.2f; const int STANCE_FRAME = 2;
+        float atkW, grdW, stW, ovW, atkFr, atkMix = 1; Quaternion[] atkQ, atkQ2;
+        public float spinYaw; public bool atkHeld; bool atkQueued;
+        int fromBase = -1; float fromFr; AtkClip fromC;
+        bool TwoHanded => ch.cfg.weapon != "shield" && ch.cfg.weapon != "none";
         static float Sm(float x) { x = Mathf.Clamp01(x); return x * x * (3 - 2 * x); }
-        // lays the cut over the pose from locomotion: the whole body when standing, from the waist up when moving
-        void AttackLayer(float dt)
+        static float CR(float a0, float a1, float a2, float a3, float u) { return 0.5f * (2 * a1 + (a2 - a0) * u + (2 * a0 - 5 * a1 + 4 * a2 - a3) * u * u + (3 * a1 - a0 - 3 * a2 + a3) * u * u * u); }
+        static Vector3 CR(Vector3 a0, Vector3 a1, Vector3 a2, Vector3 a3, float u) { return new Vector3(CR(a0.x, a1.x, a2.x, a3.x, u), CR(a0.y, a1.y, a2.y, a3.y, u), CR(a0.z, a1.z, a2.z, a3.z, u)); }
+        // lays a captured pose over the pose from locomotion: the whole body when standing, from the waist up when moving
+        void Lay(Quaternion[] Q, Vector3 aro, float w, bool yAbs)
         {
-            atkW = 0; grdW = 0; ovW = 0;
-            int nbG = MotionDB.nb; if (atkQ == null) atkQ = new Quaternion[nbG];
-            if (guard > 0.01f && ch.cfg.weapon != "shield" && limbs[2])
-            {
-                Vector3 gro = Vector3.zero; SamplePose(GUARD_A + guard * (GUARD_N - 1), atkQ, ref gro, null);
-                float gl = guard * (1 - wWalk);
-                for (int k = 0; k < nbG; k++) { string n = MotionDB.bones[k]; outQ[k] = Quaternion.Slerp(outQ[k], atkQ[k], n == "root" || n.Contains("leg") || n.Contains("foot") ? gl : guard); }
-                ro += new Vector3(gro.x, gro.y - GUARD_Y0, gro.z) * gl;
-                grdW = guard; ovW = guard;
-            }
-            if (!Attacking || !limbs[2]) return;
-            atkT += dt; var C = Clip; float t = Mathf.Min(atkT, C.dur); int i = 0; while (i < C.kt.Length - 2 && t > C.kt[i + 1]) i++;
-            atkFr = Mathf.Lerp(C.kf[i], C.kf[i + 1], Mathf.Clamp01((t - C.kt[i]) / (C.kt[i + 1] - C.kt[i])));
-            float w = Mathf.Min(Sm(t / ATK_IN), Sm((C.dur - t) / ATK_OUT));
-            int nb = MotionDB.nb;
-            Vector3 aro = Vector3.zero; SamplePose(C.a + (ClipMirror ? MotionDB.n : 0) + atkFr, atkQ, ref aro, null);
             float wl = w * (1 - wWalk); bool shield = ch.cfg.weapon == "shield";
-            for (int k = 0; k < nb; k++)
+            for (int k = 0; k < MotionDB.nb; k++)
             {
                 string n = MotionDB.bones[k]; float wk = w;
                 if (n == "root" || n.Contains("leg") || n.Contains("foot")) wk = wl;
                 else if (shield && n.EndsWith(".L")) wk = 0;               // the shield arm keeps the shield up
-                outQ[k] = Quaternion.Slerp(outQ[k], atkQ[k], wk);
+                outQ[k] = Quaternion.Slerp(outQ[k], Q[k], wk);
             }
-            ro = Vector3.Lerp(ro, aro, wl);
+            ro.x += (aro.x - ro.x) * wl; ro.z += (aro.z - ro.z) * wl; ro.y += yAbs ? (aro.y - ro.y) * wl : aro.y * wl;
+        }
+        // the layers over locomotion: the two-handed fighting stance, the guard, the cut
+        void AttackLayer(float dt)
+        {
+            atkW = 0; grdW = 0; stW = 0; ovW = 0; spinYaw = 0;
+            int nb = MotionDB.nb; if (atkQ == null) { atkQ = new Quaternion[nb]; atkQ2 = new Quaternion[nb]; }
+            // stance: with a weapon in both hands the body takes the guard the cuts start from (hilt low in front, point forward)
+            if (stance > 0.01f && TwoHanded && limbs[2]) { Vector3 s0 = Vector3.zero; SamplePose(ATTACKS[1].a + STANCE_FRAME, atkQ, ref s0, null); Lay(atkQ, s0, stance, true); stW = stance; }
+            if (guard > 0.01f && ch.cfg.weapon != "shield" && limbs[2])
+            {
+                Vector3 gro = Vector3.zero; SamplePose(GUARD_A + guard * (GUARD_N - 1), atkQ, ref gro, null);
+                Lay(atkQ, new Vector3(gro.x, gro.y - GUARD_Y0, gro.z), guard, false); grdW = guard;
+            }
+            ovW = Mathf.Max(stW, grdW);
+            if (!Attacking || !limbs[2]) { atkQueued = false; return; }
+            // the next cut follows straight on if the button is held or was pressed again: no return to the stance in between
+            if (atkT >= atkDur - ATK_OUT && (atkQueued || atkHeld))
+            {
+                var fc = Clip; float ffr = atkFr; atkQueued = false; atkType = 0;
+                StartAttack();
+                if (atkType != 0 && !fc.proc && !Clip.proc) { fromC = fc; fromBase = fc.a + (fc.mirror ? MotionDB.n : 0); fromFr = ffr; atkT = CHAIN_T0; }
+                if (atkType == 0) return;
+            }
+            atkT += dt; var C = Clip; float t = Mathf.Min(atkT, C.dur);
+            float w = Mathf.Min(fromBase >= 0 ? 1 : Sm(t / ATK_IN), Sm((C.dur - t) / ATK_OUT));
             atkW = w; ovW = Mathf.Max(ovW, w);
+            if (C.spin0 >= 0) { float u = Mathf.Clamp01((t - C.spin0) / (C.spin1 - C.spin0)); spinYaw = u >= 1 ? 0 : Mathf.PI * 2 * u * u * u * (u * (u * 6 - 15) + 10); }
+            if (C.proc) return;                              // spear and staff moves are posed on the bones in Combat()
+            int i = 0; while (i < C.kt.Length - 2 && t > C.kt[i + 1]) i++;
+            atkFr = Mathf.Lerp(C.kf[i], C.kf[i + 1], Mathf.Clamp01((t - C.kt[i]) / (C.kt[i + 1] - C.kt[i])));
+            Vector3 aro = Vector3.zero; SamplePose(C.a + (C.mirror ? MotionDB.n : 0) + atkFr, atkQ, ref aro, null);
+            atkMix = 1;
+            if (fromBase >= 0)
+            {   // out of the end of the previous cut into this one
+                float m = Sm((t - CHAIN_T0) / CHAIN_BLEND); atkMix = m;
+                if (m < 1) { Vector3 r2 = Vector3.zero; SamplePose(fromBase + fromFr, atkQ2, ref r2, null); for (int k = 0; k < nb; k++) atkQ[k] = Quaternion.Slerp(atkQ2[k], atkQ[k], m); aro = Vector3.Lerp(r2, aro, m); }
+            }
+            Lay(atkQ, aro, w, true);
         }
         public const float COMBAT_HOLD = 3f;      // seconds the fighting stance is kept after the last cut, block or hit
         public float combatT; float stance, stanceFeet;
@@ -679,22 +734,25 @@ namespace AsciiHero
         public readonly HashSet<int> atkHits = new HashSet<int>();
         /// the edge is travelling: this is when the cut can land
         public bool Cutting => Attacking && atkT > Clip.cut0 && atkT < Clip.cut1;
+        public float Reach => Attacking && Clip.proc ? 2.3f : 1.75f;
+        public bool Around => Attacking && Clip.around;
         public float Guard => guard;
         /// points the blade passed through this frame (tip and mid-blade): the game turns them into a streak in the air
         public readonly List<Vector3> trail = new List<Vector3>();
         int atkType, lastAtk; float atkT = 9, atkDur; float guard; public bool guardHeld;
         public bool Attacking => atkType != 0 && atkT < atkDur;
-        /// starts a cut if the previous one is over (the cooldown is the animation itself). Standing: a random cut, then
-        /// they alternate. Running: the cut that continues the arm's motion - sword arm behind -> 1, in front -> 2.
+        /// starts an attack if none is running (the cooldown is the animation itself); pressed during one, the next is chained on.
+        /// Standing: any attack of the weapon but the last one. Running with a blade: sword arm behind -> an overhead cut, in front -> a drawn one.
         public bool StartAttack()
         {
-            if (Attacking || !limbs[2]) return false;
-            // sword alone: four cuts (two and their mirror images); with a shield: two. Standing: any but the last one.
-            // Running: sword arm behind -> an overhead cut, in front -> a drawn one.
-            bool four = ch.cfg.weapon != "shield"; int type;
-            if (Velocity.magnitude > 0.5f) type = (Mathf.Cos(phase * Mathf.PI * 2) > 0 ? 2 : 1) + (four && UnityEngine.Random.value < 0.5f ? 2 : 0);
-            else { int cnt = four ? 4 : 2; do type = UnityEngine.Random.Range(1, cnt + 1); while (type == lastAtk); }
-            atkHits.Clear(); combatT = COMBAT_HOLD;
+            if (Attacking) { atkQueued = true; return false; }
+            if (!limbs[2]) return false;
+            string Wn = ch.cfg.weapon; var list = new List<int>(AttackList(Wn)); int type;
+            if (Velocity.magnitude > 0.5f && Wn != "spear" && Wn != "staff")
+            { bool over = Mathf.Cos(phase * Mathf.PI * 2) <= 0; list.RemoveAll(x => (x % 2 == 1) != over); }
+            else if (list.Count > 1) list.RemoveAll(x => x == lastAtk);
+            type = list[UnityEngine.Random.Range(0, list.Count)];
+            atkHits.Clear(); combatT = COMBAT_HOLD; fromBase = -1;
             lastAtk = type; atkType = type; atkT = 0; atkDur = Clip.dur;
             return true;
         }
@@ -711,6 +769,15 @@ namespace AsciiHero
         }
         // the whole trunk winds up and unwinds; the head keeps looking ahead
         void TwistRight(float a) { Rot("spine05", Vector3.up, a * 0.4f); Rot("spine03", Vector3.up, a * 0.6f); Rot("neck01", Vector3.up, -a * 0.45f); }
+        // The back is rounded forward and the pelvis tucked under (no hollow lower back, no seat pushed out): a little at
+        // rest, clearly in the run and in the fighting stance. The head is brought back up so the eyes stay on the path.
+        void SpineFix()
+        {
+            Vector3 X = ch.go.transform.rotation * Vector3.right;
+            float f = (0.07f + 0.2f * wRun + 0.06f * sprint + 0.12f * stance) * (1 - 0.6f * atkW);
+            Rot("root", X, -0.35f * f); Rot("upperleg01.L", X, 0.35f * f); Rot("upperleg01.R", X, 0.35f * f);
+            Rot("spine05", X, 0.6f * f); Rot("spine03", X, 0.75f * f); Rot("neck01", X, -0.5f * f); Rot("head", X, -0.3f * f);
+        }
         void Combat(float dt)
         {
             Quaternion gq = ch.go.transform.rotation;
@@ -719,27 +786,46 @@ namespace AsciiHero
             if (guardHeld) combatT = COMBAT_HOLD;
             combatT = Mathf.Max(0, combatT - dt);
             stance += ((combatT > 0 ? 1f : 0f) - stance) * (1 - Mathf.Exp(-dt * LN2 / 0.14f));
-            float st = stance * (1 - ovW), still = 1 - wWalk; stanceFeet = st * still;
+            SpineFix();
+            string Wc = ch.cfg.weapon; bool two = TwoHanded;
+            // (with a weapon in both hands the stance is the captured guard, see AttackLayer; the posed one is for shield and bare hands)
+            float st = two ? 0 : stance * (1 - ovW), still = 1 - wWalk; stanceFeet = st * still;
             if (st > 0.01f)
             {
                 Vector3 SX = gq * Vector3.right, SZ = gq * Vector3.forward;
                 var sp0 = H.root.localPosition; sp0.y -= (0.1f * still + 0.02f) * st; H.root.localPosition = sp0;
-                // the whole trunk tips forward from the hips (the legs keep their place), then the back rounds over
-                Rot("root", SX, 0.13f * st); Rot("upperleg01.L", SX, -0.13f * st); Rot("upperleg01.R", SX, -0.13f * st);
                 float hunch = st * (0.6f + 0.4f * still);
-                Rot("spine05", SX, 0.15f * hunch); Rot("spine03", SX, 0.2f * hunch); Rot("neck01", SX, -0.3f * hunch);
+                Rot("spine05", SX, 0.1f * hunch); Rot("spine03", SX, 0.12f * hunch); Rot("neck01", SX, -0.15f * hunch);
                 for (int si = 0; si < 2; si++)
                 {
                     if (!limbs[1 + si]) continue; float sg = si == 0 ? -1f : 1f;
                     Rot("upperarm01." + SIDES[si], SZ, sg * 0.24f * st); Rot("lowerarm01." + SIDES[si], SX, -0.3f * st * still);
                 }
             }
+            float free = (1 - atkW) * (1 - grdW);
+            // two-handed stance: the point is carried forward, 12 degrees above level
+            if (two && stW > 0.01f) BladeW(gq * V(0, 0.21f, 0.98f), stW * free);
+            float calm = free * (1 - stW);
+            if (Wc == "spear" && calm > 0.01f) BladeW(gq * V(0, 0.08f, 1), calm);            // carried level at its middle, point ahead
+            if (Wc == "staff")
+            {
+                // walking staff: upright, its foot on the ground, set down again with every stride; when running (or fighting)
+                // the hand slides to the middle and it is carried level like a spear
+                float th = 0.3f * Mathf.Sin(phase * Mathf.PI * 2) * wWalk * (1 - wRun);
+                Vector3 dir = V(0, Mathf.Cos(th) * (1 - wRun) + 0.1f * wRun, Mathf.Sin(th) * (1 - wRun) + wRun);
+                if (calm > 0.01f)
+                {
+                    BladeW(gq * dir, calm); float up = calm * (1 - wRun);
+                    AimW("upperarm01.R", "lowerarm01.R", gq * V(0.2f, -0.82f, 0.45f), up); AimW("lowerarm01.R", "wrist.R", gq * V(0.05f, 0.3f, 0.95f), up); BladeW(gq * dir, calm);
+                }
+                if (ch.weaponSlide != null) ch.weaponSlide.localPosition = new Vector3(0, -0.5f + 0.5f * Mathf.Max(wRun, 1 - calm), 0);
+            }
             // in the stance the shield is carried out in front of the body
-            if (st > 0.01f && ch.cfg.weapon == "shield" && limbs[1])
+            if (st > 0.01f && Wc == "shield" && limbs[1])
             { AimW("upperarm01.L", "lowerarm01.L", gq * V(-0.28f, -0.72f, 0.63f), 0.85f * st); AimW("lowerarm01.L", "wrist.L", gq * V(0.3f, 0.2f, 0.93f), 0.85f * st); }
             // guard
             guard += ((guardHeld ? 1f : 0f) - guard) * (1 - Mathf.Exp(-dt * LN2 / 0.06f));
-            float gw = guard; bool shield = ch.cfg.weapon == "shield";
+            float gw = guard; bool shield = Wc == "shield";
             if (gw > 0.01f)
             {
                 if (shield) { var rp = H.root.localPosition; rp.y -= 0.05f * gw; H.root.localPosition = rp; }
@@ -758,13 +844,39 @@ namespace AsciiHero
                 }
                 else if (limbs[2]) BladeW(gq * V(-0.8f, 0.55f, 0.2f), gw);        // the body comes from the captured guard; the blade is laid across in front of the face
             }
-            // cut: the body is driven by the captured motion (AttackLayer); here the blade is set in the hand and leaves its streak
+            // attack: a cut is driven by the captured motion (AttackLayer) and only the blade is set here; a spear or staff
+            // move is posed from its keys. Either way the edge leaves a streak in the air.
             plantW = 0; if (!Attacking || atkW <= 0) return;
-            var C = Clip; int nfb = C.blade.Length / 3, f0 = Mathf.Min(nfb - 1, Mathf.FloorToInt(atkFr)), f1 = Mathf.Min(nfb - 1, f0 + 1); float u = atkFr - f0;
+            var C = Clip; float w = atkW;
+            if (C.proc)
+            {
+                var K = C.k; float t = Mathf.Min(atkT, C.dur); int i = 0; while (i < K.Length - 2 && t > K[i + 1].t) i++;
+                float u = Mathf.Clamp01((t - K[i].t) / (K[i + 1].t - K[i].t));
+                ProcKey p0 = K[Mathf.Max(i - 1, 0)], p1 = K[i], p2 = K[i + 1], p3 = K[Mathf.Min(i + 2, K.Length - 1)];
+                float stl = 1 - wWalk * 0.6f; Vector3 X = gq * Vector3.right;
+                // the legs and hips carry it: the pelvis goes forward and down into the lunge, the trunk turns and leans behind the shaft
+                var rp = H.root.localPosition; rp.z += CR(p0.fwd, p1.fwd, p2.fwd, p3.fwd, u) * w * stl; rp.y -= CR(p0.drop, p1.drop, p2.drop, p3.drop, u) * w; H.root.localPosition = rp;
+                TwistRight(CR(p0.yaw, p1.yaw, p2.yaw, p3.yaw, u) * w);
+                float pitch = CR(p0.pitch, p1.pitch, p2.pitch, p3.pitch, u) * w * 0.5f; Rot("spine05", X, pitch); Rot("spine03", X, pitch);
+                AimW("upperarm01.R", "lowerarm01.R", gq * CR(p0.ua, p1.ua, p2.ua, p3.ua, u), w); AimW("lowerarm01.R", "wrist.R", gq * CR(p0.fa, p1.fa, p2.fa, p3.fa, u), w);
+                if (limbs[1]) { AimW("upperarm01.L", "lowerarm01.L", gq * CR(p0.la, p1.la, p2.la, p3.la, u), w); AimW("lowerarm01.L", "wrist.L", gq * CR(p0.lf, p1.lf, p2.lf, p3.lf, u), w); }
+                BladeW(gq * CR(p0.sh, p1.sh, p2.sh, p3.sh, u), w);
+            }
+            else
+            {
+                Vector3 bd = BladeOf(C, atkFr);
+                if (fromBase >= 0 && atkMix < 1) bd = Vector3.Lerp(BladeOf(fromC, fromFr), bd, atkMix);
+                BladeW(gq * bd, w);
+            }
+            float tipY = Wc == "spear" ? 1.05f : Wc == "staff" ? 0.9f : 0.8f;
+            if (ch.weapon != null && atkT > C.cut0 - 0.05f && atkT < C.cut1 + 0.03f) { trail.Add(ch.weapon.TransformPoint(0, tipY, 0)); trail.Add(ch.weapon.TransformPoint(0, tipY * 0.55f, 0)); }
+        }
+        static Vector3 BladeOf(AtkClip C, float fr)
+        {
+            int nfb = C.blade.Length / 3, f0 = Mathf.Min(nfb - 1, Mathf.FloorToInt(fr)), f1 = Mathf.Min(nfb - 1, f0 + 1); float u = fr - f0;
             Vector3 bd = Vector3.Lerp(new Vector3(C.blade[f0 * 3], C.blade[f0 * 3 + 1], C.blade[f0 * 3 + 2]), new Vector3(C.blade[f1 * 3], C.blade[f1 * 3 + 1], C.blade[f1 * 3 + 2]), u);
-            if (ClipMirror) bd.x = -bd.x;
-            BladeW(gq * bd, atkW);
-            if (ch.weapon != null && atkT > C.cut0 - 0.05f && atkT < C.cut1 + 0.03f) { trail.Add(ch.weapon.TransformPoint(0, 0.8f, 0)); trail.Add(ch.weapon.TransformPoint(0, 0.45f, 0)); }
+            if (C.mirror) bd.x = -bd.x;
+            return bd;
         }
         readonly Vector3[] plant = new Vector3[2]; float plantW;
         /// moves the simulated position (dash) without touching the velocity
