@@ -16,6 +16,7 @@ Shader "AsciiHero/Lit"
         _AsciiActor ("Actor boost", Float) = 0
         _GlyphSmoke ("Smoke body", Float) = 0
         _GlyphCell ("Glyph cell (m)", Vector) = (0.03, 0.05, 0, 0)
+        _Cloth ("Cloth", Float) = 0
         [Enum(UnityEngine.Rendering.CullMode)] _Cull ("Cull", Float) = 2
     }
     SubShader
@@ -36,12 +37,25 @@ Shader "AsciiHero/Lit"
             float _AsciiActor;
             float _GlyphSmoke;
             float4 _GlyphCell;
+            float _Cloth;
         CBUFFER_END
         TEXTURE2D(_MainTex); SAMPLER(sampler_MainTex);
         float _AsciiNDPass;
         float4 _DashShift;   // per renderer (world): during the dash the armour pieces lag behind the body
         float4 _DashSpin;    // per renderer: xyz = axis, w = angle; the piece tumbles about _DashPivot while it flies
         float4 _DashPivot;
+        // cloth (the robe): the hem trails behind the motion and flutters; in the dash flight it billows harder
+        float _ClothDash;      // per renderer (MaterialPropertyBlock)
+        float4 _AsciiHeroVel; float _AsciiTime;
+        float3 ClothWS(float3 ws, float3 os)
+        {
+            if (_Cloth < 0.5) return ws;
+            float w = saturate((1.05 - os.y) / 0.8); w *= w;      // the hem moves most, the shoulders hardly at all
+            float sp = length(_AsciiHeroVel.xz), t = _AsciiTime, f = 1.0 + 0.8 * _ClothDash;
+            float amp = (0.012 + 0.016 * sp) * (1.0 + 4.0 * _ClothDash);
+            float3 fl = float3(sin(t * 7.0 * f + os.y * 11.0 + os.x * 6.0), 0.35 * sin(t * 5.3 * f + os.x * 9.0), cos(t * 6.3 * f + os.y * 9.0 + os.z * 7.0));
+            return ws - _AsciiHeroVel.xyz * (0.08 * w) + fl * amp * w + float3(0, 0.03 * w * min(sp, 3.0) / 3.0, 0);
+        }
         float3 DashWS(float3 ws)
         {
             if (_DashSpin.w != 0.0)
@@ -85,7 +99,7 @@ Shader "AsciiHero/Lit"
             {
                 Varyings o;
                 UNITY_SETUP_INSTANCE_ID(i);
-                float3 pWS = DashWS(TransformObjectToWorld(i.positionOS.xyz));
+                float3 pWS = DashWS(ClothWS(TransformObjectToWorld(i.positionOS.xyz), i.positionOS.xyz));
                 VertexNormalInputs n = GetVertexNormalInputs(i.normalOS);
                 o.positionCS = TransformWorldToHClip(pWS);
                 o.positionWS = pWS;
@@ -154,7 +168,7 @@ Shader "AsciiHero/Lit"
             Varyings vert (Attributes i)
             {
                 Varyings o;
-                float3 positionWS = DashWS(TransformObjectToWorld(i.positionOS.xyz));
+                float3 positionWS = DashWS(ClothWS(TransformObjectToWorld(i.positionOS.xyz), i.positionOS.xyz));
                 float3 normalWS = TransformObjectToWorldNormal(i.normalOS);
             #if _CASTING_PUNCTUAL_LIGHT_SHADOW
                 float3 lightDirectionWS = normalize(_LightPosition - positionWS);
@@ -186,7 +200,7 @@ Shader "AsciiHero/Lit"
             #pragma fragment frag
             struct Attributes { float4 positionOS : POSITION; };
             struct Varyings { float4 positionCS : SV_POSITION; };
-            Varyings vert (Attributes i) { Varyings o; o.positionCS = TransformWorldToHClip(DashWS(TransformObjectToWorld(i.positionOS.xyz))); return o; }
+            Varyings vert (Attributes i) { Varyings o; o.positionCS = TransformWorldToHClip(DashWS(ClothWS(TransformObjectToWorld(i.positionOS.xyz), i.positionOS.xyz))); return o; }
             half frag (Varyings i) : SV_Target { return i.positionCS.z; }
             ENDHLSL
         }
@@ -203,7 +217,7 @@ Shader "AsciiHero/Lit"
             #pragma fragment frag
             struct Attributes { float4 positionOS : POSITION; float3 normalOS : NORMAL; };
             struct Varyings { float4 positionCS : SV_POSITION; float3 normalWS : TEXCOORD0; };
-            Varyings vert (Attributes i) { Varyings o; o.positionCS = TransformWorldToHClip(DashWS(TransformObjectToWorld(i.positionOS.xyz))); o.normalWS = TransformObjectToWorldNormal(i.normalOS); return o; }
+            Varyings vert (Attributes i) { Varyings o; o.positionCS = TransformWorldToHClip(DashWS(ClothWS(TransformObjectToWorld(i.positionOS.xyz), i.positionOS.xyz))); o.normalWS = TransformObjectToWorldNormal(i.normalOS); return o; }
             half4 frag (Varyings i) : SV_Target { return half4(NormalizeNormalPerPixel(i.normalWS), 0); }
             ENDHLSL
         }

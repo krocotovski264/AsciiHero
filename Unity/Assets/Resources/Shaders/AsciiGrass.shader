@@ -23,6 +23,7 @@ Shader "AsciiHero/Grass"
             TEXTURE2D(_AsciiNDTex); SAMPLER(sampler_AsciiNDTex);
             float _AsciiRows, _AsciiExposure, _AsciiLinear, _AsciiDepthRef, _AsciiTime;
             float4 _AsciiHeroA, _AsciiHeroB;
+            float _AsciiGrassThin;     // settings: the share of blades that is not drawn (0 = all)
 
             struct Attributes { float4 positionOS : POSITION; float2 corner : TEXCOORD0; float2 seed : TEXCOORD1; };
             struct Varyings { float4 positionCS : SV_POSITION; float2 local : TEXCOORD0; float3 col : TEXCOORD1; float gi : TEXCOORD2; };
@@ -47,7 +48,7 @@ Shader "AsciiHero/Grass"
                 float4 nd = SAMPLE_TEXTURE2D_LOD(_AsciiNDTex, sampler_AsciiNDTex, suv, 0);
                 float sceneZ = nd.b > 1e-4 ? nd.b * 12.0 : 1e5;
                 float myZ = -pVS.z;
-                bool vis = myZ <= sceneZ + 0.3 && all(suv >= 0.0) && all(suv <= 1.0);
+                bool vis = myZ <= sceneZ + 0.3 && all(suv >= 0.0) && all(suv <= 1.0) && frac(s * 7.31) >= _AsciiGrassThin;
                 float lv = TransformWorldToViewDir(float3(lean.x, 0, lean.y), false).x;
                 o.gi = push > 0.8 ? 4.0 : (lv > 0.2 ? 2.0 : (lv < -0.2 ? 3.0 : 0.0));
                 float3 lit = SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, sampler_AsciiLitTex, suv, 0).rgb;
@@ -65,7 +66,8 @@ Shader "AsciiHero/Grass"
             {
                 float2 l = clamp(i.local, 0.03, 0.97);
                 float rows = max(_AsciiRows, 1.0);
-                float mk = SAMPLE_TEXTURE2D(_AsciiAtlas, sampler_AsciiAtlas, float2((i.gi + l.x) / 16.0, 1.0 - 13.0 / rows + l.y / rows)).r;   // row 12
+                float mk = SAMPLE_TEXTURE2D_BIAS(_AsciiAtlas, sampler_AsciiAtlas, float2((i.gi + l.x) / 16.0, 1.0 - 13.0 / rows + l.y / rows), -0.6).r;   // row 12
+                mk = saturate((mk - 0.22) * 1.9);
                 return half4(i.col * mk, 1);
             }
             ENDHLSL

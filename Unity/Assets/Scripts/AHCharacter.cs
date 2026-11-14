@@ -315,7 +315,7 @@ namespace AsciiHero
             if (W == "axe" || W == "spear" || W == "staff")
             {
                 g = Group("Holder"); g.SetParent(g0, false);
-                if (W == "axe") g.localRotation = Quaternion.Euler(0, 90, 0);
+                if (W == "axe") g.localRotation = Quaternion.Euler(0, -90, 0);
                 if (W == "spear") g.localPosition = new Vector3(0, -0.55f, 0);
                 if (W == "staff") { g.localPosition = new Vector3(0, -0.5f, 0); weaponSlide = g; }
             }

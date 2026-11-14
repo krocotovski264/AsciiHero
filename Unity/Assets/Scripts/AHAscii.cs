@@ -17,8 +17,10 @@ namespace AsciiHero
     public class AsciiRenderer
     {
         public int cols, rows, W, H;
-        public float exposure = 1f, actorBoost = 0f, bloom = 0.55f;
+        public float exposure = 1f, actorBoost = 0f, bloom = 0.32f;
         public bool surfaceGlyphs = true;
+        /// high quality: the lit colour the characters take their brightness from is rendered at full resolution (else half)
+        public bool fullLit; bool builtFull;
         /// diagnostics: draw the plain 3D scene straight to the screen (no ASCII)
         public bool plain;
         bool builtSurface, builtPlain;
@@ -122,14 +124,14 @@ namespace AsciiHero
                 return;
             }
             if (builtPlain) { builtPlain = false; cam.rect = new Rect(0, 0, 1, 1); cam.depth = -3; ndCam.enabled = true; final = null; }
-            if (w == W && h == H && c == cols && r == rows && final != null && builtSurface == surfaceGlyphs) { SyncND(); return; }
-            W = w; H = h; cols = c; rows = r; builtSurface = surfaceGlyphs;
+            if (w == W && h == H && c == cols && r == rows && final != null && builtSurface == surfaceGlyphs && builtFull == fullLit) { SyncND(); return; }
+            W = w; H = h; cols = c; rows = r; builtSurface = surfaceGlyphs; builtFull = fullLit;
             cam.targetTexture = null; ndCam.targetTexture = null; glyphCam.targetTexture = null;
             Free(ref rtCol); Free(ref rtND); Free(ref rtAscii); Free(ref rtB1); Free(ref rtB2); Free(ref final); Free(ref rtFull);
             var half = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGBHalf) ? RenderTextureFormat.ARGBHalf : RenderTextureFormat.ARGB32;
             if (surfaceGlyphs)
             {
-                int hw = (W + 1) / 2, hh = (H + 1) / 2;
+                int hw = fullLit ? W : (W + 1) / 2, hh = fullLit ? H : (H + 1) / 2;
                 rtCol = RT(hw, hh, half, FilterMode.Bilinear, 24, RenderTextureReadWrite.Linear);
                 rtND = RT(hw, hh, half, FilterMode.Point, 24, RenderTextureReadWrite.Linear);
                 // a camera target must have a depth buffer in URP's render graph, even though glyphs don't test depth

@@ -340,7 +340,7 @@ function updateDummies(dt, t) {
     const dx = pos.x - d.x, dz = pos.z - d.z, dist = Math.hypot(dx, dz);
     // the hero's cut lands once, while the edge is travelling, on a dummy in reach and in front of him
     const a = player.atk;
-    if (a && a.t < a.dur && !a.hits.has(i) && a.t > ATTACKS[a.type].cut[0] && a.t < ATTACKS[a.type].cut[1] && dist < (ATTACKS[a.type].proc ? 2.3 : 1.75)) {
+    if (a && a.t < a.dur && !a.hits.has(i) && a.t > ATTACKS[a.type].cut[0] && a.t < ATTACKS[a.type].cut[1] && dist < (ATTACKS[a.type].reach || (ATTACKS[a.type].proc ? 2.3 : 1.75))) {
       const fx = Math.sin(player.heading), fz = Math.cos(player.heading);
       if (ATTACKS[a.type].around || (-dx * fx - dz * fz) / Math.max(dist, 1e-3) > 0.3) { a.hits.add(i); dummyDamage(d, DUMMY_HIT); if (d.dead > 0) continue; }
     }
@@ -637,7 +637,7 @@ function frame(now) {
   if (fpsAcc > 1) { $('fps').textContent = Math.round(fpsN / fpsAcc) + ' fps · ' + (GLYPH.uMode.value > 0.5 ? GLYPH_STATS.count + ' симв.' : AR.cols + '×' + AR.rows); fpsAcc = 0; fpsN = 0; }
   requestAnimationFrame(frame);
 }
-window.__dbg = { damage, body, get dummies() { return loc && loc.dummies; }, doAttack, doDash, act, dash, ISO, debris, puffs, get loc() { return loc; }, cam, setCfg, enterWorld, leaveWorld, stick, get pos() { return pos; }, get player() { return player; }, get auto() { return autoRotate; }, set auto(v) { autoRotate = v; }, AR };
+window.__dbg = { ATTACKS, damage, body, get dummies() { return loc && loc.dummies; }, doAttack, doDash, act, dash, ISO, debris, puffs, get loc() { return loc; }, cam, setCfg, enterWorld, leaveWorld, stick, get pos() { return pos; }, get player() { return player; }, get auto() { return autoRotate; }, set auto(v) { autoRotate = v; }, AR };
 (async () => {
   try {
     await loadHuman(); await loadMocap();

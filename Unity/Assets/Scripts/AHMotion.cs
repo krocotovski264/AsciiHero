@@ -320,7 +320,7 @@ namespace AsciiHero
             {
                 if (map[k] < 0) continue;
                 // a cut takes the arms over completely (the shield arm keeps its pose)
-                float mk = mask[k]; if (!(shieldArm && MotionDB.bones[k].EndsWith(".L"))) mk *= 1 - ovW;
+                float mk = mask[k]; if (!(shieldArm && MotionDB.bones[k].EndsWith(".L"))) mk *= 1 - ovW; else mk *= 1 - bashW;
                 var q = outQ[k]; if (mk > 0) q = Quaternion.Slerp(q, baseQ[map[k]], mk);
                 B[map[k]].localRotation = q;
             }
@@ -635,13 +635,13 @@ namespace AsciiHero
         class ProcKey { public float t, yaw, pitch, fwd, drop; public Vector3 ua, fa, la, lf, sh;
             public ProcKey(float t, Vector3 ua, Vector3 fa, Vector3 la, Vector3 lf, Vector3 sh, float yaw, float pitch, float fwd, float drop)
             { this.t = t; this.ua = ua; this.fa = fa; this.la = la; this.lf = lf; this.sh = sh; this.yaw = yaw; this.pitch = pitch; this.fwd = fwd; this.drop = drop; } }
-        class AtkClip { public int a; public float dur, cut0, cut1, spin0 = -1, spin1; public float[] kt, kf, blade; public bool mirror, proc, around; public ProcKey[] k;
+        class AtkClip { public int a; public float dur, cut0, cut1, spin0 = -1, spin1, reach; public float[] kt, kf, blade; public bool mirror, proc, around, bash, grip2; public ProcKey[] k;
             public AtkClip Mirrored() { var m = (AtkClip)MemberwiseClone(); m.mirror = true; return m; } }
         static Vector3 V(float x, float y, float z) { return new Vector3(x, y, z); }
         static readonly AtkClip[] ATTACKS = MakeAttacks();
         static AtkClip[] MakeAttacks()
         {
-            var A = new AtkClip[7];
+            var A = new AtkClip[19];
             A[1] = new AtkClip { a = 9945, dur = 0.74f, cut0 = 0.4f, cut1 = 0.55f, kt = new[] { 0f, 0.3f, 0.57f, 0.74f }, kf = new[] { 2f, 32f, 52f, 62f },
                 blade = new[] { -0.003f, 0.417f, 0.909f, -0.003f, 0.425f, 0.905f, -0.003f, 0.438f, 0.899f, -0.001f, 0.458f, 0.889f, 0.002f, 0.486f, 0.874f, 0.006f, 0.524f, 0.851f, 0.01f, 0.572f, 0.82f, 0.013f, 0.628f, 0.778f, 0.015f, 0.689f, 0.724f, 0.016f, 0.754f, 0.657f, 0.017f, 0.818f, 0.575f, 0.017f, 0.878f, 0.479f, 0.016f, 0.928f, 0.371f, 0.013f, 0.967f, 0.254f, 0.009f, 0.991f, 0.131f, 0.001f, 1f, 0.006f, -0.01f, 0.993f, -0.118f, -0.022f, 0.971f, -0.237f, -0.034f, 0.936f, -0.35f, -0.044f, 0.891f, -0.452f, -0.051f, 0.838f, -0.543f, -0.056f, 0.782f, -0.621f, -0.059f, 0.727f, -0.684f, -0.06f, 0.677f, -0.734f, -0.061f, 0.632f, -0.772f, -0.06f, 0.595f, -0.802f, -0.059f, 0.564f, -0.823f, -0.058f, 0.541f, -0.839f, -0.058f, 0.523f, -0.851f, -0.059f, 0.508f, -0.859f, -0.06f, 0.496f, -0.866f, -0.061f, 0.485f, -0.872f, -0.06f, 0.475f, -0.878f, -0.057f, 0.468f, -0.882f, -0.048f, 0.464f, -0.885f, -0.03f, 0.466f, -0.884f, 0.005f, 0.48f, -0.877f, 0.062f, 0.516f, -0.854f, 0.145f, 0.583f, -0.799f, 0.249f, 0.686f, -0.684f, 0.354f, 0.808f, -0.471f, 0.419f, 0.898f, -0.137f, 0.392f, 0.874f, 0.289f, 0.25f, 0.678f, 0.691f, 0.044f, 0.359f, 0.932f, -0.141f, 0.041f, 0.989f, -0.259f, -0.203f, 0.944f, -0.316f, -0.371f, 0.873f, -0.336f, -0.482f, 0.809f, -0.341f, -0.554f, 0.759f, -0.343f, -0.597f, 0.725f, -0.342f, -0.619f, 0.707f, -0.343f, -0.624f, 0.702f, -0.347f, -0.616f, 0.708f, -0.355f, -0.598f, 0.719f, -0.365f, -0.575f, 0.732f, -0.377f, -0.549f, 0.746f, -0.389f, -0.523f, 0.758f, -0.401f, -0.497f, 0.769f, -0.411f, -0.474f, 0.779f, -0.418f, -0.453f, 0.787f, -0.425f, -0.437f, 0.793f, -0.431f, -0.423f, 0.797f, -0.436f, -0.413f, 0.8f, -0.439f, -0.406f, 0.801f, -0.442f, -0.402f, 0.802f } };
             A[2] = new AtkClip { a = 10011, dur = 0.76f, cut0 = 0.41f, cut1 = 0.56f, kt = new[] { 0f, 0.32f, 0.59f, 0.76f }, kf = new[] { 2f, 35f, 53f, 64f },
@@ -659,18 +659,44 @@ namespace AsciiHero
                 new ProcKey(0.4f, V(0.85f, -0.2f, 0.3f), V(0.9f, 0, 0.42f), V(-0.1f, -0.4f, 0.9f), V(0.6f, 0, 0.8f), V(0.92f, 0.02f, 0.38f), 0.1f, 0.12f, 0, 0.09f),
                 new ProcKey(0.72f, V(0.7f, -0.3f, 0.6f), V(0.6f, -0.05f, 0.8f), V(-0.2f, -0.45f, 0.87f), V(0.4f, 0, 0.9f), V(0.75f, -0.05f, 0.66f), -0.35f, 0.1f, 0, 0.06f),
                 new ProcKey(0.86f, V(0.3f, -0.7f, 0.4f), V(0.3f, -0.1f, 0.9f), V(-0.3f, -0.6f, 0.7f), V(0.2f, 0, 0.98f), V(0.2f, 0.05f, 0.98f), 0, 0, 0, 0) } };
+            // captured strikes for the spear, the long axe and the shield: lunging thrusts with the shaft along the striking arm,
+            // two-handed swings and chops of a long tool, a straight jab of the shield arm (edge first) and a backhand sweep (mirrored)
+            A[7] = new AtkClip { a = 10101, dur = 0.842f, cut0 = 0.362f, cut1 = 0.622f, reach = 2.3f, mirror = false, bash = false, grip2 = true, kt = new[] { 0f, 0.382f, 0.582f, 0.842f }, kf = new[] { 0f, 19.5f, 27f, 41f },
+                blade = new[] { -0.055f, -0.092f, 0.994f, -0.044f, -0.104f, 0.994f, -0.036f, -0.105f, 0.994f, -0.028f, -0.105f, 0.994f, -0.024f, -0.106f, 0.994f, -0.023f, -0.106f, 0.994f, -0.026f, -0.106f, 0.994f, -0.031f, -0.107f, 0.994f, -0.038f, -0.107f, 0.994f, -0.048f, -0.107f, 0.993f, -0.057f, -0.107f, 0.993f, -0.062f, -0.107f, 0.992f, -0.064f, -0.107f, 0.992f, -0.063f, -0.107f, 0.992f, -0.059f, -0.107f, 0.993f, -0.052f, -0.106f, 0.993f, -0.046f, -0.106f, 0.993f, -0.039f, -0.105f, 0.994f, -0.034f, -0.105f, 0.994f, -0.03f, -0.102f, 0.994f, -0.027f, -0.078f, 0.997f, -0.026f, -0.052f, 0.998f, -0.026f, -0.022f, 0.999f, -0.026f, 0.011f, 1f, -0.029f, 0.045f, 0.999f, -0.031f, 0.075f, 0.997f, -0.032f, 0.102f, 0.994f, -0.033f, 0.122f, 0.992f, -0.032f, 0.137f, 0.99f, -0.03f, 0.145f, 0.989f, -0.027f, 0.146f, 0.989f, -0.023f, 0.142f, 0.99f, -0.018f, 0.135f, 0.991f, -0.013f, 0.125f, 0.992f, -0.009f, 0.113f, 0.994f, -0.005f, 0.098f, 0.995f, -0.001f, 0.08f, 0.997f, 0.002f, 0.06f, 0.998f, 0.005f, 0.038f, 0.999f, 0.007f, 0.015f, 1f, 0.009f, -0.009f, 1f, 0.009f, -0.032f, 0.999f } };
+            A[8] = new AtkClip { a = 10143, dur = 0.842f, cut0 = 0.362f, cut1 = 0.622f, reach = 2.3f, mirror = false, bash = false, grip2 = true, kt = new[] { 0f, 0.382f, 0.582f, 0.842f }, kf = new[] { 0f, 19.5f, 27f, 41f },
+                blade = new[] { 0.03f, 0.121f, 0.992f, 0.042f, 0.09f, 0.995f, 0.049f, 0.059f, 0.997f, 0.053f, 0.028f, 0.998f, 0.052f, 0f, 0.999f, 0.047f, -0.027f, 0.999f, 0.039f, -0.049f, 0.998f, 0.029f, -0.067f, 0.997f, 0.019f, -0.08f, 0.997f, 0.009f, -0.088f, 0.996f, 0.004f, -0.09f, 0.996f, 0.003f, -0.088f, 0.996f, 0.006f, -0.082f, 0.997f, 0.013f, -0.071f, 0.997f, 0.024f, -0.057f, 0.998f, 0.035f, -0.039f, 0.999f, 0.048f, -0.016f, 0.999f, 0.06f, 0.011f, 0.998f, 0.07f, 0.044f, 0.997f, 0.075f, 0.078f, 0.994f, 0.078f, 0.115f, 0.99f, 0.076f, 0.15f, 0.986f, 0.071f, 0.185f, 0.98f, 0.062f, 0.217f, 0.974f, 0.052f, 0.245f, 0.968f, 0.043f, 0.269f, 0.962f, 0.034f, 0.291f, 0.956f, 0.027f, 0.308f, 0.951f, 0.022f, 0.322f, 0.946f, 0.019f, 0.332f, 0.943f, 0.019f, 0.338f, 0.941f, 0.02f, 0.341f, 0.94f, 0.022f, 0.341f, 0.94f, 0.025f, 0.338f, 0.941f, 0.029f, 0.334f, 0.942f, 0.033f, 0.327f, 0.945f, 0.039f, 0.318f, 0.947f, 0.046f, 0.307f, 0.951f, 0.053f, 0.293f, 0.955f, 0.061f, 0.277f, 0.959f, 0.068f, 0.257f, 0.964f, 0.076f, 0.233f, 0.97f } };
+            A[9] = new AtkClip { a = 10185, dur = 0.815f, cut0 = 0.245f, cut1 = 0.505f, reach = 2.3f, mirror = false, bash = false, grip2 = true, kt = new[] { 0f, 0.265f, 0.465f, 0.815f }, kf = new[] { 0f, 13.5f, 21f, 41f },
+                blade = new[] { 0.035f, -0.105f, 0.994f, 0.047f, -0.105f, 0.993f, 0.063f, -0.104f, 0.993f, 0.077f, -0.083f, 0.994f, 0.091f, -0.053f, 0.994f, 0.102f, -0.019f, 0.995f, 0.109f, 0.016f, 0.994f, 0.111f, 0.054f, 0.992f, 0.109f, 0.088f, 0.99f, 0.103f, 0.121f, 0.987f, 0.093f, 0.151f, 0.984f, 0.08f, 0.176f, 0.981f, 0.064f, 0.195f, 0.979f, 0.045f, 0.209f, 0.977f, 0.025f, 0.216f, 0.976f, 0.004f, 0.217f, 0.976f, -0.018f, 0.209f, 0.978f, -0.039f, 0.196f, 0.98f, -0.059f, 0.175f, 0.983f, -0.073f, 0.149f, 0.986f, -0.08f, 0.117f, 0.99f, -0.076f, 0.08f, 0.994f, -0.062f, 0.043f, 0.997f, -0.039f, 0.01f, 0.999f, -0.009f, -0.018f, 1f, 0.023f, -0.04f, 0.999f, 0.053f, -0.056f, 0.997f, 0.079f, -0.065f, 0.995f, 0.098f, -0.074f, 0.992f, 0.111f, -0.079f, 0.991f, 0.113f, -0.083f, 0.99f, 0.11f, -0.086f, 0.99f, 0.104f, -0.087f, 0.991f, 0.101f, -0.085f, 0.991f, 0.099f, -0.081f, 0.992f, 0.097f, -0.076f, 0.992f, 0.097f, -0.071f, 0.993f, 0.097f, -0.067f, 0.993f, 0.097f, -0.063f, 0.993f, 0.096f, -0.058f, 0.994f, 0.094f, -0.053f, 0.994f, 0.093f, -0.045f, 0.995f } };
+            A[10] = new AtkClip { a = 10227, dur = 0.842f, cut0 = 0.362f, cut1 = 0.622f, reach = 2.3f, mirror = false, bash = false, grip2 = false, kt = new[] { 0f, 0.382f, 0.582f, 0.842f }, kf = new[] { 0f, 19.5f, 27f, 41f },
+                blade = new[] { -0.093f, 0.342f, 0.935f, -0.087f, 0.344f, 0.935f, -0.078f, 0.347f, 0.934f, -0.068f, 0.351f, 0.934f, -0.054f, 0.356f, 0.933f, -0.038f, 0.361f, 0.932f, -0.018f, 0.366f, 0.93f, 0.006f, 0.372f, 0.928f, 0.034f, 0.378f, 0.925f, 0.069f, 0.384f, 0.921f, 0.109f, 0.391f, 0.914f, 0.159f, 0.402f, 0.902f, 0.224f, 0.42f, 0.879f, 0.309f, 0.446f, 0.84f, 0.416f, 0.473f, 0.777f, 0.54f, 0.49f, 0.684f, 0.672f, 0.486f, 0.559f, 0.795f, 0.446f, 0.412f, 0.894f, 0.358f, 0.27f, 0.96f, 0.22f, 0.175f, 0.983f, 0.039f, 0.181f, 0.933f, -0.164f, 0.321f, 0.747f, -0.346f, 0.568f, 0.411f, -0.438f, 0.8f, 0.041f, -0.409f, 0.912f, -0.225f, -0.252f, 0.941f, -0.371f, 0.096f, 0.924f, -0.426f, 0.561f, 0.71f, -0.44f, 0.824f, 0.357f, -0.435f, 0.9f, 0.02f, -0.342f, 0.887f, -0.311f, -0.169f, 0.806f, -0.568f, 0.007f, 0.722f, -0.692f, 0.167f, 0.671f, -0.723f, 0.279f, 0.657f, -0.701f, 0.277f, 0.693f, -0.665f, 0.153f, 0.771f, -0.619f, -0.045f, 0.852f, -0.522f, -0.268f, 0.901f, -0.343f, -0.458f, 0.886f, -0.08f, -0.559f, 0.801f, 0.214f, -0.561f, 0.676f, 0.477f } };
+            A[11] = new AtkClip { a = 10227, dur = 0.842f, cut0 = 0.362f, cut1 = 0.622f, reach = 2.3f, mirror = true, bash = false, grip2 = false, kt = new[] { 0f, 0.382f, 0.582f, 0.842f }, kf = new[] { 0f, 19.5f, 27f, 41f },
+                blade = new[] { -0.093f, 0.342f, 0.935f, -0.087f, 0.344f, 0.935f, -0.078f, 0.347f, 0.934f, -0.068f, 0.351f, 0.934f, -0.054f, 0.356f, 0.933f, -0.038f, 0.361f, 0.932f, -0.018f, 0.366f, 0.93f, 0.006f, 0.372f, 0.928f, 0.034f, 0.378f, 0.925f, 0.069f, 0.384f, 0.921f, 0.109f, 0.391f, 0.914f, 0.159f, 0.402f, 0.902f, 0.224f, 0.42f, 0.879f, 0.309f, 0.446f, 0.84f, 0.416f, 0.473f, 0.777f, 0.54f, 0.49f, 0.684f, 0.672f, 0.486f, 0.559f, 0.795f, 0.446f, 0.412f, 0.894f, 0.358f, 0.27f, 0.96f, 0.22f, 0.175f, 0.983f, 0.039f, 0.181f, 0.933f, -0.164f, 0.321f, 0.747f, -0.346f, 0.568f, 0.411f, -0.438f, 0.8f, 0.041f, -0.409f, 0.912f, -0.225f, -0.252f, 0.941f, -0.371f, 0.096f, 0.924f, -0.426f, 0.561f, 0.71f, -0.44f, 0.824f, 0.357f, -0.435f, 0.9f, 0.02f, -0.342f, 0.887f, -0.311f, -0.169f, 0.806f, -0.568f, 0.007f, 0.722f, -0.692f, 0.167f, 0.671f, -0.723f, 0.279f, 0.657f, -0.701f, 0.277f, 0.693f, -0.665f, 0.153f, 0.771f, -0.619f, -0.045f, 0.852f, -0.522f, -0.268f, 0.901f, -0.343f, -0.458f, 0.886f, -0.08f, -0.559f, 0.801f, 0.214f, -0.561f, 0.676f, 0.477f } };
+            A[12] = new AtkClip { a = 10269, dur = 0.842f, cut0 = 0.362f, cut1 = 0.622f, reach = 2.3f, mirror = false, bash = false, grip2 = false, kt = new[] { 0f, 0.382f, 0.582f, 0.842f }, kf = new[] { 0f, 19.5f, 27f, 41f },
+                blade = new[] { -0.045f, -0.979f, 0.198f, -0.085f, -0.97f, 0.229f, -0.124f, -0.957f, 0.261f, -0.157f, -0.946f, 0.283f, -0.191f, -0.937f, 0.293f, -0.224f, -0.929f, 0.294f, -0.253f, -0.922f, 0.294f, -0.263f, -0.914f, 0.309f, -0.23f, -0.909f, 0.347f, -0.125f, -0.908f, 0.4f, 0.069f, -0.889f, 0.453f, 0.346f, -0.79f, 0.507f, 0.639f, -0.535f, 0.553f, 0.819f, -0.138f, 0.557f, 0.826f, 0.28f, 0.489f, 0.705f, 0.609f, 0.364f, 0.531f, 0.817f, 0.225f, 0.363f, 0.926f, 0.106f, 0.227f, 0.974f, 0.018f, 0.127f, 0.991f, -0.027f, 0.067f, 0.998f, -0.005f, 0.04f, 0.992f, 0.117f, 0.032f, 0.926f, 0.376f, 0.025f, 0.641f, 0.767f, 0.025f, -0.076f, 0.997f, 0.031f, -0.697f, 0.717f, 0.024f, -0.876f, 0.482f, 0.021f, -0.904f, 0.427f, 0.027f, -0.898f, 0.44f, 0.039f, -0.889f, 0.456f, 0.053f, -0.887f, 0.458f, 0.067f, -0.893f, 0.446f, 0.08f, -0.902f, 0.425f, 0.093f, -0.912f, 0.401f, 0.102f, -0.917f, 0.385f, 0.111f, -0.915f, 0.387f, 0.122f, -0.904f, 0.41f, 0.139f, -0.881f, 0.452f, 0.161f, -0.848f, 0.506f, 0.177f, -0.816f, 0.551f, 0.177f, -0.803f, 0.568f, 0.166f, -0.816f, 0.554f } };
+            A[13] = new AtkClip { a = 10311, dur = 0.746f, cut0 = 0.304f, cut1 = 0.564f, reach = 2.0f, mirror = false, bash = false, grip2 = false, kt = new[] { 0f, 0.324f, 0.524f, 0.746f }, kf = new[] { 0f, 16.5f, 24f, 36f },
+                blade = new[] { -0.193f, -0.546f, 0.815f, -0.227f, -0.549f, 0.805f, -0.246f, -0.541f, 0.804f, -0.23f, -0.528f, 0.818f, -0.166f, -0.51f, 0.844f, -0.046f, -0.482f, 0.875f, 0.132f, -0.437f, 0.89f, 0.357f, -0.353f, 0.865f, 0.587f, -0.194f, 0.786f, 0.752f, 0.057f, 0.657f, 0.792f, 0.361f, 0.493f, 0.696f, 0.643f, 0.32f, 0.506f, 0.847f, 0.162f, 0.284f, 0.958f, 0.031f, 0.081f, 0.994f, -0.074f, -0.079f, 0.985f, -0.152f, -0.186f, 0.964f, -0.191f, -0.24f, 0.958f, -0.158f, -0.251f, 0.968f, -0.012f, -0.232f, 0.925f, 0.3f, -0.2f, 0.59f, 0.782f, -0.156f, -0.269f, 0.951f, -0.137f, -0.793f, 0.594f, -0.139f, -0.903f, 0.406f, -0.136f, -0.912f, 0.387f, -0.128f, -0.904f, 0.407f, -0.115f, -0.898f, 0.425f, -0.099f, -0.894f, 0.436f, -0.081f, -0.893f, 0.442f, -0.067f, -0.894f, 0.443f, -0.056f, -0.896f, 0.44f, -0.048f, -0.898f, 0.437f, -0.041f, -0.9f, 0.435f, -0.037f, -0.901f, 0.433f, -0.036f, -0.902f, 0.431f, -0.035f, -0.904f, 0.426f, -0.035f, -0.907f, 0.42f } };
+            A[14] = new AtkClip { a = 10348, dur = 0.727f, cut0 = 0.304f, cut1 = 0.564f, reach = 2.0f, mirror = false, bash = false, grip2 = false, kt = new[] { 0f, 0.324f, 0.524f, 0.727f }, kf = new[] { 0f, 16.5f, 24f, 35f },
+                blade = new[] { -0.179f, -0.79f, 0.587f, -0.185f, -0.708f, 0.681f, -0.202f, -0.555f, 0.807f, -0.239f, -0.332f, 0.913f, -0.298f, -0.063f, 0.952f, -0.377f, 0.214f, 0.901f, -0.468f, 0.461f, 0.754f, -0.557f, 0.647f, 0.521f, -0.623f, 0.75f, 0.221f, -0.638f, 0.762f, -0.111f, -0.575f, 0.697f, -0.427f, -0.441f, 0.6f, -0.668f, -0.285f, 0.518f, -0.807f, -0.146f, 0.467f, -0.872f, -0.03f, 0.454f, -0.89f, 0.05f, 0.494f, -0.868f, 0.092f, 0.599f, -0.796f, 0.113f, 0.767f, -0.632f, 0.135f, 0.939f, -0.317f, 0.17f, 0.973f, 0.159f, 0.187f, 0.717f, 0.671f, 0.127f, 0.168f, 0.978f, -0.002f, -0.429f, 0.904f, -0.11f, -0.785f, 0.609f, -0.153f, -0.909f, 0.387f, -0.146f, -0.928f, 0.343f, -0.113f, -0.886f, 0.449f, -0.082f, -0.776f, 0.625f, -0.081f, -0.609f, 0.789f, -0.14f, -0.438f, 0.888f, -0.26f, -0.311f, 0.914f, -0.418f, -0.223f, 0.881f, -0.593f, -0.139f, 0.793f, -0.765f, -0.023f, 0.643f, -0.895f, 0.139f, 0.423f, -0.939f, 0.317f, 0.135f } };
+            A[15] = new AtkClip { a = 10384, dur = 0.783f, cut0 = 0.304f, cut1 = 0.564f, reach = 2.0f, mirror = false, bash = false, grip2 = false, kt = new[] { 0f, 0.324f, 0.524f, 0.783f }, kf = new[] { 0f, 16.5f, 24f, 38f },
+                blade = new[] { 0.044f, 0.417f, 0.908f, 0.07f, 0.413f, 0.908f, 0.098f, 0.41f, 0.907f, 0.129f, 0.408f, 0.904f, 0.163f, 0.409f, 0.898f, 0.2f, 0.416f, 0.887f, 0.241f, 0.435f, 0.867f, 0.286f, 0.467f, 0.837f, 0.335f, 0.51f, 0.792f, 0.388f, 0.56f, 0.732f, 0.448f, 0.606f, 0.657f, 0.515f, 0.643f, 0.567f, 0.59f, 0.663f, 0.46f, 0.672f, 0.661f, 0.334f, 0.752f, 0.63f, 0.192f, 0.826f, 0.561f, 0.051f, 0.896f, 0.44f, -0.051f, 0.965f, 0.259f, -0.045f, 0.99f, 0.022f, 0.141f, 0.838f, -0.226f, 0.497f, 0.446f, -0.375f, 0.812f, 0.029f, -0.369f, 0.929f, -0.255f, -0.202f, 0.946f, -0.421f, 0.14f, 0.896f, -0.5f, 0.489f, 0.714f, -0.544f, 0.697f, 0.467f, -0.553f, 0.809f, 0.202f, -0.532f, 0.846f, -0.034f, -0.499f, 0.841f, -0.211f, -0.424f, 0.834f, -0.353f, -0.317f, 0.83f, -0.458f, -0.233f, 0.826f, -0.513f, -0.184f, 0.829f, -0.528f, -0.169f, 0.842f, -0.513f, -0.198f, 0.857f, -0.476f, -0.269f, 0.864f, -0.425f, -0.37f, 0.856f, -0.36f, -0.493f, 0.824f, -0.279f, -0.617f, 0.767f, -0.175f } };
+            A[16] = new AtkClip { a = 10423, dur = 0.859f, cut0 = 0.38f, cut1 = 0.64f, reach = 2.0f, mirror = false, bash = false, grip2 = false, kt = new[] { 0f, 0.4f, 0.6f, 0.859f }, kf = new[] { 0f, 22.5f, 30f, 44f },
+                blade = new[] { 0.109f, 0.952f, 0.287f, 0.089f, 0.957f, 0.277f, 0.083f, 0.955f, 0.284f, 0.091f, 0.948f, 0.304f, 0.11f, 0.937f, 0.331f, 0.14f, 0.921f, 0.362f, 0.182f, 0.899f, 0.398f, 0.235f, 0.869f, 0.436f, 0.297f, 0.829f, 0.474f, 0.365f, 0.777f, 0.513f, 0.439f, 0.709f, 0.552f, 0.517f, 0.622f, 0.588f, 0.594f, 0.509f, 0.622f, 0.663f, 0.363f, 0.655f, 0.711f, 0.177f, 0.681f, 0.714f, -0.05f, 0.699f, 0.639f, -0.305f, 0.706f, 0.456f, -0.552f, 0.699f, 0.164f, -0.725f, 0.669f, -0.175f, -0.774f, 0.609f, -0.469f, -0.72f, 0.512f, -0.658f, -0.645f, 0.388f, -0.733f, -0.614f, 0.293f, -0.721f, -0.622f, 0.304f, -0.669f, -0.589f, 0.453f, -0.617f, -0.43f, 0.66f, -0.567f, -0.161f, 0.808f, -0.514f, 0.137f, 0.847f, -0.466f, 0.401f, 0.788f, -0.424f, 0.615f, 0.664f, -0.383f, 0.778f, 0.498f, -0.338f, 0.889f, 0.309f, -0.291f, 0.95f, 0.117f, -0.245f, 0.968f, -0.058f, -0.206f, 0.957f, -0.205f, -0.176f, 0.929f, -0.325f, -0.155f, 0.893f, -0.422f, -0.137f, 0.858f, -0.496f, -0.125f, 0.828f, -0.547f, -0.12f, 0.807f, -0.578f, -0.125f, 0.799f, -0.588f, -0.139f, 0.804f, -0.579f, -0.159f, 0.817f, -0.554f, -0.182f, 0.837f, -0.516f, -0.205f, 0.861f, -0.465f } };
+            A[17] = new AtkClip { a = 10468, dur = 0.649f, cut0 = 0.225f, cut1 = 0.485f, reach = 1.4f, mirror = false, bash = true, grip2 = false, kt = new[] { 0f, 0.245f, 0.445f, 0.649f }, kf = new[] { 0f, 12.5f, 20f, 31f },
+                blade = new[] { -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f } };
+            A[18] = new AtkClip { a = 10500, dur = 0.611f, cut0 = 0.205f, cut1 = 0.465f, reach = 1.4f, mirror = true, bash = true, grip2 = false, kt = new[] { 0f, 0.225f, 0.425f, 0.611f }, kf = new[] { 0f, 11.5f, 19f, 29f },
+                blade = new[] { -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f, -0.201f, 0.301f, 0.932f } };
             return A;
         }
         // which attacks a weapon has
         static int[] AttackList(string w)
         {
-            return w == "shield" ? new[] { 1, 2 } : w == "spear" ? new[] { 5, 1, 6, 5, 3 } : w == "staff" ? new[] { 1, 6, 2, 3, 4 } : new[] { 1, 2, 3, 4 };
+            return w == "shield" ? new[] { 1, 2, 17, 18 } : w == "spear" ? new[] { 7, 8, 9, 10, 11, 12, 6 } : w == "axe" ? new[] { 13, 14, 15, 16 } : w == "staff" ? new[] { 1, 6, 2, 3, 4 } : new[] { 1, 2, 3, 4 };
         }
         AtkClip Clip => ATTACKS[atkType];
         // guard with the weapon alone (motion capture) - both hands come up in front of the face, the knees give
         const int GUARD_A = 10079, GUARD_N = 22; const float GUARD_Y0 = 0.09f;
         const float ATK_IN = 0.09f, ATK_OUT = 0.2f, CHAIN_T0 = 0.07f, CHAIN_BLEND = 0.2f; const int STANCE_FRAME = 2;
-        float atkW, grdW, stW, ovW, atkFr, atkMix = 1; Quaternion[] atkQ, atkQ2;
+        float atkW, grdW, stW, ovW, bashW, atkFr, atkMix = 1; Quaternion[] atkQ, atkQ2;
         public float spinYaw; public bool atkHeld; bool atkQueued;
         int fromBase = -1; float fromFr; AtkClip fromC;
         bool TwoHanded => ch.cfg.weapon != "shield" && ch.cfg.weapon != "none";
@@ -678,14 +704,14 @@ namespace AsciiHero
         static float CR(float a0, float a1, float a2, float a3, float u) { return 0.5f * (2 * a1 + (a2 - a0) * u + (2 * a0 - 5 * a1 + 4 * a2 - a3) * u * u + (3 * a1 - a0 - 3 * a2 + a3) * u * u * u); }
         static Vector3 CR(Vector3 a0, Vector3 a1, Vector3 a2, Vector3 a3, float u) { return new Vector3(CR(a0.x, a1.x, a2.x, a3.x, u), CR(a0.y, a1.y, a2.y, a3.y, u), CR(a0.z, a1.z, a2.z, a3.z, u)); }
         // lays a captured pose over the pose from locomotion: the whole body when standing, from the waist up when moving
-        void Lay(Quaternion[] Q, Vector3 aro, float w, bool yAbs)
+        void Lay(Quaternion[] Q, Vector3 aro, float w, bool yAbs, bool bash = false)
         {
             float wl = w * (1 - wWalk); bool shield = ch.cfg.weapon == "shield";
             for (int k = 0; k < MotionDB.nb; k++)
             {
                 string n = MotionDB.bones[k]; float wk = w;
                 if (n == "root" || n.Contains("leg") || n.Contains("foot")) wk = wl;
-                else if (shield && n.EndsWith(".L")) wk = 0;               // the shield arm keeps the shield up
+                else if (shield && n.EndsWith(".L") && !bash) wk = 0;               // the shield arm keeps the shield up (but strikes with it)
                 outQ[k] = Quaternion.Slerp(outQ[k], Q[k], wk);
             }
             ro.x += (aro.x - ro.x) * wl; ro.z += (aro.z - ro.z) * wl; ro.y += yAbs ? (aro.y - ro.y) * wl : aro.y * wl;
@@ -693,7 +719,7 @@ namespace AsciiHero
         // the layers over locomotion: the two-handed fighting stance, the guard, the cut
         void AttackLayer(float dt)
         {
-            atkW = 0; grdW = 0; stW = 0; ovW = 0; spinYaw = 0;
+            atkW = 0; grdW = 0; stW = 0; ovW = 0; spinYaw = 0; bashW = 0;
             int nb = MotionDB.nb; if (atkQ == null) { atkQ = new Quaternion[nb]; atkQ2 = new Quaternion[nb]; }
             // stance: with a weapon in both hands the body takes the guard the cuts start from (hilt low in front, point forward)
             if (stance > 0.01f && TwoHanded && limbs[2]) { Vector3 s0 = Vector3.zero; SamplePose(ATTACKS[1].a + STANCE_FRAME, atkQ, ref s0, null); Lay(atkQ, s0, stance, true); stW = stance; }
@@ -726,7 +752,7 @@ namespace AsciiHero
                 float m = Sm((t - CHAIN_T0) / CHAIN_BLEND); atkMix = m;
                 if (m < 1) { Vector3 r2 = Vector3.zero; SamplePose(fromBase + fromFr, atkQ2, ref r2, null); for (int k = 0; k < nb; k++) atkQ[k] = Quaternion.Slerp(atkQ2[k], atkQ[k], m); aro = Vector3.Lerp(r2, aro, m); }
             }
-            Lay(atkQ, aro, w, true);
+            Lay(atkQ, aro, w, true, C.bash); bashW = C.bash ? w : 0;
         }
         public const float COMBAT_HOLD = 3f;      // seconds the fighting stance is kept after the last cut, block or hit
         public float combatT; float stance, stanceFeet;
@@ -734,7 +760,7 @@ namespace AsciiHero
         public readonly HashSet<int> atkHits = new HashSet<int>();
         /// the edge is travelling: this is when the cut can land
         public bool Cutting => Attacking && atkT > Clip.cut0 && atkT < Clip.cut1;
-        public float Reach => Attacking && Clip.proc ? 2.3f : 1.75f;
+        public float Reach => !Attacking ? 1.75f : Clip.reach > 0 ? Clip.reach : Clip.proc ? 2.3f : 1.75f;
         public bool Around => Attacking && Clip.around;
         public float Guard => guard;
         /// points the blade passed through this frame (tip and mid-blade): the game turns them into a streak in the air
@@ -868,8 +894,22 @@ namespace AsciiHero
                 if (fromBase >= 0 && atkMix < 1) bd = Vector3.Lerp(BladeOf(fromC, fromFr), bd, atkMix);
                 BladeW(gq * bd, w);
             }
+            // a thrust is made with both hands on the shaft: the rear (left) hand takes it 40 cm behind the right one
+            if (C.grip2 && limbs[1] && ch.weapon != null) { var wr = H.Bone("wrist.R"); if (wr != null) ArmIK("L", wr.position - ch.weapon.up * 0.4f, w); }
             float tipY = Wc == "spear" ? 1.05f : Wc == "staff" ? 0.9f : 0.8f;
             if (ch.weapon != null && atkT > C.cut0 - 0.05f && atkT < C.cut1 + 0.03f) { trail.Add(ch.weapon.TransformPoint(0, tipY, 0)); trail.Add(ch.weapon.TransformPoint(0, tipY * 0.55f, 0)); }
+        }
+        // two-bone arm IK: brings the hand of arm s to target (world), blended by w; the elbow keeps bending the way it bends
+        void ArmIK(string s, Vector3 target, float w)
+        {
+            Transform up = H.Bone("upperarm01." + s), lo = H.Bone("lowerarm01." + s), wr = H.Bone("wrist." + s); if (up == null || lo == null || wr == null || w <= 0.001f) return;
+            Vector3 sp = up.position, ep = lo.position, wp = wr.position; float l1 = (ep - sp).magnitude, l2 = (wp - ep).magnitude;
+            Vector3 tgt = Vector3.Lerp(wp, target, w), toT = tgt - sp; float d = Mathf.Clamp(toT.magnitude, Mathf.Abs(l1 - l2) + 0.01f, (l1 + l2) * 0.999f); toT.Normalize();
+            Vector3 kd = ep - sp, perp = kd - toT * Vector3.Dot(kd, toT); if (perp.sqrMagnitude < 1e-8f) perp = Vector3.down; perp.Normalize();
+            float an = Mathf.Acos(Mathf.Clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1f, 1f));
+            Vector3 ne = sp + toT * (Mathf.Cos(an) * l1) + perp * (Mathf.Sin(an) * l1);
+            up.rotation = Quaternion.FromToRotation(kd.normalized, (ne - sp).normalized) * up.rotation;
+            Vector3 ep2 = lo.position, wp2 = wr.position; lo.rotation = Quaternion.FromToRotation((wp2 - ep2).normalized, (tgt - ep2).normalized) * lo.rotation;
         }
         static Vector3 BladeOf(AtkClip C, float fr)
         {
@@ -939,7 +979,7 @@ namespace AsciiHero
             for (int si = 0; si < 2; si++)
             {
                 float w = si == 0 ? (W == "shield" ? 1f : 0f) : (W == "spear" || W == "staff" ? 0.8f : 0.55f);
-                if (si == 1) w *= 1 - ovW;                 // the cut drives the sword arm itself
+                if (si == 1) w *= 1 - ovW; else w *= 1 - bashW;                 // the cut drives the sword arm itself
                 if (w <= 0.001f || !limbs[1 + si]) continue;
                 for (int j = 0; j < ARM_CHAIN.Length; j++)
                 {

@@ -251,7 +251,7 @@ function addWeapon(group, h, mats, W) {
   const g0 = new THREE.Group(); let g = g0;
   // axe: turned on its haft so the head points ahead (down the line of the cut), not sideways. Spear: gripped at the middle.
   // Staff: gripped a metre above its foot; the holder slides when the hand moves to the middle (running, fighting).
-  if (W === 'axe' || W === 'spear' || W === 'staff') { g = new THREE.Group(); g0.add(g); if (W === 'axe') g.rotation.y = Math.PI / 2; if (W === 'spear') g.position.y = -0.55; if (W === 'staff') { g.position.y = -0.5; g.userData.y0 = -0.5; g0.userData.slide = g; } }
+  if (W === 'axe' || W === 'spear' || W === 'staff') { g = new THREE.Group(); g0.add(g); if (W === 'axe') g.rotation.y = -Math.PI / 2; if (W === 'spear') g.position.y = -0.55; if (W === 'staff') { g.position.y = -0.5; g.userData.y0 = -0.5; g0.userData.slide = g; } }
   if (W === 'sword' || W === 'shield') {
     g.add(Object.assign(mesh(cyl(0.015, 0.014, 0.11, 10), mats.LEATHER2), {}));
     const pom = mesh(new THREE.SphereGeometry(0.024, 10, 8), mats.GOLD); pom.position.y = -0.07; g.add(pom);

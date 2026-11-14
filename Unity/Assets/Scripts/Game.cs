@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.25 · Unity";
+        public const string VERSION = "beta 0.26 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -72,7 +72,7 @@ namespace AsciiHero
         readonly List<Rect> uiRects = new List<Rect>(); List<Rect> uiRectsPrev = new List<Rect>();
         readonly List<Vector2> taps = new List<Vector2>();
         Rect sliderRect, stickRect; Vector2 stickCenter, stick; float stickR, stickRun; int stickId = int.MinValue;
-        Texture2D texWhite, texDisc, texRing; GUIStyle sTitle, sSmall, sBtn, sBtnOn, sMono, sName, sDesc, sBadge, sToast;
+        Texture2D texWhite, texDisc, texRing; GUIStyle sBig, sRight, sTitle, sSmall, sBtn, sBtnOn, sMono, sName, sDesc, sBadge, sToast;
         Font mono; float fpsAcc; int fpsN; string fpsText = "";
 
         static readonly string[] SEX = { "m", "f" }; static readonly string[] SEXNAME = { "Мужчина", "Женщина" };
@@ -107,7 +107,7 @@ namespace AsciiHero
         System.Collections.IEnumerator Start()
         {
             loadT0 = Time.realtimeSinceStartup;
-            Application.targetFrameRate = 60;
+            LoadSettings(); Application.targetFrameRate = FPS[Mathf.Clamp(setFps, 0, FPS.Length - 1)];
             QualitySettings.skinWeights = SkinWeights.FourBones;   // mobile quality levels default to 2 bones, which breaks this 163-bone rig
             Screen.sleepTimeout = SleepTimeout.NeverSleep;
             Screen.autorotateToPortrait = false; Screen.autorotateToPortraitUpsideDown = false;
@@ -128,6 +128,7 @@ namespace AsciiHero
                 sceneCam.nearClipPlane = 0.05f; sceneCam.farClipPlane = 40; sceneCam.fieldOfView = 36; sceneCam.allowMSAA = false; sceneCam.allowHDR = false;
                 ascii = new AsciiRenderer(sceneCam);
                 ascii.surfaceGlyphs = PlayerPrefs.GetInt("ascii_glyph_mode", 1) == 1;
+                ApplySettings(false);
             })) yield break;
             yield return null;
             if (!Step("Свет и окружение", () => { SetupEnvironment(); ApplyEditorAmbient(); })) yield break;
@@ -599,7 +600,7 @@ namespace AsciiHero
             if (tavern != null) { tavern.SetActive(false); bartenderChar.go.SetActive(false); }
             if (field != null) field.SetActive(false);
             worldLightsRoot.SetActive(false); editorRoot.SetActive(true);
-            Shader.SetGlobalVector("_AsciiHeroA", new Vector4(0, -99, 0, 0)); Shader.SetGlobalVector("_AsciiHeroB", new Vector4(0, -99, 0, 0));
+            Shader.SetGlobalVector("_AsciiHeroA", new Vector4(0, -99, 0, 0)); Shader.SetGlobalVector("_AsciiHeroB", new Vector4(0, -99, 0, 0)); Shader.SetGlobalVector("_AsciiHeroVel", Vector4.zero);
             hero.go.transform.position = Vector3.zero; hero.go.transform.rotation = Quaternion.identity;
             player.speed = 0; player.heading = 0; player.ResetSim(); lockOn = false;
             sceneCam.fieldOfView = 36; ascii.exposure = 1; ascii.actorBoost = 0; Shader.SetGlobalFloat("_AsciiLod", 1);
@@ -617,10 +618,92 @@ namespace AsciiHero
             sh.AddDirectionalLight(Vector3.up, ((sky - ground) * 0.5f).linear, 1f);
             RenderSettings.ambientProbe = sh;
         }
+        static float shadowBase = 14, shadowScale = 1;
         static void SetShadowDistance(float d)
         {
+            shadowBase = d; d *= shadowScale;
             var urp = GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;
             if (urp != null) urp.shadowDistance = d; else QualitySettings.shadowDistance = d;
+        }
+
+        // ---------- main menu and settings ----------
+        bool inMenu = true; int menuPage;   // 0 main, 1 settings, 2 developers
+        int setQuality, setGrass, setRes, setFps, setMusic, setSound; bool setBloom, setShowFps;
+        static readonly string[] QUALITY = { "Низкое", "Среднее", "Высокое" };
+        static readonly int[] GRASS = { 0, 25, 50, 75, 100 }, RES = { 50, 67, 75, 85, 100 }, FPS = { 30, 60, 90, 120 };
+        static readonly string[] DEVELOPERS = { "krocotovski264", "Тёма — программист" };
+        void LoadSettings()
+        {
+            bool phone = Application.isMobilePlatform;
+            setQuality = PlayerPrefs.GetInt("set_quality", phone ? 1 : 2); setGrass = PlayerPrefs.GetInt("set_grass", 4); setRes = PlayerPrefs.GetInt("set_res", 4);
+            setFps = PlayerPrefs.GetInt("set_fps", 1); setBloom = PlayerPrefs.GetInt("set_bloom", 1) == 1; setShowFps = PlayerPrefs.GetInt("set_showfps", 0) == 1;
+            setMusic = PlayerPrefs.GetInt("set_music", 70); setSound = PlayerPrefs.GetInt("set_sound", 80);
+        }
+        void ApplySettings(bool save = true)
+        {
+            setQuality = Mathf.Clamp(setQuality, 0, 2); setGrass = Mathf.Clamp(setGrass, 0, GRASS.Length - 1); setRes = Mathf.Clamp(setRes, 0, RES.Length - 1);
+            setFps = Mathf.Clamp(setFps, 0, FPS.Length - 1); setMusic = Mathf.Clamp(setMusic, 0, 100); setSound = Mathf.Clamp(setSound, 0, 100);
+            if (save)
+            {
+                PlayerPrefs.SetInt("set_quality", setQuality); PlayerPrefs.SetInt("set_grass", setGrass); PlayerPrefs.SetInt("set_res", setRes); PlayerPrefs.SetInt("set_fps", setFps);
+                PlayerPrefs.SetInt("set_bloom", setBloom ? 1 : 0); PlayerPrefs.SetInt("set_showfps", setShowFps ? 1 : 0);
+                PlayerPrefs.SetInt("set_music", setMusic); PlayerPrefs.SetInt("set_sound", setSound); PlayerPrefs.Save();
+            }
+            Application.targetFrameRate = FPS[setFps];
+            Shader.SetGlobalFloat("_AsciiGrassThin", 1 - GRASS[setGrass] / 100f);
+            if (ascii != null) { ascii.bloom = setBloom ? 0.32f : 0f; ascii.fullLit = setQuality == 2; }
+            shadowScale = setQuality == 0 ? 0f : setQuality == 1 ? 0.6f : 1f; SetShadowDistance(shadowBase);
+            AudioListener.volume = setSound / 100f;      // (the game has no sounds or music yet: the levels are kept for them)
+            // rendering resolution: a share of the display's own resolution (100 % = the most the device can show)
+            int sw = Display.main.systemWidth, sh = Display.main.systemHeight; if (sw <= 0 || sh <= 0) { sw = Screen.currentResolution.width; sh = Screen.currentResolution.height; }
+            bool land = Screen.width >= Screen.height; int big = Mathf.Max(sw, sh), small = Mathf.Min(sw, sh);
+            float f = RES[setRes] / 100f; int tw = Mathf.RoundToInt((land ? big : small) * f), th = Mathf.RoundToInt((land ? small : big) * f);
+            if (Mathf.Abs(Screen.width - tw) > 2 || Mathf.Abs(Screen.height - th) > 2) Screen.SetResolution(tw, th, FullScreenMode.FullScreenWindow);
+        }
+        void MenuUI(float W, float H)
+        {
+            Fill(new Rect(0, 0, W, H), new Color(0.01f, 0.01f, 0.02f, menuPage == 0 ? 0.45f : 0.7f));
+            float cx = W / 2, top = safe.y + 30 * k, bottom = safe.yMax - 10 * k;
+            GUI.Label(new Rect(cx - 250 * k, top, 500 * k, 50 * k), "ASCII HERO", sBig);
+            if (menuPage == 0)
+            {
+                float bw = 230 * k, bh = 40 * k, y = top + 80 * k;
+                if (Button(new Rect(cx - bw / 2, y, bw, bh), "ИГРАТЬ")) inMenu = false;
+                if (Button(new Rect(cx - bw / 2, y + bh + 12 * k, bw, bh), "НАСТРОЙКИ")) menuPage = 1;
+                if (Button(new Rect(cx - bw / 2, y + 2 * (bh + 12 * k), bw, bh), "ВЫХОД")) Application.Quit();
+                if (Button(new Rect(safe.x + 10 * k, bottom - 22 * k, 104 * k, 22 * k), "Разработчики")) menuPage = 2;
+                GUI.Label(new Rect(safe.xMax - 210 * k, bottom - 22 * k, 200 * k, 22 * k), VERSION, sRight);
+                return;
+            }
+            float pw = 460 * k, x0 = cx - pw / 2, y0 = top + 56 * k;
+            if (menuPage == 2)
+            {
+                GUI.Label(new Rect(x0, y0, pw, 22 * k), "РАЗРАБОТЧИКИ", sTitle);
+                for (int i = 0; i < DEVELOPERS.Length; i++) GUI.Label(new Rect(x0, y0 + (28 + 24 * i) * k, pw, 22 * k), DEVELOPERS[i], sBadge);
+                if (Button(new Rect(cx - 70 * k, bottom - 36 * k, 140 * k, 30 * k), "НАЗАД")) menuPage = 0;
+                return;
+            }
+            GUI.Label(new Rect(x0, y0, pw, 22 * k), "НАСТРОЙКИ", sTitle);
+            float rh = 29 * k, y1 = y0 + 26 * k; int row = 0; bool changed = false;
+            void Row(string name, string value, System.Action dec, System.Action inc)
+            {
+                float yy = y1 + row * rh; row++;
+                GUI.Label(new Rect(x0, yy + 3 * k, 210 * k, rh), name, sBadge);
+                if (Button(new Rect(x0 + 220 * k, yy, 34 * k, rh - 4 * k), "<")) { dec(); changed = true; }
+                GUI.Label(new Rect(x0 + 258 * k, yy, 160 * k, rh - 4 * k), value, sBtn);
+                if (Button(new Rect(x0 + 422 * k, yy, 34 * k, rh - 4 * k), ">")) { inc(); changed = true; }
+            }
+            Row("Качество изображения", QUALITY[setQuality], () => setQuality--, () => setQuality++);
+            Row("Растительность", GRASS[setGrass] + " %", () => setGrass--, () => setGrass++);
+            Row("Разрешение", RES[setRes] + " %" + (setRes == RES.Length - 1 ? " (макс.)" : ""), () => setRes--, () => setRes++);
+            Row("Свечение", setBloom ? "вкл" : "выкл", () => setBloom = !setBloom, () => setBloom = !setBloom);
+            Row("Ограничение кадров", FPS[setFps] + " к/с", () => setFps--, () => setFps++);
+            Row("Показывать FPS", setShowFps ? "да" : "нет", () => setShowFps = !setShowFps, () => setShowFps = !setShowFps);
+            Row("Громкость музыки", setMusic + " %", () => setMusic -= 10, () => setMusic += 10);
+            Row("Громкость звуков", setSound + " %", () => setSound -= 10, () => setSound += 10);
+            if (changed) ApplySettings();
+            GUI.Label(new Rect(x0, y1 + row * rh + 2 * k, pw, 16 * k), "Звуков и музыки в игре пока нет — громкость сохранится на будущее", sSmall);
+            if (Button(new Rect(cx - 70 * k, bottom - 36 * k, 140 * k, 30 * k), "НАЗАД")) menuPage = 0;
         }
         void OnDestroy() { if (ascii != null) ascii.Dispose(); }
         void ShowToast(string t) { toast = t; toastT = 2.6f; }
@@ -773,14 +856,14 @@ namespace AsciiHero
             dashAnim = at + 0.3f; dashSettle = at + 1.3f; dashCd = dashAnim + 0.5f;
             player.Teleport(0, 0, Mathf.Atan2(dashDir.x, dashDir.z));
         }
-        void SetShift(Piece pc, Vector3 v, Vector4 spin)
+        void SetShift(Piece pc, Vector3 v, Vector4 spin, float cloth = 0)
         {
             if (shiftMpb == null) shiftMpb = new MaterialPropertyBlock();
             Vector3 piv = pc.rs.Count > 0 && pc.rs[0] != null ? pc.rs[0].bounds.center : pos;     // the piece tumbles about its own centre
             foreach (var r in pc.rs)
             {
                 if (r == null) continue; r.GetPropertyBlock(shiftMpb);
-                shiftMpb.SetVector("_DashShift", v); shiftMpb.SetVector("_DashSpin", spin); shiftMpb.SetVector("_DashPivot", piv); shiftMpb.SetVector("_DashScatter", Vector4.zero);
+                shiftMpb.SetVector("_DashShift", v); shiftMpb.SetVector("_DashSpin", spin); shiftMpb.SetVector("_DashPivot", piv); shiftMpb.SetVector("_DashScatter", Vector4.zero); shiftMpb.SetFloat("_ClothDash", cloth);
                 r.SetPropertyBlock(shiftMpb);
             }
         }
@@ -827,7 +910,7 @@ namespace AsciiHero
                 {
                     float fl = last ? 0 : (1 - sm) * Mathf.Min(1, tau * 6);
                     Vector3 shR = back * (1 - p) + sideV * (pc.side * arc + 0.1f * Mathf.Sin(tau * 9) * fl) + Vector3.up * (pc.lift * arc + 0.07f * Mathf.Sin(tau * 13) * fl);
-                    SetShift(pc, shR, new Vector4(sideV.x, 0, sideV.z, tau > 0 && !last ? (0.5f * arc + 0.18f * Mathf.Sin(tau * 11)) * (1 - sm * sm) + 1e-4f : 0));     // it streams out behind and billows
+                    SetShift(pc, shR, new Vector4(sideV.x, 0, sideV.z, tau > 0 && !last ? (0.5f * arc + 0.18f * Mathf.Sin(tau * 11)) * (1 - sm * sm) + 1e-4f : 0), fl);     // it streams out behind and billows
                     continue;
                 }
                 Vector3 sh = back * (1 - p) + sideV * (pc.side * arc) + Vector3.up * (pc.lift * arc);
@@ -987,6 +1070,8 @@ namespace AsciiHero
             sName = new GUIStyle(GUI.skin.label) { fontSize = fs(12), fontStyle = FontStyle.Bold }; sName.normal.textColor = ink;
             sDesc = new GUIStyle(GUI.skin.label) { fontSize = fs(9.5f), wordWrap = true }; sDesc.normal.textColor = new Color(0.62f, 0.6f, 0.56f);
             sToast = new GUIStyle(GUI.skin.label) { fontSize = fs(12), alignment = TextAnchor.MiddleCenter, wordWrap = true }; sToast.normal.textColor = Color.white;
+            sBig = new GUIStyle(GUI.skin.label) { fontSize = fs(34), fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter }; sBig.normal.textColor = gold;
+            sRight = new GUIStyle(sSmall) { alignment = TextAnchor.LowerRight, wordWrap = false };
         }
         void Fill(Rect r, Color c) { var old = GUI.color; GUI.color = c; GUI.DrawTexture(r, texWhite); GUI.color = old; }
         void Frame(Rect r, Color c, float w = 1)
@@ -1043,13 +1128,14 @@ namespace AsciiHero
             }
             float L = safe.x + 12 * k, T = safe.y + 8 * k;
             if (world) DrawDanger(W, H);
+            if (inMenu && !world) { MenuUI(W, H); ConsoleUI(W, H, false); FinishGui(); return; }
             if (!world) EditorUI(W, H, vr, L, T); else WorldUI(W, H, L, T);
             if (toastT > 0 && !string.IsNullOrEmpty(toast))
             {
                 float a = Mathf.Clamp01(toastT / 0.4f); var r = new Rect(vr.center.x - 150 * k, H * 0.18f, 300 * k, 46 * k);
                 Fill(r, new Color(0, 0, 0, 0.7f * a)); var old = GUI.color; GUI.color = new Color(1, 1, 1, a); GUI.Label(r, toast, sToast); GUI.color = old;
             }
-            GUI.Label(new Rect(vr.xMax - 170 * k, H - 18 * k - (H - safe.yMax), 160 * k, 16 * k), fpsText, sSmall);
+            if (setShowFps) GUI.Label(new Rect(vr.xMax - 170 * k, H - 18 * k - (H - safe.yMax), 160 * k, 16 * k), fpsText, sSmall);
             ConsoleUI(W, H, false);
             FinishGui();
         }
@@ -1116,6 +1202,7 @@ namespace AsciiHero
             foreach (var w in Character.WEAPONS) if (w[0] == cfg.weapon) wn = w[1];
             GUI.Label(new Rect(L, H - (H - safe.yMax) - 52 * k, 320 * k, 50 * k), "<b>" + SEXNAME[si] + "</b> · " + cfg.height + " см · " + Character.BUILDS[cfg.build] + "\n" + an + "\n" + wn, sBadge);
             // view buttons
+            if (Button(new Rect(vr.xMax - 196 * k, T, 62 * k, 24 * k), "МЕНЮ")) { inMenu = true; menuPage = 0; }
             if (Button(new Rect(vr.xMax - 128 * k, T, 58 * k, 24 * k), "АВТО", autoRotate)) autoRotate = !autoRotate;
             if (Button(new Rect(vr.xMax - 66 * k, T, 58 * k, 24 * k), "СБРОС")) cam = CAM0;
             if (Button(new Rect(vr.xMax - 128 * k, T + 28 * k, 120 * k, 24 * k), ascii.surfaceGlyphs ? "Aa: НА МОДЕЛЯХ" : "Aa: СЕТКОЙ", ascii.surfaceGlyphs)) ToggleGlyphMode();

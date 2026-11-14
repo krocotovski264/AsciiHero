@@ -9,6 +9,7 @@ Shader "AsciiHero/Glyph"
         _AsciiRow ("Glyph ramp row", Float) = 0
         _AsciiActor ("Actor boost", Float) = 0
         _GlyphSmoke ("Smoke body", Float) = 0
+        _GlyphCloth ("Cloth", Float) = 0
         _GlyphCell ("Glyph size (m)", Vector) = (0.017, 0.028, 0, 0)
     }
     SubShader
@@ -32,15 +33,28 @@ Shader "AsciiHero/Glyph"
                 float _AsciiActor;
                 float _GlyphSmoke;
                 float4 _GlyphCell;
+                float _GlyphCloth;
             CBUFFER_END
             TEXTURE2D(_AsciiAtlas); SAMPLER(sampler_AsciiAtlas);
             TEXTURE2D(_AsciiLitTex); SAMPLER(sampler_AsciiLitTex);
             TEXTURE2D(_AsciiNDTex); SAMPLER(sampler_AsciiNDTex);
-            float _AsciiRows, _AsciiExposure, _AsciiLinear, _AsciiDepthRef, _AsciiTime;
+            float _AsciiRows, _AsciiExposure, _AsciiLinear, _AsciiDepthRef;
             float4 _DashShift;   // per renderer (world): during the dash the armour pieces lag behind the body
                 float4 _DashSpin;    // per renderer: xyz = axis, w = angle; the piece tumbles about _DashPivot while it flies
                 float4 _DashPivot;
                 float4 _DashScatter;  // per renderer: chain mail coming apart into its links during the dash (w = time, 0 = off)
+            // cloth (the robe): the hem trails behind the motion and flutters; in the dash flight it billows harder
+            float _ClothDash;      // per renderer (MaterialPropertyBlock)
+            float4 _AsciiHeroVel; float _AsciiTime;
+            float3 ClothWS(float3 ws, float3 os)
+            {
+                if (_GlyphCloth < 0.5) return ws;
+                float w = saturate((1.05 - os.y) / 0.8); w *= w;      // the hem moves most, the shoulders hardly at all
+                float sp = length(_AsciiHeroVel.xz), t = _AsciiTime, f = 1.0 + 0.8 * _ClothDash;
+                float amp = (0.012 + 0.016 * sp) * (1.0 + 4.0 * _ClothDash);
+                float3 fl = float3(sin(t * 7.0 * f + os.y * 11.0 + os.x * 6.0), 0.35 * sin(t * 5.3 * f + os.x * 9.0), cos(t * 6.3 * f + os.y * 9.0 + os.z * 7.0));
+                return ws - _AsciiHeroVel.xyz * (0.08 * w) + fl * amp * w + float3(0, 0.03 * w * min(sp, 3.0) / 3.0, 0);
+            }
                 float3 DashWS(float3 ws)
             {
                 if (_DashSpin.w != 0.0)
@@ -52,10 +66,9 @@ Shader "AsciiHero/Glyph"
             }
             float _AsciiLod;      // far camera: fewer, larger characters (how many times further than the close-up distance)
             float _GlyphPuff;     // per renderer: 0..1, a burst of smoke flying apart
-            float4 _AsciiHeroVel; // hero velocity (world): the wisps trail behind
             float _GlyphBurn;     // per renderer: 0..1, a torn-off limb burning away
             float _LimbGone[6];   // per renderer: 1 = this limb is torn off (index from seed.y)
-            #define GLYPH_SCALE 1.5
+            #define GLYPH_SCALE 1.35
             #define MIN_GLYPH 5.0
 
             struct Attributes { float4 positionOS : POSITION; float3 normalOS : NORMAL; float2 corner : TEXCOORD0; float2 seed : TEXCOORD1; };
@@ -72,7 +85,7 @@ Shader "AsciiHero/Glyph"
                 if (_GlyphSmoke > 0.5) pOS += i.normalOS * (0.004 + (0.07 + 0.09 * wisp) * ph * ph);
                 // puff (a burst of smoke where a limb is torn off): the glyphs fly apart from the centre, rise and thin out
                 if (_GlyphPuff > 0.0) pOS += i.normalOS * _GlyphPuff * (0.18 + 0.5 * i.seed.x);
-                float3 pWS = DashWS(TransformObjectToWorld(pOS));
+                float3 pWS = DashWS(ClothWS(TransformObjectToWorld(pOS), i.positionOS.xyz));
                 // dash, chain mail: every character (a link) flies on its own, a little later or sooner than its neighbours,
                 // on its own wobbling path, and they gather on the body again
                 bool scat = _DashScatter.w > 0.0;
@@ -130,7 +143,9 @@ Shader "AsciiHero/Glyph"
             {
                 float2 l = clamp(i.local, 0.03, 0.97);
                 float rows = max(_AsciiRows, 1.0);
-                float mk = SAMPLE_TEXTURE2D(_AsciiAtlas, sampler_AsciiAtlas, float2((i.gi + l.x) / 16.0, 1.0 - (_AsciiRow + 1.0) / rows + l.y / rows)).r;
+                // sharp characters: a crisper mip and a hard threshold on the glyph's coverage (no soft, washed-out edges)
+                float mk = SAMPLE_TEXTURE2D_BIAS(_AsciiAtlas, sampler_AsciiAtlas, float2((i.gi + l.x) / 16.0, 1.0 - (_AsciiRow + 1.0) / rows + l.y / rows), -0.6).r;
+                mk = saturate((mk - 0.22) * 1.9);
                 return half4(i.col * mk, 1);
             }
             ENDHLSL
