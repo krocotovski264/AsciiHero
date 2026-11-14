@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.28 · Unity";
+        public const string VERSION = "beta 0.29 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -230,9 +230,11 @@ namespace AsciiHero
             return m;
         }
 
+        MaterialPropertyBlock smokeMpb;
         void Damage(int pct)
         {
             if (hp <= 0 || !ready) return;
+            if (player != null) player.PokeIdle();
             hp = Mathf.Max(0, hp - pct);
             string lost = "";
             while (LimbCount() > Mathf.CeilToInt(hp / 20f))
@@ -834,7 +836,7 @@ namespace AsciiHero
             if (!world || player == null || dashCd > 0 || !(limbs[3] || limbs[4])) return;
             // moving: where the stick points; standing: where the hero looks
             Vector3 d = moveDir.HasValue ? new Vector3(moveDir.Value.x, 0, moveDir.Value.y) : new Vector3(Mathf.Sin(player.heading), 0, Mathf.Cos(player.heading));
-            dashDir = d.normalized; dashT = 0; dashFrom = pos; dashMist = 0;
+            dashDir = d.normalized; dashT = 0; dashFrom = pos; dashMist = 0; player.StartLeap(); player.PokeIdle();
             // the shadow passes straight through trees, rocks and furniture; it only has to come out on free ground:
             // if the end of the dash is inside something it goes on until it is clear (or, failing that, stops short)
             dashLen = DASH_DIST;
@@ -972,6 +974,8 @@ namespace AsciiHero
             player.guardHeld = guardPtr || InputHub.Key("Guard");
             bool atkPtr = false; foreach (var ap in InputHub.active.Values) if (ap.owner == "atk") atkPtr = true;
             player.atkHeld = atkPtr || InputHub.Key("AttackHeld");
+            if (dir.HasValue || guardPtr || atkPtr || InputHub.Key("Attack") || InputHub.Key("Guard") || InputHub.Key("Dash")) player.PokeIdle();
+            if (player.IdleBusy) { dir = null; mag = 0; }          // getting up from the ground first
             if (InputHub.Key("Attack")) DoAttack();
             if (InputHub.Key("Dash")) DoDash();
             var dd = player.Locomotion(dt, dir, mag, lockPos, new Vector2(pos.x, pos.z), p => loc.Collide(p, 0.27f));
@@ -980,7 +984,14 @@ namespace AsciiHero
             UpdateDash(dt);
             if (player.trail.Count > 0) { foreach (var q in player.trail) SpawnPuff(q, 0.03f, Vector3.zero, 0.3f); player.trail.Clear(); }
             hero.go.transform.position = pos;
-            hero.go.transform.rotation = Quaternion.Euler(0, (player.heading - player.spinYaw) * Mathf.Rad2Deg, 0);      // the full-turn sweep spins the whole figure
+            float idleYaw = 0;
+            if (player.idleYawW > 0) { Vector3 co = Mirror(new Vector3(Mathf.Sin(isoYaw), 0, Mathf.Cos(isoYaw))); idleYaw = Mathf.DeltaAngle(player.heading * Mathf.Rad2Deg, Mathf.Atan2(co.x, co.z) * Mathf.Rad2Deg) * Mathf.Deg2Rad * player.idleYawW; }   // waving: turned to the camera
+            hero.go.transform.rotation = Quaternion.Euler(0, (player.heading - player.spinYaw + idleYaw) * Mathf.Rad2Deg, 0);      // the full-turn sweep spins the whole figure
+            // the shadow's body below the navel is smoke (glyph shader): the pelvis and the navel height for it
+            { var pb = hero.human != null ? hero.human.Bone("root") : null;
+              if (pb != null) Shader.SetGlobalVector("_HeroSmoke", new Vector4(pb.position.x, pb.position.y + 0.08f * hero.go.transform.lossyScale.y, pb.position.z, pos.y));
+              if (smokeMpb == null) smokeMpb = new MaterialPropertyBlock();
+              foreach (var r in hero.glyphs) if (r != null) { r.GetPropertyBlock(smokeMpb); smokeMpb.SetFloat("_SmokeLegs", 1); r.SetPropertyBlock(smokeMpb); } }
             loc.Update(tNow); Pickups(); UpdateDummies(dt, tNow); UpdateDebris(dt); UpdateDanger(tNow);
             if (respawnT > 0) { respawnT -= dt; if (respawnT <= 0) { RestoreBody(); pos = loc.spawn; player.ResetSim(); } }
             // grass: the hero and a point trailing behind him push the blades aside

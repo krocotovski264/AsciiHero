@@ -54,12 +54,12 @@ Shader "AsciiHero/Lit"
                 float w = saturate((1.2 - os.y) / 0.95); w = w * w * (3.0 - 2.0 * w);
                 float sp = min(length(_AsciiHeroVel.xz), 3.5), t = _AsciiTime, f = 1.0 + 0.8 * _ClothDash;
                 float ang = atan2(os.x, os.z);
-                // waves run down the cloth and round it; the hem swings out, trails behind the motion and lifts in a run
+                // waves run down the cloth and round it; the hem swings out a little and stays with the legs in a run
                 float wave = sin(t * 6.5 * f - os.y * 14.0 + ang * 3.0) + 0.5 * sin(t * 11.0 * f - os.y * 23.0 + ang * 5.0 + 1.7);
-                float amp = (0.022 + 0.032 * sp) * (1.0 + 3.0 * _ClothDash);
+                float amp = (0.018 + 0.016 * sp) * (1.0 + 3.0 * _ClothDash);
                 float3 radial = TransformObjectToWorldDir(normalize(float3(os.x, 0, os.z) + 1e-4));
                 float3 sway = float3(sin(t * 4.3 * f + ang * 2.0 + os.y * 7.0), 0.3 * sin(t * 5.1 * f + ang), cos(t * 3.7 * f + ang * 3.0 + os.y * 5.0));
-                return ws + (radial * wave * amp + sway * amp * 0.6 - _AsciiHeroVel.xyz * 0.2 + float3(0, 0.09 * sp / 3.5, 0)) * w;
+                return ws + (radial * wave * amp + sway * amp * 0.6 - _AsciiHeroVel.xyz * (0.03 + 0.05 * _ClothDash) + float3(0, 0.03 * sp / 3.5, 0)) * w;     // the hem follows the body closely (only a hint of trailing)
             }
         float3 DashWS(float3 ws)
         {

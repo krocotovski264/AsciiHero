@@ -55,12 +55,12 @@ Shader "AsciiHero/Glyph"
                 float w = saturate((1.2 - os.y) / 0.95); w = w * w * (3.0 - 2.0 * w);
                 float sp = min(length(_AsciiHeroVel.xz), 3.5), t = _AsciiTime, f = 1.0 + 0.8 * _ClothDash;
                 float ang = atan2(os.x, os.z);
-                // waves run down the cloth and round it; the hem swings out, trails behind the motion and lifts in a run
+                // waves run down the cloth and round it; the hem swings out a little and stays with the legs in a run
                 float wave = sin(t * 6.5 * f - os.y * 14.0 + ang * 3.0) + 0.5 * sin(t * 11.0 * f - os.y * 23.0 + ang * 5.0 + 1.7);
-                float amp = (0.022 + 0.032 * sp) * (1.0 + 3.0 * _ClothDash);
+                float amp = (0.018 + 0.016 * sp) * (1.0 + 3.0 * _ClothDash);
                 float3 radial = TransformObjectToWorldDir(normalize(float3(os.x, 0, os.z) + 1e-4));
                 float3 sway = float3(sin(t * 4.3 * f + ang * 2.0 + os.y * 7.0), 0.3 * sin(t * 5.1 * f + ang), cos(t * 3.7 * f + ang * 3.0 + os.y * 5.0));
-                return ws + (radial * wave * amp + sway * amp * 0.6 - _AsciiHeroVel.xyz * 0.2 + float3(0, 0.09 * sp / 3.5, 0)) * w;
+                return ws + (radial * wave * amp + sway * amp * 0.6 - _AsciiHeroVel.xyz * (0.03 + 0.05 * _ClothDash) + float3(0, 0.03 * sp / 3.5, 0)) * w;     // the hem follows the body closely (only a hint of trailing)
             }
                 float3 DashWS(float3 ws)
             {
@@ -73,6 +73,9 @@ Shader "AsciiHero/Glyph"
             }
             float _AsciiLod;      // far camera: fewer, larger characters (how many times further than the close-up distance)
             float _GlyphPuff;     // per renderer: 0..1, a burst of smoke flying apart
+            // the shadow hero: below the navel there are no legs, only smoke sliding down to the ground
+            float _SmokeLegs;     // per renderer (the hero's skinned glyphs)
+            float4 _HeroSmoke;    // pelvis x, navel height, pelvis z, ground height
             float _GlyphBurn;     // per renderer: 0..1, a torn-off limb burning away
             float _LimbGone[6];   // per renderer: 1 = this limb is torn off (index from seed.y)
             #define GLYPH_SCALE 1.35
@@ -92,7 +95,30 @@ Shader "AsciiHero/Glyph"
                 if (_GlyphSmoke > 0.5) pOS += i.normalOS * (0.004 + (0.07 + 0.09 * wisp) * ph * ph);
                 // puff (a burst of smoke where a limb is torn off): the glyphs fly apart from the centre, rise and thin out
                 if (_GlyphPuff > 0.0) pOS += i.normalOS * _GlyphPuff * (0.18 + 0.5 * i.seed.x);
+                float3 pWS0 = TransformObjectToWorld(i.positionOS.xyz);
+                // below the navel (and fading in over a hand's breadth under it) a glyph leaves the leg it was on and
+                // becomes part of a narrowing column of smoke: each one slides slowly down from the navel to the ground
+                // on its own turn round the column, thinning out, trailing a little behind the motion
+                float low = (_SmokeLegs > 0.5 && _GlyphCloth < 0.5) ? saturate((_HeroSmoke.y - pWS0.y) / 0.14) : 0.0;
+                low = low * low * (3.0 - 2.0 * low);
+                if (_SmokeLegs > 0.5 && _GlyphSmoke > 0.5 && low < 0.999)
+                {   // above the navel: a light smoke curling up off the arms, the chest and the head
+                    float cr = 0.035 * ph * (0.5 + wisp);
+                    pOS += float3(sin(_AsciiTime * 1.3 + i.seed.x * 40.0), 0, cos(_AsciiTime * 1.1 + i.seed.x * 31.0)) * cr;
+                }
                 float3 pWS = DashWS(ClothWS(TransformObjectToWorld(pOS), i.positionOS.xyz));
+                float sU = frac(i.seed.x * 3.31 + _AsciiTime * 0.16);       // 0 at the navel -> 1 on the ground
+                bool smokeKeep = low < 0.001 || frac(i.seed.x * 23.17) < 0.55;
+                if (low > 0.0)
+                {
+                    float top = _HeroSmoke.y, gy = _HeroSmoke.w + 0.03;
+                    float r = lerp(0.15, 0.05, sU) * (0.45 + 0.55 * frac(i.seed.x * 9.13));
+                    float an = i.seed.x * 43.9 + sU * 2.4 + _AsciiTime * (0.25 + 0.4 * (frac(i.seed.x * 2.71) - 0.5));
+                    float3 c = float3(_HeroSmoke.x, lerp(top, gy, pow(sU, 0.85)), _HeroSmoke.z);
+                    c.xz += float2(cos(an), sin(an)) * r - _AsciiHeroVel.xz * 0.12 * sU;
+                    c.x += 0.02 * sin(_AsciiTime * 2.1 + i.seed.x * 17.0);
+                    pWS = lerp(pWS, DashWS(c), low);
+                }
                 // dash, chain mail: every character (a link) flies on its own, a little later or sooner than its neighbours,
                 // on its own wobbling path, and they gather on the body again
                 bool scat = _DashScatter.w > 0.0;
@@ -121,8 +147,9 @@ Shader "AsciiHero/Glyph"
                 }
                 float lod = max(1.0, _AsciiLod);
                 bool lodKeep = lod < 1.01 || frac(i.seed.x * 31.7 + 0.37) < 1.7 / (lod * lod);
-                if (_GlyphSmoke > 0.5) pWS.y += (0.15 + 0.4 * wisp) * ph * ph;
-                if (_GlyphSmoke > 0.5 && _GlyphPuff <= 0.0) pWS -= _AsciiHeroVel.xyz * (0.05 + 0.2 * wisp) * ph * ph;
+                float upK = (_SmokeLegs > 0.5 ? 0.6 : 1.0) * (1.0 - low);     // the shadow's upper body: lighter
+                if (_GlyphSmoke > 0.5) pWS.y += (0.15 + 0.4 * wisp) * ph * ph * upK;
+                if (_GlyphSmoke > 0.5 && _GlyphPuff <= 0.0) pWS -= _AsciiHeroVel.xyz * (0.05 + 0.2 * wisp) * ph * ph * upK;
                 if (_GlyphPuff > 0.0) pWS.y += _GlyphPuff * _GlyphPuff * (0.15 + 0.5 * frac(i.seed.x * 5.3));
                 bool gone = _LimbGone[(int)(i.seed.y + 0.5)] > 0.5 || dot(i.normalOS, i.normalOS) < 0.09;
                 // burning: glyphs turn to embers one by one, float up and go out
@@ -138,7 +165,7 @@ Shader "AsciiHero/Glyph"
                 float sceneZ = nd.b > 1e-4 ? nd.b * 12.0 : 1e5;
                 float myZ = -pVS.z;
                 bool inside = all(suv >= 0.0) && all(suv <= 1.0);
-                bool vis = scat ? (lodKeep && !gone && inside) : lodKeep && !gone && ember < 0.999 && dot(nVS, toCam) > -0.05 - ember - _GlyphPuff * 4.0 - (_DashSpin.w != 0.0 ? 4.0 : 0.0) && myZ <= sceneZ + 0.008 + 0.0035 * myZ && inside;
+                bool vis = low > 0.5 ? (lodKeep && smokeKeep && !gone && inside && myZ <= sceneZ + 0.25) : scat ? (lodKeep && !gone && inside) : lodKeep && !gone && ember < 0.999 && dot(nVS, toCam) > -0.05 - ember - _GlyphPuff * 4.0 - (_DashSpin.w != 0.0 ? 4.0 : 0.0) && myZ <= sceneZ + 0.008 + 0.0035 * myZ && inside;
                 float3 lit = SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, sampler_AsciiLitTex, suv, 0).rgb;
                 float3 col = _AsciiLinear > 0.5 ? pow(max(lit, 0.0), 1.0 / 2.2) : max(lit, 0.0);
                 float lum = dot(col, float3(0.299, 0.587, 0.114));
@@ -153,6 +180,11 @@ Shader "AsciiHero/Glyph"
                     gi = floor(lerp(15.0, MIN_GLYPH, ph));
                     o.col = lerp(float3(0.42, 0.27, 0.80), float3(0.10, 0.06, 0.24), ph) * (1.0 - ph * (0.8 - 0.25 * wisp)) * (0.75 + 0.25 * depthK);
                     if (_GlyphPuff > 0.0) { gi = floor(lerp(15.0, MIN_GLYPH, _GlyphPuff)); o.col = lerp(float3(0.55, 0.36, 0.95), float3(0.10, 0.06, 0.22), _GlyphPuff) * (1.0 - _GlyphPuff) * (1.0 - _GlyphPuff * 0.5); }
+                }
+                if (low > 0.0)
+                {   // smoke whatever it was (skin, trousers, boots): it fades as it nears the ground
+                    float3 sc = lerp(float3(0.40, 0.26, 0.78), float3(0.09, 0.05, 0.22), sU) * (1.0 - sU * 0.75) * (0.75 + 0.25 * depthK);
+                    o.col = lerp(o.col, sc, low); gi = floor(lerp(gi, lerp(14.0, MIN_GLYPH, sU), low));
                 }
                 if (scat) { o.col = float3(0.62, 0.67, 0.76) * (0.5 + 0.5 * frac(i.seed.x * 5.1)); gi = MIN_GLYPH + floor(frac(i.seed.x * 9.7) * (15.99 - MIN_GLYPH)); }
                 if (ember > 0.0) { o.col = lerp(o.col, float3(1.6, 0.62, 0.12), min(1.0, ember * 2.0)) * (1.0 - ember * ember); gi = floor(lerp(gi, 2.0, ember)); }

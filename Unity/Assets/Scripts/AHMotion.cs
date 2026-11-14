@@ -350,7 +350,8 @@ namespace AsciiHero
         // (idle, walk, run) are aligned by foot contact and blended by speed with a shared phase. Game logic moves the
         // body, the playback rate follows the real speed so the feet do not slide, and nothing jumps between clips.
         class Loop { public int a, b, len, off; public float T, v, dx, dz, mx, mz; }
-        static Loop LIdle, LWalk, LRun;
+        static Loop LIdle, LIdleF, LWalk, LRun;     // standing at ease (motion capture): a man, a woman
+        Loop IdleL => ch.cfg.sex == 'f' ? LIdleF : LIdle;
         static Loop Prep(int a, int b)
         {
             var L = new Loop { a = a, b = b, len = b - a }; L.T = L.len / (float)MotionDB.fps;
@@ -363,7 +364,7 @@ namespace AsciiHero
             for (int i = 0; i < L.len; i++) { int f = a + i, p = a + (i + L.len - 1) % L.len; if (CON[p * 2] < 0.5f && CON[f * 2] >= 0.5f) { L.off = i; break; } }   // phase 0 = left foot lands
             return L;
         }
-        static void PrepLoops() { if (LIdle != null) return; LIdle = Prep(9019, 9064); LWalk = Prep(648, 685); LRun = Prep(7678, 7700); }
+        static void PrepLoops() { if (LIdle != null) return; LIdle = Prep(10493, 10568); LIdleF = Prep(10568, 10658); LWalk = Prep(648, 685); LRun = Prep(7678, 7700); }
         Quaternion[] lq, q2, q3; float phase, idlePh, wWalk, wRun;
         readonly float[] c2 = new float[2], c3 = new float[2], cTmp = new float[2];
         void SampleLoop(Loop L, float ph, Quaternion[] oq, ref Vector3 oro, float[] ocon)
@@ -392,7 +393,7 @@ namespace AsciiHero
             wRun = Smooth01(1.6f, 2.5f, v); wWalk = Smooth01(0.04f, 0.5f, v);
             float T = Mathf.Lerp(LWalk.T, LRun.T, wRun), nat = Mathf.Lerp(LWalk.v, LRun.v, wRun);
             phase = (phase + dt / T * Mathf.Clamp(v / nat, 0.55f, 1.5f)) % 1f;
-            idlePh = (idlePh + dt / LIdle.T) % 1f;
+            idlePh = (idlePh + dt / IdleL.T) % 1f;
             // the body is moved by the controller; facing follows it smoothly
             float dx = S.x - myPos.x, dz = S.z - myPos.y;
             heading += Wrap(S.h - heading) * (1 - Mathf.Exp(-dt * LN2 / 0.045f));
@@ -405,7 +406,7 @@ namespace AsciiHero
             PrepLoops();
             int nb = MotionDB.nb;
             if (q2 == null) { q2 = new Quaternion[nb]; q3 = new Quaternion[nb]; }
-            SampleLoop(LIdle, idlePh, outQ, ref ro, con);
+            SampleLoop(IdleL, idlePh, outQ, ref ro, con);
             if (wWalk > 0.001f)
             {
                 Vector3 ro2 = Vector3.zero, ro3 = Vector3.zero;
@@ -585,13 +586,13 @@ namespace AsciiHero
             Rot("spine05", Y, twist * 0.4f + look * 0.15f); Rot("spine03", Y, twist * 0.6f + look * 0.2f);
             Rot("spine03", X, -0.012f * breath - idle * 0.01f * Mathf.Sin(t * 0.6f));
             // head: stays level, looks where the body is turning, drifts a little at rest
-            Rot("neck01", Y, -twist * 0.5f + look * 0.3f + idle * 0.06f * Mathf.Sin(t * 0.37f)); Rot("head", Y, -twist * 0.35f + look * 0.35f + idle * 0.05f * Mathf.Sin(t * 0.23f + 1));
+            Rot("neck01", Y, -twist * 0.5f + look * 0.3f + idle * 0.02f * Mathf.Sin(t * 0.13f)); Rot("head", Y, -twist * 0.35f + look * 0.35f + idle * 0.02f * Mathf.Sin(t * 0.09f + 1));
             // head: eyes on the path ahead, a touch below level, whatever the trunk does
             var hb = H.Bone("head");
             if (hb != null)
             {
                 Vector3 f = hb.rotation * Vector3.forward;
-                float d = (Mathf.Asin(Mathf.Clamp(f.y, -1f, 1f)) - (-0.07f + idle * 0.02f * Mathf.Sin(t * 0.8f))) * 0.9f * kw;
+                float d = (Mathf.Asin(Mathf.Clamp(f.y, -1f, 1f)) - (-0.07f + idle * 0.01f * Mathf.Sin(t * 0.3f))) * 0.9f * kw;
                 Rot("neck01", X, d * 0.4f); Rot("head", X, d * 0.6f);
             }
             // arms: swing opposite to the legs (phase 0 = left foot lands, so the right arm is forward)
@@ -724,11 +725,114 @@ namespace AsciiHero
             }
             ro.x += (aro.x - ro.x) * wl; ro.z += (aro.z - ro.z) * wl; ro.y += yAbs ? (aro.y - ro.y) * wl : aro.y * wl;
         }
+        // ---------- idle behaviour ----------
+        // Standing still and left alone, the hero does something now and then (timers since the last input):
+        //   5 s  (75 %) looks around - the head leads, the neck and a little of the chest follow, a pause at each side
+        //   10 s (60 %) shifts his weight from foot to foot (mocap), then lifts a foot behind him and looks down at its sole
+        //   15 s (20 %) turns to the camera, waves (mocap) and turns back
+        //   20 s        sits down on the ground (mocap) and stays there, looking round every 4-7 s, until something happens;
+        //               then he gets up (mocap) before he can move
+        // The dash plays a crouch-and-spring (mocap leap) over the body.
+        const int SHIFT_A = 10658, SHIFT_N = 120;
+        const int WAVE_A = 10778, WAVE_N = 55;
+        const int SIT_A = 10833, SIT_N = 81;
+        const int LEAP_A = 10914, LEAP_N = 38;
+        class IdleAct { public string kind, phase = "down"; public float t, w = 1, nextLook, look = -1; public bool o; }
+        IdleAct idleA; readonly List<string> idleDue = new List<string>(); float idleT, leapT = -1, idleW, footLift, idleLook, idleLookP;
+        /// 0..1: how far the hero is turned towards the camera (the game adds the turn to his facing)
+        public float idleYawW;
+        static float Smoother(float x) { x = Mathf.Clamp01(x); return x * x * x * (x * (x * 6 - 15) + 10); }
+        /// any input or a hit: idle actions stop (sitting: he gets up first)
+        public void PokeIdle()
+        {
+            idleT = 0; idleDue.Clear();
+            if (idleA == null) return;
+            if (idleA.kind == "sit") { if (idleA.phase != "up") { idleA.phase = "up"; idleA.t = 0; } } else idleA.o = true;
+        }
+        /// sitting or getting up: the hero cannot walk yet
+        public bool IdleBusy => idleA != null && idleA.kind == "sit";
+        public void StartLeap() { leapT = 0; }
+        static float LookYaw(float t, float T, float amp)
+        {   // left, hold, right, hold, back
+            float[] kt = { 0, 0.16f, 0.36f, 0.56f, 0.76f, 1 }, kv = { 0, amp, amp, -amp, -amp, 0 };
+            float u = Mathf.Clamp01(t / T); int i = 0; while (i < kt.Length - 2 && u > kt[i + 1]) i++;
+            return kv[i] + (kv[i + 1] - kv[i]) * Smoother((u - kt[i]) / (kt[i + 1] - kt[i]));
+        }
+        void LayClip(int a, float fr, float w)
+        {
+            if (w <= 0.001f) return; Vector3 r0 = Vector3.zero; SamplePose(a + fr, atkQ, ref r0, null); Lay(atkQ, r0, w, true); idleW = Mathf.Max(idleW, w);
+        }
+        void IdleUpdate(float dt)
+        {
+            bool busy = vel > 0.08f || Attacking || guard > 0.05f || combatT > 0 || !limbs[3] || !limbs[4] || !loopMode;
+            if (busy && !IdleBusy) PokeIdle();
+            float T0 = idleT; idleT += dt;
+            float[] at = { 5, 10, 15, 20 }, chance = { 0.75f, 0.6f, 0.2f, 1 }; string[] kinds = { "look", "shift", "wave", "sit" };
+            for (int k = 0; k < 4; k++) if (T0 < at[k] && idleT >= at[k] && UnityEngine.Random.value < chance[k]) idleDue.Add(kinds[k]);
+            if (idleA == null && idleDue.Count > 0) { idleA = new IdleAct { kind = idleDue[0], nextLook = 4 + UnityEngine.Random.value * 3 }; idleDue.RemoveAt(0); }
+            idleYawW = 0; idleLook = 0; idleLookP = 0; footLift = 0; idleW = 0;
+            var I = idleA;
+            if (I != null)
+            {
+                I.t += dt;
+                float fade = I.o ? (I.w = Mathf.Max(0, I.w - dt / 0.25f)) : 1;
+                if (I.kind == "look") { idleLook = LookYaw(I.t, 4.2f, 0.95f) * fade; idleLookP = -0.06f * Mathf.Abs(idleLook); if (I.t > 4.2f || fade <= 0) idleA = null; }
+                else if (I.kind == "shift")
+                {
+                    float cw = Mathf.Min(Smoother(I.t / 0.5f), 1 - Smoother((I.t - 4.0f) / 0.5f)) * fade;
+                    if (I.t < 4.5f) LayClip(SHIFT_A, Mathf.Min(SHIFT_N - 1, I.t * 30), cw);
+                    float lt = I.t - 4.1f; footLift = (lt > 0 ? Mathf.Min(Smoother(lt / 0.6f), 1 - Smoother((lt - 1.9f) / 0.6f)) : 0) * fade;
+                    if (I.t > 6.7f || fade <= 0) idleA = null;
+                }
+                else if (I.kind == "wave")
+                {
+                    idleYawW = Mathf.Min(Smoother(I.t / 0.7f), 1 - Smoother((I.t - 2.6f) / 0.7f)) * fade;
+                    float wt = I.t - 0.6f, wd = WAVE_N / 30f;
+                    if (wt > 0 && wt < wd) LayClip(WAVE_A, wt * 30, Mathf.Min(Smoother(wt / 0.25f), 1 - Smoother((wt - wd + 0.3f) / 0.3f)) * fade);
+                    if (I.t > 3.3f || fade <= 0) idleA = null;
+                }
+                else
+                {   // sit
+                    float fr, w = 1;
+                    if (I.phase == "down") { fr = 2 + Mathf.Min(1, I.t / 1.0f) * 22; w = Smoother(I.t / 0.25f); if (I.t > 1.0f) { I.phase = "sit"; I.t = 0; } }
+                    else if (I.phase == "sit")
+                    {
+                        fr = 24 + 16 * Smoother(I.t / 0.8f);       // settles into the sitting pose
+                        I.nextLook -= dt; if (I.nextLook <= 0 && I.look < 0) I.look = 0;
+                        if (I.look >= 0) { I.look += dt; idleLook = LookYaw(I.look, 2.8f, 0.75f); if (I.look > 2.8f) { I.look = -1; I.nextLook = 4 + UnityEngine.Random.value * 3; } }
+                    }
+                    else { fr = 57 + Mathf.Min(1, I.t / 0.85f) * 22; w = 1 - Smoother((I.t - 0.75f) / 0.2f); if (I.t > 0.95f) { idleA = null; idleT = 0; } }
+                    LayClip(SIT_A, fr, w);
+                }
+            }
+            if (leapT >= 0)
+            {
+                leapT += dt; float u = leapT / 0.45f;
+                if (u >= 1) leapT = -1; else LayClip(LEAP_A, 5 + u * 26, Mathf.Min(Smoother(u / 0.15f), 1 - Smoother((u - 0.75f) / 0.25f)));
+            }
+        }
+        // head, neck and chest turn to look round; looking down behind at the sole of the lifted right foot
+        void IdleBones()
+        {
+            Quaternion gq = ch.go.transform.rotation; Vector3 X = gq * Vector3.right;
+            if (idleLook != 0)
+            {
+                Rot("spine03", Vector3.up, idleLook * 0.12f); Rot("neck01", Vector3.up, idleLook * 0.33f); Rot("head", Vector3.up, idleLook * 0.55f);
+                Rot("head", X, idleLookP);
+            }
+            if (footLift > 0.001f)
+            {
+                float fw = footLift; H.root.position += gq * Vector3.left * (0.05f * fw);       // the weight onto the left leg
+                Rot("spine05", Vector3.up, 0.9f * fw * 0.2f); Rot("spine03", Vector3.up, 0.9f * fw * 0.3f); Rot("neck01", Vector3.up, 0.9f * fw * 0.5f);
+                Rot("spine03", X, 0.7f * fw * 0.2f); Rot("neck01", X, 0.7f * fw * 0.4f); Rot("head", X, 0.7f * fw * 0.5f);
+            }
+        }
         // the layers over locomotion: the two-handed fighting stance, the guard, the cut
         void AttackLayer(float dt)
         {
             atkW = 0; grdW = 0; stW = 0; ovW = 0; spinYaw = 0; bashW = 0;
             int nb = MotionDB.nb; if (atkQ == null) { atkQ = new Quaternion[nb]; atkQ2 = new Quaternion[nb]; }
+            IdleUpdate(dt);
             // stance: with a weapon in both hands the body takes the guard the cuts start from (hilt low in front, point forward)
             if (stance > 0.01f && TwoHanded && limbs[2]) { Vector3 s0 = Vector3.zero; SamplePose(ATTACKS[1].a + STANCE_FRAME, atkQ, ref s0, null); Lay(atkQ, s0, stance, true); stW = stance; }
             if (guard > 0.01f && ch.cfg.weapon != "shield" && limbs[2])
@@ -736,7 +840,7 @@ namespace AsciiHero
                 Vector3 gro = Vector3.zero; SamplePose(GUARD_A + guard * (GUARD_N - 1), atkQ, ref gro, null);
                 Lay(atkQ, new Vector3(gro.x, gro.y - GUARD_Y0, gro.z), guard, false); grdW = guard;
             }
-            ovW = Mathf.Max(stW, grdW);
+            ovW = Mathf.Max(Mathf.Max(stW, grdW), idleW);
             if (!Attacking || !limbs[2]) { atkQueued = false; return; }
             // the next cut follows straight on if the button is held or was pressed again: no return to the stance in between
             if (atkT >= atkDur - ATK_OUT && (atkQueued || atkHeld))
@@ -826,6 +930,7 @@ namespace AsciiHero
             combatT = Mathf.Max(0, combatT - dt);
             stance += ((combatT > 0 ? 1f : 0f) - stance) * (1 - Mathf.Exp(-dt * LN2 / 0.14f));
             SpineFix();
+            IdleBones();
             string Wc = ch.cfg.weapon; bool two = TwoHanded;
             // (with a weapon in both hands the stance is the captured guard, see AttackLayer; the posed one is for shield and bare hands)
             float st = two ? 0 : stance * (1 - ovW), still = 1 - wWalk; stanceFeet = st * still;
@@ -1012,7 +1117,7 @@ namespace AsciiHero
         // ---------- arms ----------
         // The mocap actors hold their arms away from the body. Bring a hanging arm back to the torso: the sideways
         // angle of the upper arm is limited softly, the forward/back swing is untouched.
-        const float ARM_MAX = 0.13f, ARM_SOFT = 0.12f;
+        const float ARM_MAX = 0.13f, ARM_SOFT = 0.12f, ARM_MIN = 0.2f;     // ARM_MIN: the elbows never lie against the trunk
         void RelaxArms()
         {
             Quaternion gq = ch.go.transform.rotation, gi = Quaternion.Inverse(gq);
@@ -1028,8 +1133,8 @@ namespace AsciiHero
                 float o = d.x * sign, r = Mathf.Sqrt(o * o + d.y * d.y), abd = Mathf.Atan2(o, -d.y);
                 bool oneLeg = limbs[3] != limbs[4];
                 if (ovW > 0.3f) continue;            // a cut or the guard raises the arms on purpose
-                if (!oneLeg && abd <= ARM_MAX) continue;
-                float a2 = oneLeg ? Mathf.Max(abd, 0.55f + 0.12f * Mathf.Sin(hopPh)) : (ARM_MAX + 0.13f * wRun) + Mathf.Max(0, abd - ARM_MAX - 0.13f * wRun) * ARM_SOFT;   // one leg: arms out for balance
+                if (!oneLeg && abd >= ARM_MIN && abd <= ARM_MAX + 0.13f * wRun) continue;
+                float a2 = oneLeg ? Mathf.Max(abd, 0.55f + 0.12f * Mathf.Sin(hopPh)) : abd < ARM_MIN ? ARM_MIN : (ARM_MAX + 0.13f * wRun) + Mathf.Max(0, abd - ARM_MAX - 0.13f * wRun) * ARM_SOFT;   // one leg: arms out for balance
                 Vector3 d2 = gq * new Vector3(Mathf.Sin(a2) * r * sign, -Mathf.Cos(a2) * r, d.z).normalized;
                 up.rotation = Quaternion.FromToRotation(dW, d2) * up.rotation;
             }
@@ -1082,6 +1187,11 @@ namespace AsciiHero
                     Vector3 w = g.rotation * new Vector3(sg * 0.03f, 0, -hopStride * Mathf.Cos(hopPh) * mv) + g.position;
                     target = new Vector3(w.x, groundAnkle + (0.5f * hopH + 0.14f * Mathf.Max(0, Mathf.Sin(hopPh)) * mv) * scaleY, w.z);   // in the air the foot is pulled up under the body F.locked = false; F.rel = 0;
                 }
+                if (si == 1 && footLift > 0.001f)
+                {   // the right foot lifted behind the body, knee bent
+                    Vector3 o = ch.go.transform.rotation * new Vector3(0.04f, 0, -0.2f);
+                    target.x += o.x * footLift; target.z += o.z * footLift; target.y += 0.32f * footLift * scaleY;
+                }
                 target.y = Mathf.Max(target.y, groundAnkle);
                 float l1 = Vector3.Distance(kp, hp), l2 = Vector3.Distance(ap, kp), over = Vector3.Distance(target, hp) - (l1 + l2) * 0.99f;
                 if (F.rel > 0.5f && over > 0) drop = Mathf.Max(drop, over);
@@ -1114,6 +1224,7 @@ namespace AsciiHero
                 Vector3 kp2 = L.knee.position, ap2 = L.foot.position;
                 RotateWorld(L.knee, Quaternion.FromToRotation((ap2 - kp2).normalized, (L.target - kp2).normalized));
                 L.foot.rotation = stanceFeet > 0.01f ? Quaternion.AngleAxis(sgK * 0.3f * stanceFeet * Mathf.Rad2Deg, Vector3.up) * footQ : footQ;     // toes turned out
+                if (si == 1 && footLift > 0.001f) L.foot.rotation = Quaternion.AngleAxis(1.1f * footLift * Mathf.Rad2Deg, ch.go.transform.rotation * Vector3.right) * L.foot.rotation;   // toes down: the sole turned up behind
             }
         }
     }

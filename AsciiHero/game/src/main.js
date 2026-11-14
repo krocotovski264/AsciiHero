@@ -5,7 +5,7 @@ import { AsciiRenderer, makeMaterials, buildGlyphLayer, enableShift, GLYPH, GLYP
 import { buildTavern } from './tavern.js';
 import { buildField, LIMBS, LIMB_NAME } from './field.js';
 import { applyPose } from './pose.js';
-import { makeActor, animateActor, locomotion, loadMocap, setLimbs, startAttack, ATTACKS, COMBAT_HOLD } from './anim.js';
+import { makeActor, animateActor, locomotion, loadMocap, setLimbs, startAttack, ATTACKS, COMBAT_HOLD, pokeIdle, idleBusy, startLeap } from './anim.js';
 
 const $ = id => document.getElementById(id);
 const DEF = { sex: 'm', height: 180, build: 1, armor: 'chain', weapon: 'shield' };
@@ -154,7 +154,7 @@ function rebuild() {
       pc.shifts.push(enableShift(o)); }); }
   buildGlyphLayer(char.group);
   scene.add(char.group);
-  char.cfgWeapon = cfg.weapon;
+  char.cfgWeapon = cfg.weapon; char.cfgSex = cfg.sex;
   player = makeActor(char);
   setLimbs(player, body.limbs);
   applyHeight();
@@ -214,6 +214,7 @@ const body = { hp: 100, limbs: { head: true, armL: true, armR: true, legL: true,
 const limbCount = () => LIMBS.filter(l => body.limbs[l]).length;
 function damage(pct) {
   if (body.hp <= 0) return;
+  if (player) pokeIdle(player);
   body.hp = Math.max(0, body.hp - pct);
   const lost = [];
   while (limbCount() > Math.ceil(body.hp / 20)) { const have = LIMBS.filter(l => body.limbs[l]); const l = have[Math.floor(Math.random() * have.length)]; spawnDebris(l); body.limbs[l] = false; lost.push(LIMB_NAME[l]); }
@@ -499,6 +500,7 @@ function doDash() {
   if (mode !== 'world' || !player || dash.cd > 0 || !(body.limbs.legL || body.limbs.legR)) return;
   // moving: where the stick points; standing: where the hero looks
   const d = act.dir ? new THREE.Vector3(act.dir[0], 0, act.dir[1]) : new THREE.Vector3(Math.sin(player.heading), 0, Math.cos(player.heading));
+  startLeap(player); pokeIdle(player);
   dash.dir = d.normalize(); dash.t = 0; dash.from.copy(pos); dash.mist = 0;
   // the armour follows piece by piece, one after another, like a suit assembling itself. Every piece is pulled in by its
   // own spring: it accelerates gently, overshoots its place, swings back and only then settles; it tumbles on the way.
@@ -581,6 +583,8 @@ function worldUpdate(dt, t) {
   // stick: light push = turn on the spot, more = walk -> jog -> sprint (blend tree)
   const lockPos = lockOn ? (lockFixed || (loc === tavern ? bartender.char.group.position : loc.spawn)) : null;
   act.dir = dir; player.guardHeld = act.guard || !!keys.KeyK; player.atkHeld = !!act.atk || !!keys.KeyJ;
+  if (dir || act.atk || act.guard || keys.KeyJ || keys.KeyK) pokeIdle(player);
+  if (idleBusy(player)) { dir = null; mag = 0; }          // getting up from the ground first
   const [ddx, ddz] = locomotion(player, dt, dir, mag, lockPos, pos, p => collide(p, 0.27));
   pos.x += ddx; pos.z += ddz;
   updateDash(dt);
@@ -588,7 +592,8 @@ function worldUpdate(dt, t) {
   collide(pos, 0.27);
   heading = player.heading;
   char.group.position.set(pos.x, 0, pos.z);
-  char.group.rotation.y = heading + (player.spinYaw || 0);      // the full-turn sweep spins the whole figure
+  { const ch = Math.atan2(ISO_OFF.x, ISO_OFF.z); let d = ch - heading; d = Math.atan2(Math.sin(d), Math.cos(d)); player.idleYaw = d * (player.idleYawW || 0); }
+  char.group.rotation.y = heading + (player.spinYaw || 0) + (player.idleYaw || 0);      // the full-turn sweep spins the whole figure
   loc.update(t); pickups(); updateDummies(dt, t); updateDebris(dt);
   if (player) GLYPH.uVel.value.set(player.sim.vx, 0, player.sim.vz);
   GLYPH.uHeroA.value.set(pos.x, 0, pos.z); GLYPH.uHeroB.value.lerp(GLYPH.uHeroA.value, Math.min(1, dt * 2.2));
@@ -637,7 +642,7 @@ function frame(now) {
   if (fpsAcc > 1) { $('fps').textContent = Math.round(fpsN / fpsAcc) + ' fps · ' + (GLYPH.uMode.value > 0.5 ? GLYPH_STATS.count + ' симв.' : AR.cols + '×' + AR.rows); fpsAcc = 0; fpsN = 0; }
   requestAnimationFrame(frame);
 }
-window.__dbg = { ATTACKS, damage, body, get dummies() { return loc && loc.dummies; }, doAttack, doDash, act, dash, ISO, debris, puffs, get loc() { return loc; }, cam, setCfg, enterWorld, leaveWorld, stick, get pos() { return pos; }, get player() { return player; }, get auto() { return autoRotate; }, set auto(v) { autoRotate = v; }, AR };
+window.__dbg = { pokeIdle, ATTACKS, damage, body, get dummies() { return loc && loc.dummies; }, doAttack, doDash, act, dash, ISO, debris, puffs, get loc() { return loc; }, cam, setCfg, enterWorld, leaveWorld, stick, get pos() { return pos; }, get player() { return player; }, get auto() { return autoRotate; }, set auto(v) { autoRotate = v; }, AR };
 (async () => {
   try {
     await loadHuman(); await loadMocap();
