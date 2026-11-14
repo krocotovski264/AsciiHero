@@ -59,12 +59,30 @@ Shader "AsciiHero/Glyph"
             float4 _ClothMap;             // skirt mesh: x = centre z, y = top y, z = bottom y
             float _ClothSim;              // per renderer: 1 = this is the simulated skirt
             float4 _AsciiWind;            // xy = direction (world xz), z = strength
+            float WHash(float2 p) { p = frac(p * float2(123.34, 456.21)); p += dot(p, p + 45.32); return frac(p.x * p.y); }
+            float WNoise(float2 p)      // smooth value noise, 0..1
+            {
+                float2 i = floor(p), f = frac(p); float2 u = f * f * (3.0 - 2.0 * f);
+                return lerp(lerp(WHash(i), WHash(i + float2(1, 0)), u.x), lerp(WHash(i + float2(0, 1)), WHash(i + float2(1, 1)), u.x), u.y);
+            }
+            // the wind field (shared by grass, leaves): a coarse gust pattern carried downwind, with finer detail scrolling
+            // faster over it (as in the 'Ghost of Tsushima' grass); _AsciiWind: xy direction, z strength (with lulls, from
+            // the CPU), w the distance the air has travelled
+            float WindGust(float2 p)
+            {
+                float2 wd = _AsciiWind.xy, wp = float2(-wd.y, wd.x); float run = _AsciiWind.w;
+                float2 q = float2(dot(p, wd) - run, dot(p, wp));
+                float g = WNoise(q * float2(0.17, 0.11) + 3.1);                    // big gusts: long downwind, broad across
+                g = smoothstep(0.32, 0.82, g);
+                float d = WNoise(q * float2(0.6, 0.45) - float2(run * 0.7, 0) + 11.7);   // smaller ripples on top, faster
+                return saturate(g * (0.7 + 0.6 * d));
+            }
             float3 ClothWS(float3 ws, float3 os)
             {
                 if (_GlyphCloth > 1.5)
                 {   // leaves: the crown leans downwind with the gusts, every bit of it flutters
                     float2 wd = _AsciiWind.xy; float st = _AsciiWind.z, t = _AsciiTime;
-                    float gust = 0.5 + 0.5 * sin(dot(ws.xz, wd) * 0.85 - t * 2.3); gust *= gust;
+                    float gust = WindGust(ws.xz);     // the same gusts as over the grass
                     float hk = saturate(ws.y / 3.5);
                     float3 sway = float3(wd.x, 0, wd.y) * st * (0.04 + 0.11 * gust) * hk;
                     float3 fl = float3(sin(t * 5.3 + dot(ws, float3(4.1, 2.3, 3.7))), 0.6 * sin(t * 6.1 + dot(ws, float3(2.9, 3.3, 1.7))), cos(t * 4.7 + dot(ws, float3(1.3, 3.9, 2.1))));
@@ -150,7 +168,7 @@ Shader "AsciiHero/Glyph"
                     }
                 }
                 float lod = max(1.0, _AsciiLod);
-                bool lodKeep = lod < 1.01 || frac(i.seed.x * 31.7 + 0.37) < 1.7 / (lod * lod);
+                bool lodKeep = lod < 1.01 || _AsciiActor > 0.5 || frac(i.seed.x * 31.7 + 0.37) < 1.7 / (lod * lod);     // (characters keep every glyph: no bald patches)
                 if (_GlyphSmoke > 0.5) pWS.y += (0.15 + 0.4 * wisp) * ph * ph;
                 if (_GlyphSmoke > 0.5 && _GlyphPuff <= 0.0) pWS -= _AsciiHeroVel.xyz * (0.05 + 0.2 * wisp) * ph * ph;
                 if (_GlyphPuff > 0.0) pWS.y += _GlyphPuff * _GlyphPuff * (0.15 + 0.5 * frac(i.seed.x * 5.3));
@@ -193,7 +211,7 @@ Shader "AsciiHero/Glyph"
                 if (ember > 0.0) { o.col = lerp(o.col, float3(1.6, 0.62, 0.12), min(1.0, ember * 2.0)) * (1.0 - ember * ember); gi = floor(lerp(gi, 2.0, ember)); }
                 o.gi = gi;
                 o.local = i.corner + 0.5;
-                pVS.xy += i.corner * _GlyphCell.xy * GLYPH_SCALE * lod;   // upright character in the view plane, slight overlap
+                pVS.xy += i.corner * _GlyphCell.xy * GLYPH_SCALE * (_AsciiActor > 0.5 ? 1.18 * (1.0 + 0.25 * (lod - 1.0)) : lod);   // upright character in the view plane; on characters dense and overlapping so no gaps show
                 o.positionCS = vis ? TransformWViewToHClip(pVS) : float4(2, 2, 2, 1);
                 return o;
             }

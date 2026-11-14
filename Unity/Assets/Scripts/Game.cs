@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.33 · Unity";
+        public const string VERSION = "beta 0.34 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -53,13 +53,13 @@ namespace AsciiHero
         bool rebuildPending;
         // body customisation UI
         Rect bodyList; readonly List<Rect> bodyTracks = new List<Rect>(); readonly List<int> bodyTrackIx = new List<int>(); Rect bodyTrackHit;
-        float bodyScroll, bodyScrollMax, bodyBuiltAt; bool bodyDirty, setDev; readonly string[] devText = new string[64]; readonly string[] devShown = new string[64];
+        float bodyScroll, bodyScrollMax, bodyBuiltAt; bool bodyDirty, setDev, presetOpen; int presetIx = 2; readonly string[] devText = new string[64]; readonly string[] devShown = new string[64];
         void SetBodyValue(int ix, float val)
         {
             if (ix == 0) { SetHeight(val); return; }
             if (cfg.body == null) ResetBody();
             if (cfg.body[ix] == val) return;
-            cfg.body[ix] = val; bodyDirty = true;
+            cfg.body[ix] = val; bodyDirty = true; presetIx = -1;
         }
         /// the number shown next to a slider: the size it stands for (cm on the built body) or the value itself
         string BodyText(int ix, out float shown)
@@ -571,7 +571,7 @@ namespace AsciiHero
             }
             PlayerPrefs.Save();
         }
-        void SetSex(char s) { if (cfg.sex != s) { cfg.sex = s; cfg.height = s == 'f' ? 167 : 180; ResetBody(); rebuildPending = true; SaveCfg(); } }
+        void SetSex(char s) { if (cfg.sex != s) { cfg.sex = s; cfg.height = s == 'f' ? 167 : 180; ResetBody(); presetIx = 2; rebuildPending = true; SaveCfg(); } }
         void SetBuild(int b) { if (cfg.build != b) { cfg.build = b; rebuildPending = true; SaveCfg(); } }
         void SetArmor(string a) { if (cfg.armor != a) { cfg.armor = a; rebuildPending = true; SaveCfg(); } }
         void SetWeapon(string w) { if (cfg.weapon != w) { cfg.weapon = w; rebuildPending = true; SaveCfg(); } }
@@ -594,7 +594,7 @@ namespace AsciiHero
                 var bp = Body.ALL[i]; float d = Body.Def(i, cfg.sex), g = (Random.value + Random.value + Random.value - 1.5f) / 1.5f;
                 cfg.body[i] = Mathf.Clamp(d + g * (g > 0 ? bp.max - d : d - bp.min) * 0.6f, bp.min, bp.max);
             }
-            cfg.body[Body.Ix("weight")] = Mathf.Round(Body.DefaultWeight(cfg.sex, cfg.height) * (0.8f + 0.5f * Random.value));
+            cfg.body[Body.Ix("weight")] = Mathf.Round(Body.DefaultWeight(cfg.sex, cfg.height) * (0.8f + 0.5f * Random.value)); presetIx = -1;
             cfg.armor = Character.ARMORS[Random.Range(0, Character.ARMORS.Length)][0];
             cfg.weapon = Character.WEAPONS[Random.Range(0, Character.WEAPONS.Length)][0];
             rebuildPending = true; SaveCfg();
@@ -906,7 +906,7 @@ namespace AsciiHero
 
         // ---------- actions: attack, guard, dash ----------
         Cloak cloak; readonly List<Renderer> cloakRs = new List<Renderer>(); MaterialPropertyBlock clothMpb;
-        Vector3 windV; float windA = 0.7f;
+        Vector3 windV; float windA = 0.7f, windStr = 0.3f, windTarget = 0.4f, windPhaseT, windRun; int windPhase = 1;
         class Piece { public string kind = ""; public List<Renderer> rs = new List<Renderer>(); public float delay, om = 11, zeta = 0.45f, lift = 0.3f, wob, turns = 1, side; public Vector3 axis = Vector3.up; }
         readonly List<Piece> pieces = new List<Piece>(); MaterialPropertyBlock shiftMpb;
         const float DASH_DIST = 2.0f, DASH_T = 0.1f; float dashAnim = 0.4f, dashSettle = 0;
@@ -1080,14 +1080,24 @@ namespace AsciiHero
             // grass: the hero and a point trailing behind him push the blades aside
             heroTrail = Vector3.Lerp(heroTrail, pos, Mathf.Min(1, dt * 2.2f));
             Shader.SetGlobalVector("_AsciiHeroVel", player != null ? (Vector4)player.Velocity : Vector4.zero);
-            // wind: its direction wanders slowly, its strength rises and falls in gusts (grass, leaves and the cloak follow it)
+            // wind: calm spells (pauses), breezes and gusts follow each other at random, each a few seconds long; the
+            // strength eases from one to the next, the direction wanders a little (and swings more in a gust); the air
+            // runs downwind faster the harder it blows, carrying the gust pattern over the grass and the trees
             {
-                windA += dt * 0.04f * Mathf.Sin(tNow * 0.031f);
-                float gust = Mathf.Max(0, Mathf.Sin(tNow * 0.71f) * Mathf.Sin(tNow * 0.37f + 1f));
-                float st = 0.45f + 0.25f * Mathf.Sin(tNow * 0.13f) + 0.5f * gust;
+                windPhaseT -= dt;
+                if (windPhaseT <= 0)
+                {
+                    float r = Random.value;
+                    if (windPhase == 2 || r < 0.3f) { windPhase = 0; windTarget = 0.05f + 0.12f * Random.value; windPhaseT = 2f + 4f * Random.value; }        // lull
+                    else if (r < 0.7f) { windPhase = 1; windTarget = 0.4f + 0.3f * Random.value; windPhaseT = 3f + 5f * Random.value; }                   // breeze
+                    else { windPhase = 2; windTarget = 0.9f + 0.5f * Random.value; windPhaseT = 1.5f + 2.5f * Random.value; }                            // gust
+                }
+                windStr += (windTarget - windStr) * (1 - Mathf.Exp(-dt / (windTarget > windStr ? 0.7f : 1.6f)));        // rises quicker than it dies away
+                windA += dt * (0.03f * Mathf.Sin(tNow * 0.031f) + (windPhase == 2 ? 0.06f * Mathf.Sin(tNow * 0.9f) : 0));
+                windRun += dt * (0.8f + 3.2f * windStr);
                 Vector2 wd = new Vector2(Mathf.Cos(windA), Mathf.Sin(windA));
-                Shader.SetGlobalVector("_AsciiWind", new Vector4(wd.x, wd.y, st, 0));
-                windV = new Vector3(wd.x, 0, wd.y) * (st * 2.2f);
+                Shader.SetGlobalVector("_AsciiWind", new Vector4(wd.x, wd.y, windStr, windRun));
+                windV = new Vector3(wd.x, 0, wd.y) * (windStr * 2.4f);
             }
             if (cloak != null) { cloak.Update(dt, windV); if (clothMpb == null) clothMpb = new MaterialPropertyBlock(); cloak.Apply(clothMpb, cloakRs); }
             // grass is pressed down by the body itself - the feet, the pelvis over it, a weapon swept low - not by a collision circle
@@ -1368,8 +1378,19 @@ namespace AsciiHero
                 if (Button(new Rect(x0, y, hw, 28 * k), SEXNAME[0], si == 0)) SetSex('m');
                 if (Button(new Rect(x0 + hw + 6 * k, y, hw, 28 * k), SEXNAME[1], si == 1)) SetSex('f');
                 y += 34 * k;
-                if (Button(new Rect(x0, y, cw, 24 * k), "ТЕЛО ПО УМОЛЧАНИЮ")) { ResetBody(); bodyDirty = true; }
+                // presets for the sex: a drop-down list
+                string pn = presetIx >= 0 ? Body.PRESETS[presetIx] : "свой";
+                if (Button(new Rect(x0, y, cw, 26 * k), "ТЕЛОСЛОЖЕНИЕ: " + pn.ToUpper() + (presetOpen ? "  ▴" : "  ▾"), presetOpen)) presetOpen = !presetOpen;
                 y += 30 * k;
+                if (presetOpen)
+                {
+                    for (int pi = 0; pi < Body.PRESETS.Length; pi++)
+                        if (Button(new Rect(x0 + 8 * k, y + pi * 30 * k, cw - 16 * k, 26 * k), Body.PRESETS[pi], presetIx == pi))
+                        {
+                            cfg.body = Body.Preset(pi, cfg.sex, cfg.height); presetIx = pi; presetOpen = false; bodyDirty = true;
+                        }
+                    y += Body.PRESETS.Length * 30 * k + 4 * k;
+                }
                 if (cfg.body == null) ResetBody();
                 // the list of sliders, scrolled by dragging
                 bodyList = new Rect(x0, y, cw, bottom - 6 * k - y); uiRects.Add(bodyList);

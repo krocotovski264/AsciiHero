@@ -7,8 +7,8 @@
 //     more on the hips, thighs and breasts of a woman; little on forearms, shins, hands and feet)
 //   * muscle: girth of the shoulders, arms, legs, neck, chest and back
 //   * belly, buttocks: soft-tissue shapes on the front of the abdomen and the back of the pelvis
-//   * relief: sharper muscle definition (unsharp mask over the surface) and raised veins on the arms
-//   * skin age: soft tissue sags (breasts, belly, buttocks)
+//   * breasts: a woman's grow in volume like a ball about their centre, a man's chest muscles thicken forward as a
+//     flat block (no stretching along a bone)
 // The feet are kept on the ground; the total height is set afterwards by the model scale (Character.ApplyHeight).
 using System;
 using System.Collections.Generic;
@@ -32,8 +32,6 @@ namespace AsciiHero
             V("weight", "Базовый вес тела", "кг", 0, 40, 150, 75, 60),
             V("muscle", "Мышечная масса", "%", 0, 15, 70, 40, 32),
             V("fat", "Жировая ткань", "%", 0, 4, 55, 18, 26),
-            V("relief", "Рельефность и вены", "%", 0, 0, 100, 25, 15),
-            V("age", "Возрастной тонус кожи", "лет", 0, 18, 90, 25, 25),
             F("neckLen", "Длина шеи", 1, 0.7f, 1.45f),
             F("neckGirth", "Толщина шеи", 1, 0.75f, 1.45f, true),
             F("shoulderW", "Ширина плеч", 1, 0.8f, 1.25f),
@@ -61,6 +59,35 @@ namespace AsciiHero
             F("fingers", "Длина пальцев рук", 2, 0.8f, 1.25f),
         };
         public static readonly int N = ALL.Length;
+        // ---------- presets ----------
+        public static readonly string[] PRESETS = { "Спортивный", "Худой", "Обычный", "Толстый" };
+        /// a preset body for a sex and height (the weight follows the height)
+        public static float[] Preset(int k, char sex, float height)
+        {
+            var v = Defaults(sex); v[0] = height; float w0 = DefaultWeight(sex, height); bool f = sex == 'f';
+            Action<string, float> S = (key, val) => v[IX[key]] = val;
+            switch (k)
+            {
+                case 0:   // athletic: muscle, broad shoulders and back, narrow waist
+                    S("weight", w0 * (f ? 1.05f : 1.1f)); S("muscle", f ? 42 : 55); S("fat", f ? 18 : 11);
+                    S("shoulderW", f ? 1.03f : 1.08f); S("chest", f ? 1.02f : 1.08f); S("backW", f ? 1.06f : 1.12f);
+                    S("waistW", 0.9f); S("waistD", 0.92f); S("biceps", f ? 1.08f : 1.18f); S("forearm", f ? 1.05f : 1.12f);
+                    S("thigh", f ? 1.06f : 1.1f); S("calf", f ? 1.08f : 1.1f); S("neckGirth", f ? 1.02f : 1.1f);
+                    S("glutes", f ? 120 : 105); S("breastSize", f ? 95 : 125); break;
+                case 1:   // thin
+                    S("weight", w0 * (f ? 0.82f : 0.8f)); S("muscle", f ? 26 : 30); S("fat", f ? 16 : 8);
+                    S("chest", 0.93f); S("waistW", f ? 0.86f : 0.88f); S("waistD", 0.88f); S("biceps", 0.89f); S("forearm", 0.9f);
+                    S("thigh", 0.88f); S("calf", 0.9f); S("neckGirth", 0.92f); S("breastSize", f ? 75 : 80); S("glutes", 80); S("pelvisW", f ? 0.96f : 1); break;
+                case 3:   // heavy
+                    S("weight", w0 * 1.4f); S("muscle", f ? 28 : 34); S("fat", f ? 42 : 34); S("belly", f ? 6 : 9);
+                    S("waistW", 1.25f); S("waistD", f ? 1.25f : 1.3f); S("chest", 1.1f); S("neckGirth", 1.15f);
+                    S("thigh", f ? 1.25f : 1.15f); S("calf", f ? 1.15f : 1.08f); S("biceps", f ? 1.15f : 1.1f);
+                    S("glutes", f ? 160 : 130); S("breastSize", f ? 160 : 150); S("pelvisW", f ? 1.1f : 1.04f); break;
+                default:  // normal
+                    S("weight", w0); break;
+            }
+            return v;
+        }
         static readonly Dictionary<string, int> IX = new Dictionary<string, int>();
         static Body() { for (int i = 0; i < ALL.Length; i++) IX[ALL[i].key] = i; }
         public static int Ix(string key) { return IX[key]; }
@@ -122,12 +149,9 @@ namespace AsciiHero
                 if (Under(i, "foot.L") || Under(i, "foot.R")) { L[i] *= fs; G1[i] *= fs; G2[i] *= fs; }
             }
             setL(pre("finger"), cl(G("fingers")));
-            // breasts (their own bones): volume and lift
             float bs = Mathf.Max(0.02f, G("breastSize") / 100f), bl = (G("breastShape") - 50) / 50f;
             foreach (var s in new[] { "L", "R" })
             {
-                int i = HumanDB.BI["breast." + s]; float k = Mathf.Pow(bs, fem ? 0.75f : 0.35f);
-                L[i] *= k; G1[i] *= k; G2[i] *= k; R[i] = Q(Vector3.right, -0.3f * bl);
                 // shoulder slope: the collarbone turns about the forward axis (the outer end up or down)
                 int c = HumanDB.BI["clavicle." + s]; float side = Mathf.Sign(Tl[c].x - Hd[c].x);
                 R[c] = Q(Vector3.forward, side * G("shoulderSlope") * Mathf.Deg2Rad);
@@ -164,8 +188,10 @@ namespace AsciiHero
             float bellyY = yNavel + (G("bellyShape") - 50) / 50f * 0.07f;
             float f = (G("fat") - Def(IX["fat"], sex)) / Def(IX["fat"], sex);
             float gv = G("glutes") / 100f - 1, gl = (G("glutesShape") - 50) / 50f, belly = G("belly") / 100f;
-            float age = Mathf.Clamp((G("age") - 25) / 55f, 0, 1.5f), fatK = 0.4f + 0.6f * Mathf.Clamp(G("fat") / 30f, 0, 2);
             int bL = HumanDB.BI["breast.L"], bR = HumanDB.BI["breast.R"];
+            // the breasts' centres (on the new skeleton): a point inside each, a little past the middle of its bone
+            Vector3 cL = NH[bL] + (NT[bL] - NH[bL]) * 0.4f, cR = NH[bR] + (NT[bR] - NH[bR]) * 0.4f;
+            float bk = fem ? Mathf.Max(0.45f, Mathf.Sqrt(bs)) : 1; var lift = Q(Vector3.right, -0.32f * bl * (fem ? 1 : 0.3f));
             var reg = h.region;
             for (int i = 0; i < n; i++)
             {
@@ -174,30 +200,26 @@ namespace AsciiHero
                 float front = Mathf.Clamp01((z - zSp) / 0.06f), back = Mathf.Clamp01((zSp - 0.04f - z) / 0.05f);
                 float bm = Mathf.Exp(-Sq((y - bellyY) / 0.1f) - Sq(x / 0.14f)) * front;
                 float gm = Mathf.Exp(-Sq((x - 0.085f) / 0.08f) - Sq((y - (yHip - 0.03f)) / 0.09f)) * back;
-                float bw = 0; for (int k = 0; k < 4; k++) { int b = SI[i * 4 + k]; if (b == bL || b == bR) bw += SWt[i * 4 + k] / 255f; }
+                float bw = 0, bwL = 0; for (int k = 0; k < 4; k++) { int b = SI[i * 4 + k]; float w = SWt[i * 4 + k] / 255f; if (b == bL || b == bR) bw += w; if (b == bL) bwL += w; }
+                if (bw > 0.001f)
+                {
+                    Vector3 c = bwL >= bw * 0.5f ? cL : cR;
+                    if (fem)
+                    {   // a woman's breast: scaled about its centre (volume like a ball) and lifted
+                        Vector3 q = lift * ((P[i] - c) * bk);
+                        P[i] += (c + q - P[i]) * bw;
+                    }
+                    else
+                    {   // a man's chest muscle: thicker forward as a flat block, the same over its whole face
+                        P[i] += (Vector3.forward * ((bs - 1) * 0.04f) + (lift * (P[i] - c) - (P[i] - c))) * bw;
+                    }
+                }
                 float fm = FatW(reg[i], fem) + bm * 0.9f + gm * (fem ? 0.8f : 0.4f) + bw * (fem ? 0.8f : 0.3f);
                 float infl = Mathf.Clamp(0.011f * f * fm, -0.009f, 0.5f);
                 Vector3 p = P[i] + Nn[i] * infl;
                 p.z += bm * belly;
                 p += Nn[i] * (gm * 0.035f * gv); p.y += gm * 0.025f * gl;
-                p.y -= age * 0.03f * (bw * (fem ? 1f : 0.4f) + bm + gm * 0.8f) * fatK;
                 P[i] = p;
-            }
-            // relief: muscle definition and veins
-            float rel = Mathf.Clamp(G("relief") / 100f, 0, 50);
-            if (rel > 0.01f)
-            {
-                var adj = h.adj; var tmp = (Vector3[])P.Clone();
-                for (int i = 0; i < n; i++)
-                {
-                    if (HumanDB.vpart[i] != 0) continue; var rg = reg[i];
-                    if (rg == Region.Head || rg == Region.Hand || rg == Region.Foot || rg == Region.Neck) continue;
-                    var a = adj[i]; if (a.Length == 0) continue;
-                    Vector3 s = Vector3.zero; foreach (int j in a) s += tmp[j]; s /= a.Length;
-                    Vector3 dd = Vector3.ClampMagnitude((tmp[i] - s) * (0.7f * rel), 0.006f);
-                    P[i] += Nn[i] * Vector3.Dot(dd, Nn[i]);
-                }
-                if (rel > 0.2f) Veins(h, P, Nn, (rel - 0.2f) / 0.8f);
             }
             // the soles stay on the ground
             float lo0 = 1e9f, lo1 = 1e9f;
@@ -239,36 +261,6 @@ namespace AsciiHero
                 default: return 0.05f;
             }
         }
-        // three veins winding down the inside of each forearm and over the back of the hand, two on the biceps
-        static void Veins(Human h, Vector3[] P, Vector3[] N, float amt)
-        {
-            float amp = 0.0024f * Mathf.Min(amt, 4f);
-            foreach (var s in new[] { "L", "R" })
-            {
-                Vector3 a = h.heads[HumanDB.BI["upperarm01." + s]], b = h.heads[HumanDB.BI["wrist." + s]];
-                Vector3 d = (b - a).normalized, e1 = (Vector3.forward - d * d.z).normalized, e2 = Vector3.Cross(d, e1);
-                float len = (b - a).magnitude;
-                for (int i = 0; i < h.n; i++)
-                {
-                    if (HumanDB.vpart[i] != 0) continue; var rg = h.region[i];
-                    if (rg != Region.UpperArm && rg != Region.ForeArm && rg != Region.Hand) continue;
-                    Vector3 q = P[i] - a; float t = Vector3.Dot(q, d) / len; if (t < 0.15f || t > 1.15f) continue;
-                    if ((s == "L") != (P[i].x * Mathf.Sign(a.x) > 0)) continue;
-                    Vector3 rr = q - d * Vector3.Dot(q, d); float rad = rr.magnitude; if (rad < 1e-4f) continue;
-                    float az = Mathf.Atan2(Vector3.Dot(rr, e2), Vector3.Dot(rr, e1));
-                    float bump = 0;
-                    for (int k = 0; k < 3; k++)
-                    {
-                        if (t < 0.5f && k == 2) continue;
-                        float c = -0.7f + 0.75f * k + 0.3f * Mathf.Sin(t * 11f + k * 2.1f) + 0.12f * Mathf.Sin(t * 29f + k);
-                        float da = Mathf.DeltaAngle(az * Mathf.Rad2Deg, c * Mathf.Rad2Deg) * Mathf.Deg2Rad;
-                        bump = Mathf.Max(bump, Mathf.Exp(-Sq(da * rad / 0.004f)));
-                    }
-                    P[i] += N[i] * (amp * bump);
-                }
-            }
-        }
-
         // ---------- sizes shown next to the sliders ----------
         /// the size the parameter stands for, measured on the built (morphed) body, in metres (model units)
         public static float Measure(Human h, int ix)

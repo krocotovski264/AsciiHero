@@ -26,6 +26,25 @@ Shader "AsciiHero/Grass"
             float _AsciiGrassThin;     // settings: the share of blades that is not drawn (0 = all)
             float4 _AsciiWind;         // wind: xy = direction (world xz), z = strength 0..1.5, w = unused
 
+            float WHash(float2 p) { p = frac(p * float2(123.34, 456.21)); p += dot(p, p + 45.32); return frac(p.x * p.y); }
+            float WNoise(float2 p)      // smooth value noise, 0..1
+            {
+                float2 i = floor(p), f = frac(p); float2 u = f * f * (3.0 - 2.0 * f);
+                return lerp(lerp(WHash(i), WHash(i + float2(1, 0)), u.x), lerp(WHash(i + float2(0, 1)), WHash(i + float2(1, 1)), u.x), u.y);
+            }
+            // the wind field (shared by grass, leaves): a coarse gust pattern carried downwind, with finer detail scrolling
+            // faster over it (as in the 'Ghost of Tsushima' grass); _AsciiWind: xy direction, z strength (with lulls, from
+            // the CPU), w the distance the air has travelled
+            float WindGust(float2 p)
+            {
+                float2 wd = _AsciiWind.xy, wp = float2(-wd.y, wd.x); float run = _AsciiWind.w;
+                float2 q = float2(dot(p, wd) - run, dot(p, wp));
+                float g = WNoise(q * float2(0.17, 0.11) + 3.1);                    // big gusts: long downwind, broad across
+                g = smoothstep(0.32, 0.82, g);
+                float d = WNoise(q * float2(0.6, 0.45) - float2(run * 0.7, 0) + 11.7);   // smaller ripples on top, faster
+                return saturate(g * (0.7 + 0.6 * d));
+            }
+
             struct Attributes { float4 positionOS : POSITION; float2 corner : TEXCOORD0; float2 seed : TEXCOORD1; };
             struct Varyings { float4 positionCS : SV_POSITION; float2 local : TEXCOORD0; float3 col : TEXCOORD1; float gi : TEXCOORD2; };
 
@@ -35,16 +54,21 @@ Shader "AsciiHero/Grass"
                 float3 a = TransformObjectToWorld(i.positionOS.xyz);
                 float s = i.seed.x;
                 float h = 0.165 + 0.225 * s;          // (one and a half times the old blades)
-                // wind: waves run across the field the way they do over a meadow or a wheat field - a band of grass is
-                // pressed flat downwind as a gust passes and rises again behind it; the bands are long and slightly
-                // curved, a second, shorter set crosses them, and every blade flutters a little on its own
-                float2 wd = _AsciiWind.xy; float ws = _AsciiWind.z; float2 wp = float2(-wd.y, wd.x);
-                float bend = 0.45 * sin(dot(a.xz, wp) * 0.33 + _AsciiTime * 0.21);
-                float w1 = 0.5 + 0.5 * sin(dot(a.xz, wd) * 0.85 - _AsciiTime * 2.5 + bend); w1 = w1 * w1; w1 = w1 * w1;
-                float w2 = 0.5 + 0.5 * sin(dot(a.xz, normalize(wd + wp * 0.45)) * 1.7 - _AsciiTime * 3.3 + 1.3); w2 = w2 * w2 * w2;
-                float wave = saturate(w1 + 0.45 * w2) * saturate(ws * 1.4);
-                float2 wind = wd * (0.06 * ws + 0.88 * wave)
-                            + float2(sin(_AsciiTime * 4.3 + s * 40.0 + a.x * 3.0), cos(_AsciiTime * 3.7 + s * 23.0 + a.z * 3.0)) * (0.02 + 0.04 * ws);
+                // wind (main bending along the wind, detail flutter per blade, after Crysis and Ghost of Tsushima):
+                //   * the gust pattern travels downwind across the field, so waves of pressed-down grass roll over it, in
+                //     patches and bands rather than a regular sine, with calmer gaps between them;
+                //   * every blade responds with its own stiffness (a little late) and springs back past upright after a
+                //     gust has gone over it, then settles;
+                //   * a small flutter of its own, faster and stronger the harder the wind blows;
+                //   * the strength rises and falls on the CPU with lulls (pauses) between gusts.
+                float2 wd = _AsciiWind.xy; float ws = _AsciiWind.z;
+                float stiff = 0.6 + 0.8 * frac(s * 7.77);
+                float gNow = WindGust(a.xz - wd * (0.18 * stiff)), gPrev = WindGust(a.xz + wd * (0.9 + 0.5 * stiff));   // (what passed a moment ago is downwind now)
+                float wave = gNow * saturate(ws * 1.25);
+                float recoil = max(0.0, gPrev - gNow) * saturate(ws * 1.25);
+                float fl = sin(_AsciiTime * (3.0 + 4.0 * ws) * (0.8 + 0.4 * frac(s * 3.3)) + s * 40.0);
+                float2 wind = wd * ((0.05 + 0.1 * ws) + 0.85 * wave / stiff - 0.28 * recoil * sin(_AsciiTime * 5.0 + s * 9.0 + 1.5))
+                            + float2(-wd.y, wd.x) * fl * (0.015 + 0.06 * ws * (0.3 + wave)) + wd * fl * 0.03 * ws * wave;
                 float2 lean = wind; float push = 0;
                 for (int k = 0; k < 4; k++)
                 {
@@ -71,7 +95,7 @@ Shader "AsciiHero/Grass"
                 float depthK = clamp(1.0 - (myZ - _AsciiDepthRef) * 0.09, 0.5, 1.2);
                 float3 green = lerp(float3(0.16, 0.50, 0.24), float3(0.50, 0.78, 0.36), frac(s * 13.7));
                 o.col = (green * (0.22 + 0.95 * lum) + lit * 0.5) * depthK * (1.0 - 0.35 * push);
-                o.col *= 1.0 + 0.45 * wave;      // the crest of a wave shows lighter (the blades turn their sides to the light)
+                o.col *= 1.0 + 0.5 * wave;       // a pressed-down band shows lighter (the blades turn their sides to the light)
                 o.local = i.corner + 0.5;
                 pVS.xy += i.corner * float2(h * 0.44, h * 1.1);       // the characters keep their width, the blades are taller
                 o.positionCS = vis ? TransformWViewToHClip(pVS) : float4(2, 2, 2, 1);
