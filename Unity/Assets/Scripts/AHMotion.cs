@@ -364,7 +364,7 @@ namespace AsciiHero
             for (int i = 0; i < L.len; i++) { int f = a + i, p = a + (i + L.len - 1) % L.len; if (CON[p * 2] < 0.5f && CON[f * 2] >= 0.5f) { L.off = i; break; } }   // phase 0 = left foot lands
             return L;
         }
-        static void PrepLoops() { if (LIdle != null) return; LIdle = Prep(10493, 10568); LIdleF = Prep(10568, 10658); LWalk = Prep(648, 685); LRun = Prep(7678, 7700); }
+        static void PrepLoops() { if (LIdle != null) return; LIdle = Prep(10493, 10583); LIdleF = Prep(10583, 10663); LWalk = Prep(648, 685); LRun = Prep(7678, 7700); }
         Quaternion[] lq, q2, q3; float phase, idlePh, wWalk, wRun;
         readonly float[] c2 = new float[2], c3 = new float[2], cTmp = new float[2];
         void SampleLoop(Loop L, float ph, Quaternion[] oq, ref Vector3 oro, float[] ocon)
@@ -713,9 +713,9 @@ namespace AsciiHero
         static float CR(float a0, float a1, float a2, float a3, float u) { return 0.5f * (2 * a1 + (a2 - a0) * u + (2 * a0 - 5 * a1 + 4 * a2 - a3) * u * u + (3 * a1 - a0 - 3 * a2 + a3) * u * u * u); }
         static Vector3 CR(Vector3 a0, Vector3 a1, Vector3 a2, Vector3 a3, float u) { return new Vector3(CR(a0.x, a1.x, a2.x, a3.x, u), CR(a0.y, a1.y, a2.y, a3.y, u), CR(a0.z, a1.z, a2.z, a3.z, u)); }
         // lays a captured pose over the pose from locomotion: the whole body when standing, from the waist up when moving
-        void Lay(Quaternion[] Q, Vector3 aro, float w, bool yAbs, bool bash = false)
+        void Lay(Quaternion[] Q, Vector3 aro, float w, bool yAbs, bool bash = false, bool upper = false)
         {
-            float wl = w * (1 - wWalk); bool shield = ch.cfg.weapon == "shield";
+            float wl = upper ? 0 : w * (1 - wWalk); bool shield = ch.cfg.weapon == "shield";
             for (int k = 0; k < MotionDB.nb; k++)
             {
                 string n = MotionDB.bones[k]; float wk = w;
@@ -733,11 +733,13 @@ namespace AsciiHero
         //   20 s        sits down on the ground (mocap) and stays there, looking round every 4-7 s, until something happens;
         //               then he gets up (mocap) before he can move
         // The dash plays a crouch-and-spring (mocap leap) over the body.
-        const int SHIFT_A = 10658, SHIFT_N = 120;
-        const int WAVE_A = 10778, WAVE_N = 55;
-        const int SIT_A = 10833, SIT_N = 81;
-        const int LEAP_A = 10914, LEAP_N = 38;
-        class IdleAct { public string kind, phase = "down"; public float t, w = 1, nextLook, look = -1; public bool o; }
+        const int SHIFT_A = 10663, SHIFT_N = 120;
+        const int WAVE_A = 10783, WAVE_N = 55;
+        const int SITDOWN_A = 10838, SITDOWN_N = 65;
+        const int SITLOOP_A = 10903, SITLOOP_N = 360;
+        const int GETUP_A = 11263, GETUP_N = 65;
+        const int LEAP_A = 11328, LEAP_N = 38;
+        class IdleAct { public string kind, phase = "down"; public float t, w = 1, nextLook, look = -1, p = -1, g0, te; public bool o; }
         IdleAct idleA; readonly List<string> idleDue = new List<string>(); float idleClock, leapT = -1, idleW, footLift, idleLook, idleLookP;
         /// 0..1: how far the hero is turned towards the camera (the game adds the turn to his facing)
         public float idleYawW;
@@ -747,7 +749,15 @@ namespace AsciiHero
         {
             idleClock = 0; idleDue.Clear();
             if (idleA == null) return;
-            if (idleA.kind == "sit") { if (idleA.phase != "up") { idleA.phase = "up"; idleA.t = 0; } } else idleA.o = true;
+            if (idleA.kind == "sit")
+            {
+                if (idleA.phase != "up")
+                {   // still going down: straight back up the same way (the sit-down is the get-up played backwards)
+                    if (idleA.phase == "down") { idleA.g0 = GETUP_N - 1 - Mathf.Min(SITDOWN_N - 1, idleA.t * 36); idleA.p = -1; }
+                    idleA.phase = "up"; idleA.t = 0;
+                }
+            }
+            else idleA.o = true;
         }
         /// sitting or getting up: the hero cannot walk yet
         public bool IdleBusy => idleA != null && idleA.kind == "sit";
@@ -758,9 +768,16 @@ namespace AsciiHero
             float u = Mathf.Clamp01(t / T); int i = 0; while (i < kt.Length - 2 && u > kt[i + 1]) i++;
             return kv[i] + (kv[i + 1] - kv[i]) * Smoother((u - kt[i]) / (kt[i + 1] - kt[i]));
         }
-        void LayClip(int a, float fr, float w)
+        void LayClip(int a, float fr, float w, bool upper = false)
         {
-            if (w <= 0.001f) return; Vector3 r0 = Vector3.zero; SamplePose(a + fr, atkQ, ref r0, null); Lay(atkQ, r0, w, true); idleW = Mathf.Max(idleW, w);
+            if (w <= 0.001f) return; Vector3 r0 = Vector3.zero; SamplePose(a + fr, atkQ, ref r0, null); Lay(atkQ, r0, w, true, false, upper); idleW = Mathf.Max(idleW, w);
+        }
+        // the sitting clip loops with its end cross-faded into its start
+        const int SIT_W = 15;
+        void SitLoopAt(float p, float w)
+        {
+            int L = SITLOOP_N - SIT_W;
+            if (p < SIT_W) { LayClip(SITLOOP_A, p + L, w); LayClip(SITLOOP_A, p, w * Smoother(p / SIT_W)); } else LayClip(SITLOOP_A, p, w);
         }
         void IdleUpdate(float dt)
         {
@@ -788,21 +805,33 @@ namespace AsciiHero
                 {
                     idleYawW = Mathf.Min(Smoother(I.t / 0.7f), 1 - Smoother((I.t - 2.6f) / 0.7f)) * fade;
                     float wt = I.t - 0.6f, wd = WAVE_N / 30f;
-                    if (wt > 0 && wt < wd) LayClip(WAVE_A, wt * 30, Mathf.Min(Smoother(wt / 0.25f), 1 - Smoother((wt - wd + 0.3f) / 0.3f)) * fade);
+                    if (wt > 0 && wt < wd) LayClip(WAVE_A, wt * 30, Mathf.Min(Smoother(wt / 0.25f), 1 - Smoother((wt - wd + 0.3f) / 0.3f)) * fade, true);     // arm and trunk only: the feet stay in the stance
                     if (I.t > 3.3f || fade <= 0) idleA = null;
                 }
                 else
-                {   // sit
-                    float fr, w = 1;
-                    if (I.phase == "down") { fr = 2 + Mathf.Min(1, I.t / 1.0f) * 22; w = Smoother(I.t / 0.25f); if (I.t > 1.0f) { I.phase = "sit"; I.t = 0; } }
+                {   // sit: down onto the ground (a hand goes down first), sitting there knees up leaning back on a hand, and up again
+                    if (I.phase == "down")
+                    {
+                        float fr = Mathf.Min(SITDOWN_N - 1, I.t * 36);
+                        LayClip(SITDOWN_A, fr, Smoother(I.t / 0.3f));
+                        if (fr >= SITDOWN_N - 1) { I.phase = "sit"; I.t = 0; I.p = 0; }
+                    }
                     else if (I.phase == "sit")
                     {
-                        fr = 24 + 16 * Smoother(I.t / 0.8f);       // settles into the sitting pose
+                        I.p = (I.p + dt * 30) % (SITLOOP_N - SIT_W);
+                        LayClip(SITDOWN_A, SITDOWN_N - 1, 1); SitLoopAt(I.p, Smoother(I.t / 0.7f));
                         I.nextLook -= dt; if (I.nextLook <= 0 && I.look < 0) I.look = 0;
-                        if (I.look >= 0) { I.look += dt; idleLook = LookYaw(I.look, 2.8f, 0.75f); if (I.look > 2.8f) { I.look = -1; I.nextLook = 4 + UnityEngine.Random.value * 3; } }
+                        if (I.look >= 0) { I.look += dt; idleLook = LookYaw(I.look, 2.8f, 0.7f); if (I.look > 2.8f) { I.look = -1; I.nextLook = 4 + UnityEngine.Random.value * 3; } }
                     }
-                    else { fr = 57 + Mathf.Min(1, I.t / 0.85f) * 22; w = 1 - Smoother((I.t - 0.75f) / 0.2f); if (I.t > 0.95f) { idleA = null; idleClock = 0; } }
-                    LayClip(SIT_A, fr, w);
+                    else
+                    {   // getting up: out of the sitting loop (cross-faded), or straight back up if he was still going down
+                        float fr = Mathf.Min(GETUP_N - 1, I.g0 + I.t * 34.5f);
+                        if (fr >= GETUP_N - 1) I.te += dt;
+                        float o = 1 - Smoother(I.te / 0.3f);
+                        if (I.p >= 0) SitLoopAt(I.p, o);
+                        LayClip(GETUP_A, fr, (I.p >= 0 ? Smoother(I.t / 0.4f) : 1) * o);
+                        if (I.te > 0.3f) { idleA = null; idleClock = 0; }
+                    }
                 }
             }
             if (leapT >= 0)
@@ -1115,9 +1144,9 @@ namespace AsciiHero
         }
 
         // ---------- arms ----------
-        // The mocap actors hold their arms away from the body. Bring a hanging arm back to the torso: the sideways
-        // angle of the upper arm is limited softly, the forward/back swing is untouched.
-        const float ARM_MAX = 0.13f, ARM_SOFT = 0.12f, ARM_MIN = 0.2f;     // ARM_MIN: the elbows never lie against the trunk
+        // Arms hanging at rest: the upper arm is kept at least ARM_MIN out from the trunk (elbows clear of the body) and is
+        // eased back softly past ARM_MAX; the forward/back swing is untouched.
+        const float ARM_MAX = 0.45f, ARM_SOFT = 0.3f, ARM_MIN = 0.2f;     // ARM_MIN: the elbows never lie against the trunk
         void RelaxArms()
         {
             Quaternion gq = ch.go.transform.rotation, gi = Quaternion.Inverse(gq);

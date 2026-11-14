@@ -49,21 +49,21 @@ for fn, a, b in SPEC:
         rows['RM'].append(np.stack([c['fwd'][sl], c['lat'][sl], c['yawr'][sl]], 1)); rows['CON'].append(c['con'][sl])
         v = np.ones(m, dtype=bool); v[-31:] = False; v[:2] = False
         valid.append(v); ranges.append([total, total + m, fn + ('M' if mirror else '')]); total += m
-# sword cuts from the Bandai Namco Research Motiondataset (CC BY-NC 4.0): appended after the CMU frames and never
+# sword cuts: appended after the locomotion frames and never
 # offered to motion matching (valid = 0); the game plays them by frame index
-import bandai, json as _json
+import cuts as bandai, json as _json
 ATK = []
 for fn, a, b in (('dataset-1_slash_normal_001.bvh', 164, 230), ('dataset-1_slash_normal_002.bvh', 164, 232)):
     c = bandai.process(fn, a, b); m = c['n']
     rows['Q'].append(c['Q']); rows['RO'].append(c['RO']); rows['F'].append(np.zeros((m, 27)))
     rows['RM'].append(np.zeros((m, 3))); rows['CON'].append(c['con'])
-    valid.append(np.zeros(m, dtype=bool)); ranges.append([total, total + m, 'bandai/' + fn])
+    valid.append(np.zeros(m, dtype=bool)); ranges.append([total, total + m, 'cut/' + fn[-7:-4]])
     ATK.append({'a': total, 'n': m, 'blade': np.round(c['blade'], 3).tolist()}); total += m
 # guard with the sword: CMU 76_04 "defensive guard pose" - from standing to both hands raised in front of the face, knees giving
 c = R.process('076/76_04.bvh'); ga, gb = 26, 48; m = gb - ga
 rows['Q'].append(c['Q'][ga:gb]); rows['RO'].append(c['RO'][ga:gb] - [c['RO'][ga][0], 0, c['RO'][ga][2]]); rows['F'].append(np.zeros((m, 27)))
 rows['RM'].append(np.zeros((m, 3))); rows['CON'].append(c['con'][ga:gb])
-valid.append(np.zeros(m, dtype=bool)); ranges.append([total, total + m, 'cmu-guard/76_04'])
+valid.append(np.zeros(m, dtype=bool)); ranges.append([total, total + m, 'guard'])
 ATK.append({'a': total, 'n': m, 'guard': True, 'roY': [round(float(c['RO'][ga][1]), 3), round(float(c['RO'][gb - 1][1]), 3)]}); total += m
 # attacks from CMU clips: spear, long axe, shield
 import cmu_atk
@@ -74,6 +74,43 @@ for name, fn, a, b, pk, mode in cmu_atk.SPEC:
     valid.append(np.zeros(m, dtype=bool)); ranges.append([total, total + m, name])
     ATK.append({'name': name, 'a': total, 'n': m, 'peak': int(c['peak']), 'blade': np.round(c['blade'], 3).tolist(), 'bladeL': np.round(c['bladeL'], 3).tolist()}); total += m
     print(name, m, 'peak', c['peak'])
+# idle stances (male, female) and idle actions. All retargeted from the actor's T-pose (see retarget.py).
+#   idleM   142_13 "relaxed" - a man standing at ease, arms hanging clear of the body
+#   idleF   113_21 "standing still" - a woman, weight on one leg
+#   shift   139_02 "shifting weight" from foot to foot
+#   wave    141_16 "wave hello" (the game lays it on the upper body only)
+#   sitdown 111_07 "get up from floor", played backwards: lowering onto the ground with a hand down
+#   sitloop 82_05  "sitting on ground relaxing": knees up, leaning back on a hand, looking round
+#   getup   111_07 the same get-up forwards
+#   leap    83_42  the crouch and spring of the dash
+IDLE = {}
+def best_loop(Q, lo, hi, W):
+    best = None
+    for a in range(lo, hi - W):
+        e = 2 * np.arccos(np.abs(np.sum(Q[a] * Q[a + W], -1)).clip(0, 1)).sum()
+        if best is None or e < best[0]: best = (e, a)
+    return best[1]
+for name, fn, a4, b4, rev in (('idleM', '142/142_13.bvh', 1199, 1289, 0), ('idleF', '113/113_21.bvh', 30, 130, 0), ('shift', '139/139_02.bvh', 0, 120, 0),
+                              ('wave', '141/141_16.bvh', 1, 56, 0), ('sitdown', '111/111_07.bvh', 372, 437, 1), ('sitloop', '082/82_05.bvh', 100, 460, 0),
+                              ('getup', '111/111_07.bvh', 372, 437, 0), ('leap', '083/83_42.bvh', 67, 105, 0)):
+    c = R.process(fn)
+    if name == 'idleF': a4 = best_loop(c['Q'], a4, b4, 80); b4 = a4 + 80
+    m = b4 - a4; sl = slice(a4, b4)
+    RO = c['RO'][sl].copy(); RO[:, 1] += c['hipY'] - c['standY']         # pelvis height relative to the actor standing
+    Qs = c['Q'][sl].copy(); CONs = c['con'][sl].copy()
+    if name in ('idleM', 'idleF'): RO[:, 1] -= RO[:, 1].mean()        # stances play like the locomotion loops (height about the mean)
+    elif name in ('shift', 'wave', 'leap'): RO[:, 1] -= RO[0, 1]
+    if rev: RO = RO[::-1].copy(); Qs = Qs[::-1].copy(); CONs = CONs[::-1].copy()
+    loop = name.startswith('idle') or name == 'sitloop'
+    if loop: RO[:, 0] -= RO[:, 0].mean(); RO[:, 2] -= RO[:, 2].mean()
+    elif name == 'getup': RO[:, 0] -= RO[-1, 0]; RO[:, 2] -= RO[-1, 2]        # ends standing where the stance is
+    else: RO[:, 0] -= RO[0, 0]; RO[:, 2] -= RO[0, 2]
+    rows['Q'].append(Qs); rows['RO'].append(RO); rows['F'].append(np.zeros((m, 27)))
+    rows['RM'].append(np.zeros((m, 3))); rows['CON'].append(CONs)
+    valid.append(np.zeros(m, dtype=bool)); ranges.append([total, total + m, name])
+    IDLE[name] = {'a': total, 'n': m, 'minY': round(float(RO[:, 1].min()), 3)}; total += m
+    print(name, fn, a4, b4, m, 'minY %.2f' % RO[:, 1].min(), 'y0 %.2f y1 %.2f' % (RO[0, 1], RO[-1, 1]))
+_json.dump(IDLE, open('idle.json', 'w'))
 _json.dump(ATK, open('atk.json', 'w'))
 print('frames', total)
 Q = np.concatenate(rows['Q']); RO = np.concatenate(rows['RO']); RM = np.concatenate(rows['RM']); CON = np.concatenate(rows['CON']); F = np.concatenate(rows['F']); V = np.concatenate(valid)
@@ -102,5 +139,5 @@ meta = {'bones': R.OUT_BONES, 'fps': 30, 'n': int(total), 'nf': 27, 'mean': mean
         'q': put(np.round(Qp[..., :3] * 32767).astype(np.int16)), 'ro': put(np.round(RO * 4000).astype(np.int16)), 'rm': put(np.round(RM * 2000).astype(np.int16)),
         'con': put((CON * 255).astype(np.uint8)), 'f': put(np.round(np.clip(FN, -32, 32) * 1000).astype(np.int16)), 'valid': put(V.astype(np.uint8)), 'idleB': put(idleB)}
 gz = gzip.compress(bytes(blob), 9)
-open('/home/claude/game3d/src/data_mm.js', 'w').write('export const MM_META=' + json.dumps(meta, separators=(',', ':')) + ';\nexport const MM_B64="' + base64.b64encode(gz).decode() + '";\n')
+open('../../game/src/data_mm.js', 'w').write('export const MM_META=' + json.dumps(meta, separators=(',', ':')) + ';\nexport const MM_B64="' + base64.b64encode(gz).decode() + '";\n')
 print('raw', len(blob), 'gz', len(gz), 'b64', len(gz) * 4 // 3)

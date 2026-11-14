@@ -71,7 +71,7 @@ function springAng(x, v, goal, h, dt) {
 // (idle, walk, run) are aligned by foot contact and blended by speed with a shared phase. Game logic moves the body,
 // the playback rate follows the real speed so the feet do not slide, and nothing ever jumps between clips.
 // idle stances (motion capture): a man standing at ease, a woman with her weight on one leg
-const LOOPS = { idle: { a: 10493, b: 10568 }, idleF: { a: 10568, b: 10658 }, walk: { a: 648, b: 685 }, run: { a: 7678, b: 7700 } };
+const LOOPS = { idle: { a: 10493, b: 10583 }, idleF: { a: 10583, b: 10663 }, walk: { a: 648, b: 685 }, run: { a: 7678, b: 7700 } };
 const idleLoop = A => A.char.cfgSex === 'f' ? LOOPS.idleF : LOOPS.idle;
 function prepLoop(L) {
   L.len = L.b - L.a; L.T = L.len / DB.fps; L.off = 0;
@@ -543,12 +543,12 @@ const twoHanded = A => { const w = A.char.cfgWeapon || 'none'; return w !== 'shi
 //   20 s        sits down on the ground (mocap) and stays there, looking round every 4-7 s, until something happens;
 //               then he gets up (mocap) before he can move
 // The dash plays a crouch-and-spring (mocap leap) over the body.
-const IDLE = {"shift": {"a": 10658, "n": 120, "minY": -0.009}, "wave": {"a": 10778, "n": 55, "minY": -0.0}, "sit": {"a": 10833, "n": 81, "minY": -0.796}, "leap": {"a": 10914, "n": 38, "minY": -0.144}};
+const IDLE = {"shift": {"a": 10663, "n": 120, "minY": -0.007}, "wave": {"a": 10783, "n": 55, "minY": 0.0}, "sitdown": {"a": 10838, "n": 65, "minY": -0.884}, "sitloop": {"a": 10903, "n": 360, "minY": -0.813}, "getup": {"a": 11263, "n": 65, "minY": -0.884}, "leap": {"a": 11328, "n": 38, "minY": -0.164}};
 const smoother = x => { x = clamp(x, 0, 1); return x * x * x * (x * (x * 6 - 15) + 10); };
 export function pokeIdle(A) {
   A.idleT = 0; A.idleDue = [];
   const I = A.idle; if (!I) return;
-  if (I.kind === 'sit') { if (I.phase !== 'up') { I.phase = 'up'; I.t = 0; } } else I.out = true;
+  if (I.kind === 'sit') { if (I.phase !== 'up') { if (I.phase === 'down') { I.g0 = IDLE.getup.n - 1 - Math.min(IDLE.sitdown.n - 1, I.t * 36); I.p = undefined; } I.phase = 'up'; I.t = 0; } } else I.out = true;
 }
 export const idleBusy = A => !!(A.idle && A.idle.kind === 'sit');
 export function startLeap(A) { A.leap = { t: 0 }; }
@@ -562,29 +562,41 @@ function idleUpdate(A, dt) {
   const T0 = A.idleT || 0; A.idleT = T0 + dt; A.idleDue = A.idleDue || [];
   for (const [at, kind, ch] of [[5, 'look', 0.75], [10, 'shift', 0.6], [15, 'wave', 0.2], [20, 'sit', 1]]) if (T0 < at && A.idleT >= at && Math.random() < ch) A.idleDue.push(kind);
   if (!A.idle && A.idleDue.length) { const kind = A.idleDue.shift(); A.idle = { kind, t: 0, w: 0, phase: 'down', nextLook: 4 + Math.random() * 3, look: -1 }; }
-  const I = A.idle; A.idleYawW = 0; A.idleLook = 0; A.idleLookP = 0; A.footLift = 0; A.idleClip = null;
+  const I = A.idle; A.idleYawW = 0; A.idleLook = 0; A.idleLookP = 0; A.footLift = 0; A.idleClips = [];
   if (I) {
     I.t += dt;
     const fade = I.out ? Math.max(0, (I.w || 0) - dt / 0.25) : 1; I.w = fade;
     if (I.kind === 'look') { A.idleLook = lookYaw(I.t, 4.2, 0.95) * fade; A.idleLookP = -0.06 * Math.abs(A.idleLook); if (I.t > 4.2) A.idle = null; }
     else if (I.kind === 'shift') {
       const cw = Math.min(smoother(I.t / 0.5), 1 - smoother((I.t - 4.0) / 0.5)) * fade;
-      if (I.t < 4.5) A.idleClip = { a: IDLE.shift.a, fr: Math.min(IDLE.shift.n - 1, I.t * 30), w: cw };
+      if (I.t < 4.5) A.idleClips.push({ a: IDLE.shift.a, fr: Math.min(IDLE.shift.n - 1, I.t * 30), w: cw });
       const lt = I.t - 4.1; A.footLift = (lt > 0 ? Math.min(smoother(lt / 0.6), 1 - smoother((lt - 1.9) / 0.6)) : 0) * fade;
       if (I.t > 6.7) A.idle = null;
     } else if (I.kind === 'wave') {
       A.idleYawW = Math.min(smoother(I.t / 0.7), 1 - smoother((I.t - 2.6) / 0.7)) * fade;
-      const wt = I.t - 0.6; if (wt > 0 && wt < IDLE.wave.n / 30) A.idleClip = { a: IDLE.wave.a, fr: wt * 30, w: Math.min(smoother(wt / 0.25), 1 - smoother((wt - IDLE.wave.n / 30 + 0.3) / 0.3)) * fade };
+      const wt = I.t - 0.6; if (wt > 0 && wt < IDLE.wave.n / 30) A.idleClips.push({ a: IDLE.wave.a, fr: wt * 30, w: Math.min(smoother(wt / 0.25), 1 - smoother((wt - IDLE.wave.n / 30 + 0.3) / 0.3)) * fade, upper: true });      // the arm and trunk only: the feet stay in the stance
       if (I.t > 3.3) A.idle = null;
     } else if (I.kind === 'sit') {
-      let fr, w = 1;
-      if (I.phase === 'down') { fr = 2 + Math.min(1, I.t / 1.0) * 22; w = smoother(I.t / 0.25); if (I.t > 1.0) { I.phase = 'sit'; I.t = 0; } }
-      else if (I.phase === 'sit') {
-        fr = 24 + 16 * smoother(Math.min(1, I.t / 0.8));       // settles into the sitting pose
+      // down onto the ground (a hand goes down first), sitting there knees up and leaning back on a hand, and up again
+      const SD = IDLE.sitdown, SL = IDLE.sitloop, GU = IDLE.getup, W = 15, L = SL.n - W;
+      const loopAt = (p, w) => { if (p < W) { A.idleClips.push({ a: SL.a, fr: p + L, w }); A.idleClips.push({ a: SL.a, fr: p, w: w * smoother(p / W) }); } else A.idleClips.push({ a: SL.a, fr: p, w }); };
+      if (I.phase === 'down') {
+        const fr = Math.min(SD.n - 1, I.t * 30 * 1.2);
+        A.idleClips.push({ a: SD.a, fr, w: smoother(I.t / 0.3) });
+        if (fr >= SD.n - 1) { I.phase = 'sit'; I.t = 0; I.p = 0; }
+      } else if (I.phase === 'sit') {
+        I.p = ((I.p || 0) + dt * 30) % L;
+        A.idleClips.push({ a: SD.a, fr: SD.n - 1, w: 1 }); loopAt(I.p, smoother(I.t / 0.7));
         I.nextLook -= dt; if (I.nextLook <= 0 && I.look < 0) I.look = 0;
-        if (I.look >= 0) { I.look += dt; A.idleLook = lookYaw(I.look, 2.8, 0.75); if (I.look > 2.8) { I.look = -1; I.nextLook = 4 + Math.random() * 3; } }
-      } else { fr = 57 + Math.min(1, I.t / 0.85) * 22; w = 1 - smoother((I.t - 0.75) / 0.2); if (I.t > 0.95) { A.idle = null; A.idleT = 0; } }
-      A.idleClip = { a: IDLE.sit.a, fr, w };
+        if (I.look >= 0) { I.look += dt; A.idleLook = lookYaw(I.look, 2.8, 0.7); if (I.look > 2.8) { I.look = -1; I.nextLook = 4 + Math.random() * 3; } }
+      } else {
+        // getting up: from the sitting loop (cross-faded in), or - if he was still going down - straight back up the same way
+        const fr = Math.min(GU.n - 1, (I.g0 || 0) + I.t * 30 * 1.15), end = fr >= GU.n - 1 ? (I.te = (I.te || 0) + dt) : 0;
+        const out = 1 - smoother(end / 0.3);
+        if (I.p !== undefined) loopAt(I.p, out);
+        A.idleClips.push({ a: GU.a, fr, w: (I.p !== undefined ? smoother(I.t / 0.4) : 1) * out });
+        if (end > 0.3) { A.idle = null; A.idleT = 0; }
+      }
     }
   }
   if (A.leap) { A.leap.t += dt; const u = A.leap.t / 0.45; if (u >= 1) A.leap = null; else A.leapClip = { a: IDLE.leap.a, fr: 5 + u * 26, w: Math.min(smoother(u / 0.15), 1 - smoother((u - 0.75) / 0.25)) }; }
@@ -597,7 +609,7 @@ function attackLayer(A, dt) {
   A.atkW = 0; A.grdW = 0; A.stW = 0; A.spinYaw = 0; A.bashW = 0;
   const nb = DB.nb, names = MM_META.bones, still = 1 - (A.wWalk || 0);
   if (!_aq.length) for (let k = 0; k < nb; k++) { _aq.push(new THREE.Quaternion()); _aq2.push(new THREE.Quaternion()); }
-  const lay = (Q, ro, w, yAbs, bash) => { const wl = w * still, shield = (A.char.cfgWeapon || 'none') === 'shield';
+  const lay = (Q, ro, w, yAbs, bash, upper) => { const wl = upper ? 0 : w * still, shield = (A.char.cfgWeapon || 'none') === 'shield';
     for (let k = 0; k < nb; k++) { const n = names[k]; let wk = w; if (n === 'root' || /leg|foot/.test(n)) wk = wl; else if (shield && /\.L$/.test(n) && !bash) wk = 0; A.outQ[k].slerp(Q[k], wk); }
     A.ro[0] += (ro[0] - A.ro[0]) * wl; A.ro[2] += (ro[2] - A.ro[2]) * wl; A.ro[1] += yAbs ? (ro[1] - A.ro[1]) * wl : ro[1] * wl; };
   // stance: with a weapon in both hands the body takes the guard the cuts start from (hilt low in front, point forward)
@@ -608,7 +620,7 @@ function attackLayer(A, dt) {
     const ro = [0, 0, 0]; samplePose(GUARD.a + g * (GUARD.n - 1), _aq, ro, null); ro[1] -= GUARD.y0; lay(_aq, ro, g, false); A.grdW = g;
   }
   idleUpdate(A, dt);
-  for (const c of [A.idleClip, A.leapClip]) if (c && c.w > 0.001) { const ro = [0, 0, 0]; samplePose(c.a + c.fr, _aq, ro, null); lay(_aq, ro, c.w, true); A.stW = Math.max(A.stW, c.w); }
+  for (const c of [...(A.idleClips || []), A.leapClip]) if (c && c.w > 0.001) { const ro = [0, 0, 0]; samplePose(c.a + c.fr, _aq, ro, null); lay(_aq, ro, c.w, true, false, c.upper); A.stW = Math.max(A.stW, c.w); }
   let a = A.atk; if (!a || a.t >= a.dur || !A.limbs.armR) { A.atkQueued = false; return; }
   // the next cut follows straight on if the button is held or was pressed again: no return to the stance in between
   if (a.t >= a.dur - ATK_OUT && (A.atkQueued || A.atkHeld)) { const from = a; A.atkQueued = false; A.atk = null; startAttack(A); a = A.atk;
@@ -826,7 +838,7 @@ function pinArms(A) {
 // ---------- arms ----------
 // The mocap actors hold their arms away from the body (marker suits). Bring a hanging arm back to the torso:
 // the sideways angle of the upper arm is limited softly, the forward/back swing is untouched.
-const ARM_MAX = 0.13, ARM_SOFT = 0.12, ARM_MIN = 0.2;     // ARM_MIN: the elbows never lie against the trunk
+const ARM_MAX = 0.45, ARM_SOFT = 0.3, ARM_MIN = 0.2;     // ARM_MIN: the elbows never lie against the trunk
 function relaxArms(A) {
   const H = A.H, g = A.char.group, weapon = A.char.cfgWeapon || 'none';
   const gq = g.getWorldQuaternion(new THREE.Quaternion()), gi = gq.clone().invert();

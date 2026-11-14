@@ -118,6 +118,26 @@ OUT_BONES = ['root', 'spine05', 'spine03', 'spine01', 'neck01', 'head', 'clavicl
              'upperarm01.L', 'upperarm01.R', 'lowerarm01.L', 'lowerarm01.R', 'wrist.L', 'wrist.R',
              'upperleg01.L', 'upperleg01.R', 'lowerleg01.L', 'lowerleg01.R', 'foot.L', 'foot.R']
 
+TPOSE = True
+TMAP = [('root', 'Hips'), ('spine05', 'LowerBack'), ('spine03', 'Spine'), ('spine01', 'Spine1'), ('neck01', 'Neck1'), ('head', 'Head')]
+for s, S in (('L', 'Left'), ('R', 'Right')):
+    TMAP += [('clavicle.' + s, S + 'Shoulder'), ('upperarm01.' + s, S + 'Arm'), ('lowerarm01.' + s, S + 'ForeArm'), ('wrist.' + s, S + 'Hand'),
+             ('upperleg01.' + s, S + 'UpLeg'), ('lowerleg01.' + s, S + 'Leg'), ('foot.' + s, S + 'Foot')]
+TREF_LAST = {}
+ELBOW_MIN = 0.21      # rad: a hanging upper arm is kept at least this far out from the trunk (elbows clear of the body)
+def clear_elbows(T):
+    """Our trunk is broader than most of the actors': an arm that hangs along the actor's body would go into ours.
+    A hanging upper arm is turned outwards (about the chest's forward axis) to at least ELBOW_MIN."""
+    Rc = T.W(BI['spine01'])[0]; up = Rc @ [0, 1, 0]; fw = Rc @ [0, 0, 1]
+    for s, sg in (('L', 1.0), ('R', -1.0)):
+        b = BI['upperarm01.' + s]; Rb, Pb = T.W(b); Pe = T.W(BI['lowerarm01.' + s])[1]
+        d = Pe - Pb; d /= np.linalg.norm(d)
+        out = Rc @ [sg, 0, 0]; down = -np.dot(d, up)
+        abd = np.arctan2(np.dot(d, out), down)
+        w = np.clip((down - 0.45) / 0.3, 0, 1); w = w * w * (3 - 2 * w)
+        if abd >= ELBOW_MIN or w <= 0: continue
+        ang = (ELBOW_MIN - abd) * w * sg
+        full(T, 'upperarm01.' + s, Rot.from_rotvec(fw * ang).as_matrix() @ Rb)
 # ---------------- per clip ----------------
 MIRROR_SWAP = lambda n: n.replace('Left', '#').replace('Right', 'Left').replace('#', 'Right').replace('LThumb', '#T').replace('RThumb', 'LThumb').replace('#T', 'RThumb').replace('LHipJoint', '#H').replace('RHipJoint', 'LHipJoint').replace('#H', 'RHipJoint')
 def process(fname, step=4, mirror=False):
@@ -160,6 +180,22 @@ def process(fname, step=4, mirror=False):
         x, y, z = v[0] - traj[f, 0], v[1], v[2] - traj[f, 1]
         return np.array([c * x + s * z, y, -s * x + c * z])
     T = Target()
+    # ---- T-pose: our skeleton (rest is an A-pose) is first put into the actor's T-pose: the arms and legs take the
+    # directions of his T-pose limbs; trunk, collarbones, neck and head keep our own shape. All motion is then the
+    # actor's joint rotations relative to his T-pose, applied to ours.
+    TREF = {}
+    if TPOSE:
+        T.reset()
+        for s, S in (('L', 'Left'), ('R', 'Right')):
+            aim(T, 'upperarm01.' + s, H('lowerarm01.' + s) - H('upperarm01.' + s), R0[S + 'ForeArm'] - R0[S + 'Arm'])
+            aim(T, 'lowerarm01.' + s, H('wrist.' + s) - H('lowerarm01.' + s), R0[S + 'Hand'] - R0[S + 'ForeArm'])
+            th = 'LThumb' if s == 'L' else 'RThumb'
+            full(T, 'wrist.' + s, frame(RE0[S + 'HandIndex1'] - R0[S + 'Hand'], RE0[th] - R0[S + 'Hand']) @ REST['hand' + s].T)
+            aim(T, 'upperleg01.' + s, H('lowerleg01.' + s) - H('upperleg01.' + s), R0[S + 'Leg'] - R0[S + 'UpLeg'])
+            aim(T, 'lowerleg01.' + s, H('foot.' + s) - H('lowerleg01.' + s), R0[S + 'Foot'] - R0[S + 'Leg'])
+            aim(T, 'foot.' + s, H('toe3-1.' + s) - H('foot.' + s), R0[S + 'ToeBase'] - R0[S + 'Foot'])
+        for bn, j in TMAP: TREF[bn] = T.W(BI[bn])[0].copy()
+        TREF_LAST.clear(); TREF_LAST.update(TREF)
     Q = np.zeros((nf, len(OUT_BONES), 4)); RO = np.zeros((nf, 3)); LOC = np.zeros((nf, 3, 3))
     restRoot = HEAD[BI['root']]
     meanHipY = hips[:, 1].mean()
@@ -177,6 +213,16 @@ def process(fname, step=4, mirror=False):
             D = (Fy @ RW[jj][f]) @ (Fy0 @ RW0[jj]).T
             if mirror: S_ = np.diag([-1.0, 1, 1]); D = S_ @ D @ S_
             return D
+        if TPOSE:
+            # every bone: the actor's rotation away from his T-pose, laid on the same bone of our skeleton in its T-pose
+            for bn, j in TMAP:
+                full(T, bn, jd(j) @ TREF[bn])
+            clear_elbows(T)
+            LOC[f] = [L['LeftFoot'], L['RightFoot'], L['Hips']]
+            RO[f] = [L['Hips'][0], L['Hips'][1] - meanHipY, L['Hips'][2]]
+            for k, bn in enumerate(OUT_BONES):
+                q = Rot.from_matrix(T.local[BI[bn]]).as_quat(); Q[f, k] = q if q[3] >= 0 else -q
+            continue
         full(T, 'root', jd('Hips'))
         full(T, 'spine05', jd('LowerBack'))
         full(T, 'spine03', jd('Spine'))
@@ -217,7 +263,8 @@ def process(fname, step=4, mirror=False):
     if mirror:
         latv = -latv; yawr = -yawr; yaw = -yaw; con = con[:, ::-1].copy(); ankY = ankY[:, ::-1].copy()
     if mirror: yaw_m = yaw
-    return dict(name=fname, mirror=mirror, LOC=LOC, dt=dt, n=nf, Q=Q, RO=RO, fwd=fwdv, lat=latv, yawr=yawr, yaw=yaw, con=con, ankY=ankY, hipY=meanHipY, traj=traj)
+    standY = P0['Hips'][1] - min(P0['LeftToeBase'][1], P0['RightToeBase'][1], P0['LeftFoot'][1], P0['RightFoot'][1])
+    return dict(standY=standY, name=fname, mirror=mirror, LOC=LOC, dt=dt, n=nf, Q=Q, RO=RO, fwd=fwdv, lat=latv, yawr=yawr, yaw=yaw, con=con, ankY=ankY, hipY=meanHipY, traj=traj)
 
 def heel_strikes(c, side=0):
     x = c['con'][:, side]; return [i for i in range(1, len(x)) if x[i] > 0.5 and x[i - 1] < 0.5]

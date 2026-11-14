@@ -34,12 +34,13 @@ def process(fname, a, b):
         R.full(T, 'spine05', slerpM(pel, che, 0.4)); R.full(T, 'spine03', slerpM(pel, che, 0.8)); R.full(T, 'spine01', che)
         R.full(T, 'neck01', slerpM(che, hed, 0.5)); R.full(T, 'head', hed)
         for s in 'LR':
-            R.aim(T, 'clavicle.' + s, H('upperarm01.' + s) - H('clavicle.' + s), L['UpperArm_' + s] - L['Shoulder_' + s])
+            # (collarbones keep our own rest line under the chest: the actor's points straight up into a shrug)
             R.aim(T, 'upperarm01.' + s, H('lowerarm01.' + s) - H('upperarm01.' + s), L['LowerArm_' + s] - L['UpperArm_' + s])
             R.aim(T, 'lowerarm01.' + s, H('wrist.' + s) - H('lowerarm01.' + s), L['Hand_' + s] - L['LowerArm_' + s])
             R.aim(T, 'upperleg01.' + s, H('lowerleg01.' + s) - H('upperleg01.' + s), L['LowerLeg_' + s] - L['UpperLeg_' + s])
             R.aim(T, 'lowerleg01.' + s, H('foot.' + s) - H('lowerleg01.' + s), L['Foot_' + s] - L['LowerLeg_' + s])
             R.aim(T, 'foot.' + s, H('toe3-1.' + s) - H('foot.' + s), L['Toes_' + s] - L['Foot_' + s])
+        R.clear_elbows(T)
         for k, bn in enumerate(R.OUT_BONES):
             q = Rot.from_matrix(T.local[BI[bn]]).as_quat(); Q[f, k] = q if q[3] >= 0 else -q
         LOC[f] = [L['Foot_L'], L['Foot_R'], L['Hips']]
