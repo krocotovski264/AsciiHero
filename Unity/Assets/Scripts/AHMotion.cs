@@ -317,6 +317,7 @@ namespace AsciiHero
             }
             AttackLayer(dt);
             bool shieldArm = ch.cfg.weapon == "shield";
+            if (finQ.Length != nb) finQ = new Quaternion[nb];
             for (int k = 0; k < nb; k++)
             {
                 if (map[k] < 0) continue;
