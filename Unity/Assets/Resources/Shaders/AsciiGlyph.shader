@@ -43,6 +43,8 @@ Shader "AsciiHero/Glyph"
                 float4 _DashSpin;    // per renderer: xyz = axis, w = angle; the piece tumbles about _DashPivot while it flies
                 float4 _DashPivot;
                 float4 _DashScatter;  // per renderer: chain mail coming apart into its links during the dash (w = time, 0 = off)
+            // obstacles near the dash path (set when it starts): circles (x, z, r) and boxes (min x, min z, max x, max z)
+            float4 _DashObst[8]; float4 _DashBox[4]; float _DashObstN, _DashBoxN;
             // cloth (the robe): the hem trails behind the motion and flutters; in the dash flight it billows harder
             float _ClothDash;      // per renderer (MaterialPropertyBlock)
             float4 _AsciiHeroVel; float _AsciiTime;
@@ -99,6 +101,23 @@ Shader "AsciiHero/Glyph"
                     float dl = frac(i.seed.x * 17.3) * 0.42, u2 = saturate((_DashScatter.w - dl) / 0.4), e2 = u2 * u2 * (3.0 - 2.0 * u2), ar = sin(3.14159 * e2);
                     float3 jit = (float3(frac(i.seed.x * 7.1), frac(i.seed.x * 3.7), frac(i.seed.x * 11.9)) - 0.5) * 0.9;
                     pWS += _DashScatter.xyz * (1.0 - e2) + jit * ar + float3(0, 0.3 * ar, 0);
+                    // a link does not go into a tree or a rock: it slides round it
+                    for (int k = 0; k < 8; k++)
+                    {
+                        if (k >= (int)_DashObstN) break;
+                        float4 ob = _DashObst[k]; float2 dd = pWS.xz - ob.xy; float L = length(dd), R = ob.z + 0.12;
+                        if (L < R) pWS.xz = ob.xy + dd / max(L, 1e-4) * R;
+                    }
+                    for (int b = 0; b < 4; b++)
+                    {
+                        if (b >= (int)_DashBoxN) break;
+                        float4 bx = _DashBox[b] + float4(-0.12, -0.12, 0.12, 0.12);
+                        if (pWS.x > bx.x && pWS.x < bx.z && pWS.z > bx.y && pWS.z < bx.w)
+                        {
+                            float4 dist = float4(pWS.x - bx.x, pWS.z - bx.y, bx.z - pWS.x, bx.w - pWS.z); float m = min(min(dist.x, dist.y), min(dist.z, dist.w));
+                            if (m == dist.x) pWS.x = bx.x; else if (m == dist.z) pWS.x = bx.z; else if (m == dist.y) pWS.z = bx.y; else pWS.z = bx.w;
+                        }
+                    }
                 }
                 float lod = max(1.0, _AsciiLod);
                 bool lodKeep = lod < 1.01 || frac(i.seed.x * 31.7 + 0.37) < 1.7 / (lod * lod);

@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.27 · Unity";
+        public const string VERSION = "beta 0.28 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -826,7 +826,7 @@ namespace AsciiHero
         class Piece { public string kind = ""; public List<Renderer> rs = new List<Renderer>(); public float delay, om = 11, zeta = 0.45f, lift = 0.3f, wob, turns = 1, side; public Vector3 axis = Vector3.up; }
         readonly List<Piece> pieces = new List<Piece>(); MaterialPropertyBlock shiftMpb;
         const float DASH_DIST = 2.0f, DASH_T = 0.1f; float dashAnim = 0.4f, dashSettle = 0;
-        float dashT = 9, dashCd, dashMist, dashLen = 2; Vector3 dashFrom, dashDir; Vector2? moveDir; bool dashShifted;
+        float dashT = 9, dashCd, dashMist, dashLen = 2; readonly Vector4[] dashObst = new Vector4[8], dashBox = new Vector4[4]; Vector3 dashFrom, dashDir; Vector2? moveDir; bool dashShifted;
         Rect atkRect, defRect, dashRect;
         void DoAttack() { if (world && player != null && dashT >= DASH_T) player.StartAttack(); }
         void DoDash()
@@ -838,6 +838,21 @@ namespace AsciiHero
             // the shadow passes straight through trees, rocks and furniture; it only has to come out on free ground:
             // if the end of the dash is inside something it goes on until it is clear (or, failing that, stops short)
             dashLen = DASH_DIST;
+            // the obstacles near the path, for the chain-mail links (they are moved in the glyph shader)
+            {
+                int nc = 0, nbx = 0; Vector2 a0 = new Vector2(pos.x, pos.z), a1 = a0 + new Vector2(dashDir.x, dashDir.z) * (DASH_DIST + 1.5f);
+                foreach (var c in loc.colliders)
+                {
+                    Vector2 cc = c.circle ? new Vector2(c.x, c.z) : new Vector2((c.minx + c.maxx) / 2, (c.minz + c.maxz) / 2);
+                    float rr = c.circle ? c.r : 0.5f * new Vector2(c.maxx - c.minx, c.maxz - c.minz).magnitude;
+                    Vector2 ab = a1 - a0; float tt = Mathf.Clamp01(Vector2.Dot(cc - a0, ab) / Mathf.Max(ab.sqrMagnitude, 1e-6f));
+                    if ((a0 + ab * tt - cc).magnitude > rr + 1.6f) continue;
+                    if (c.circle && nc < 8) dashObst[nc++] = new Vector4(c.x, c.z, c.r, 0);
+                    else if (!c.circle && nbx < 4) dashBox[nbx++] = new Vector4(c.minx, c.minz, c.maxx, c.maxz);
+                }
+                Shader.SetGlobalVectorArray("_DashObst", dashObst); Shader.SetGlobalVectorArray("_DashBox", dashBox);
+                Shader.SetGlobalFloat("_DashObstN", nc); Shader.SetGlobalFloat("_DashBoxN", nbx);
+            }
             System.Func<float, bool> free = l => { var q = new Vector2(pos.x + dashDir.x * l, pos.z + dashDir.z * l); return (loc.Collide(q, 0.27f) - q).sqrMagnitude < 1e-6f; };
             if (!free(dashLen)) { float l = dashLen; while (l < DASH_DIST + 1.5f && !free(l)) l += 0.1f; if (free(l)) dashLen = l; else { l = DASH_DIST; while (l > 0 && !free(l)) l -= 0.1f; dashLen = Mathf.Max(0, l); } }
             // the armour follows piece by piece, one after another, like a suit assembling itself. Every piece is pulled in
