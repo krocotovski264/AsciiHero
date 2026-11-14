@@ -101,4 +101,4 @@ git config merge.unityyamlmerge.name "Unity SmartMerge"
 ## Сторонние данные
 
 - Анимации ударов мечом — Bandai Namco Research Motiondataset-1 (`slash_normal_001/002`), лицензия **CC BY-NC 4.0**: только некоммерческое использование, с указанием авторства. © Bandai Namco Research Inc. https://github.com/BandaiNamcoResearchInc/Bandai-Namco-Research-Motiondataset
-- Ходьба, бег, стойка — CMU Graphics Lab Motion Capture Database (mocap.cs.cmu.edu), свободное использование.
+- Ходьба, бег, стойка, блок мечом (клип 76_04) — CMU Graphics Lab Motion Capture Database (mocap.cs.cmu.edu), свободное использование.
