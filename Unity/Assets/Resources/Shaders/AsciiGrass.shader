@@ -97,8 +97,11 @@ Shader "AsciiHero/Grass"
                 float3 green = lerp(float3(0.16, 0.50, 0.24), float3(0.50, 0.78, 0.36), frac(s * 13.7));
                 o.col = (green * (0.22 + 0.95 * lum) + lit * 0.5) * depthK * (1.0 - 0.35 * push);
                 o.col *= 1.0 + 0.5 * wave;       // a pressed-down band shows lighter (the blades turn their sides to the light)
-                o.local = i.corner + 0.5;
-                pVS.xy += i.corner * float2(h * 0.44, h * 1.1);       // the characters keep their width, the blades are taller
+                // an upright blade '|' is only the middle third of its cell: its quad is that narrow, so the many blades
+                // lying over each other fill far fewer pixels (measured: the grass was a fifth of the GPU frame)
+                float wk = o.gi < 0.5 ? 0.36 : 1.0;
+                o.local = float2(0.5 + i.corner.x * wk, i.corner.y + 0.5);
+                pVS.xy += i.corner * float2(h * 0.44 * wk, h * 1.1);       // the characters keep their width, the blades are taller
                 o.positionCS = vis ? TransformWViewToHClip(pVS) : float4(2, 2, 2, 1);
                 return o;
             }

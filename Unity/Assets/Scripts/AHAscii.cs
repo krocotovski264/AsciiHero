@@ -21,6 +21,9 @@ namespace AsciiHero
         public bool surfaceGlyphs = true;
         /// high quality: the lit colour the characters take their brightness from is rendered at full resolution (else half)
         public bool fullLit; bool builtFull;
+        /// the lit colour (what the characters take their brightness, depth and the outline from) is rendered at 1/litDiv of
+        /// the output size. Measured on a Galaxy A55: at full size it cost about a quarter of the GPU frame for no visible gain
+        public int litDiv = 2; int builtDiv;
         /// diagnostics: draw the plain 3D scene straight to the screen (no ASCII)
         public bool plain;
         bool builtSurface, builtPlain;
@@ -133,8 +136,8 @@ namespace AsciiHero
                 return;
             }
             if (builtPlain) { builtPlain = false; cam.rect = new Rect(0, 0, 1, 1); cam.depth = -3; final = null; }
-            if (w == W && h == H && c == cols && r == rows && final != null && builtSurface == surfaceGlyphs && builtFull == fullLit) { SyncND(); return; }
-            W = w; H = h; cols = c; rows = r; builtSurface = surfaceGlyphs; builtFull = fullLit;
+            if (w == W && h == H && c == cols && r == rows && final != null && builtSurface == surfaceGlyphs && builtDiv == litDiv) { SyncND(); return; }
+            W = w; H = h; cols = c; rows = r; builtSurface = surfaceGlyphs; builtFull = fullLit; builtDiv = litDiv;
             cam.targetTexture = null; ndCam.targetTexture = null; glyphCam.targetTexture = null;
             Free(ref rtCol); Free(ref rtND); Free(ref rtAscii); Free(ref rtB1); Free(ref rtB2); Free(ref final); Free(ref rtFull);
             var half = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGBHalf) ? RenderTextureFormat.ARGBHalf : RenderTextureFormat.ARGB32;
@@ -142,14 +145,14 @@ namespace AsciiHero
                 ? RenderTextureFormat.RGB111110Float : half;
             if (surfaceGlyphs)
             {
-                int hw = fullLit ? W : (W + 1) / 2, hh = fullLit ? H : (H + 1) / 2;
+                int dv = Mathf.Clamp(litDiv, 2, 4), hw = (W + dv - 1) / dv, hh = (H + dv - 1) / dv;
                 rtCol = RT(hw, hh, half, FilterMode.Bilinear, 24, RenderTextureReadWrite.Linear);
                 rtND = RT(hw, hh, half, FilterMode.Point, 24, RenderTextureReadWrite.Linear);
                 // a camera target must have a depth buffer in URP's render graph, even though glyphs don't test depth.
                 // The glyph layer is the full-resolution target every character is blended into: a packed 32-bit float
                 // format halves the memory traffic of the 64-bit one where the device can blend into it
                 rtFull = RT(W, H, lite, FilterMode.Bilinear, 16, RenderTextureReadWrite.Linear);
-                formats = "глифы " + lite + ", свет " + half; checkFrames = 12;
+                formats = "глифы " + lite + ", свет " + half + " " + hw + "×" + hh; checkFrames = 12;
                 Shader.SetGlobalTexture("_AsciiLitTex", rtCol); Shader.SetGlobalTexture("_AsciiNDTex", rtND);
             }
             else
@@ -158,8 +161,9 @@ namespace AsciiHero
                 rtND = RT(cols, rows, half, FilterMode.Point, 24, RenderTextureReadWrite.Linear);
             }
             rtAscii = RT(W, H, RenderTextureFormat.ARGB32, FilterMode.Bilinear, 0, RenderTextureReadWrite.Linear);
-            rtB1 = RT((W + 3) / 4, (H + 3) / 4, lite, FilterMode.Bilinear, 0, RenderTextureReadWrite.Linear);
-            rtB2 = RT((W + 3) / 4, (H + 3) / 4, lite, FilterMode.Bilinear, 0, RenderTextureReadWrite.Linear);
+            // (the glow is blurred at a sixth of the size: the same reach on screen for under half the work of a quarter)
+            rtB1 = RT((W + 5) / 6, (H + 5) / 6, lite, FilterMode.Bilinear, 0, RenderTextureReadWrite.Linear);
+            rtB2 = RT((W + 5) / 6, (H + 5) / 6, lite, FilterMode.Bilinear, 0, RenderTextureReadWrite.Linear);
             final = RT(W, H, RenderTextureFormat.ARGB32, FilterMode.Point, 0, RenderTextureReadWrite.Default);
             cam.targetTexture = rtCol; ndCam.targetTexture = rtND;
             glyphCam.targetTexture = rtFull; glyphCam.enabled = surfaceGlyphs;
@@ -234,10 +238,10 @@ namespace AsciiHero
             float bw = rtB1.width, bh = rtB1.height; bool glow = bloom > 0.001f && !dbgNoBloom;
             if (glow)
             {
-                blurMat.SetVector("_Dir", new Vector4(1.6f / bw, 0)); Graphics.Blit(src, rtB1, blurMat);
-                blurMat.SetVector("_Dir", new Vector4(0, 1.6f / bh)); Graphics.Blit(rtB1, rtB2, blurMat);
-                blurMat.SetVector("_Dir", new Vector4(3.2f / bw, 0)); Graphics.Blit(rtB2, rtB1, blurMat);
-                blurMat.SetVector("_Dir", new Vector4(0, 3.2f / bh)); Graphics.Blit(rtB1, rtB2, blurMat);
+                blurMat.SetVector("_Dir", new Vector4(1.1f / bw, 0)); Graphics.Blit(src, rtB1, blurMat);
+                blurMat.SetVector("_Dir", new Vector4(0, 1.1f / bh)); Graphics.Blit(rtB1, rtB2, blurMat);
+                blurMat.SetVector("_Dir", new Vector4(2.2f / bw, 0)); Graphics.Blit(rtB2, rtB1, blurMat);
+                blurMat.SetVector("_Dir", new Vector4(0, 2.2f / bh)); Graphics.Blit(rtB1, rtB2, blurMat);
             }
             finalMat.SetTexture("_BloomTex", rtB2); finalMat.SetFloat("_Bloom", glow ? bloom : 0);
             Graphics.Blit(src, final, finalMat);

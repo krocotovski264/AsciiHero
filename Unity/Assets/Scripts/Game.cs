@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.35 · Unity";
+        public const string VERSION = "beta 0.36 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -678,7 +678,7 @@ namespace AsciiHero
             sceneCam.fieldOfView = 30; ascii.exposure = 1.3f; ascii.actorBoost = 1; Shader.SetGlobalFloat("_AsciiLod", ISO_LOD);
             if (toField) SetAmbient(Mats.Hex(0x8fa4d8) * 0.55f, Mats.Hex(0x4a5a58) * 0.55f, Mats.Hex(0x1a2414) * 0.55f);
             else SetAmbient(Mats.Hex(0x50465a) * 0.45f, Mats.Hex(0x342b32) * 0.45f, Mats.Hex(0x18100a) * 0.45f);
-            SetShadowDistance(40);
+            SetShadowDistance(26);      // (the view reaches about 21 m from the camera; a shorter range keeps the shadow map sharp at half its old size)
             ShowToast(toField ? "Тестовое поле\nКучи брони возвращают оторванные части" : "Трактир «Пьяный дракон»\nСтик — шаг, палец за край — бег");
         }
         void LeaveWorld()
@@ -739,8 +739,8 @@ namespace AsciiHero
             }
             Application.targetFrameRate = FPS[setFps];
             Shader.SetGlobalFloat("_AsciiGrassThin", 1 - GRASS[setGrass] / 100f);
-            if (ascii != null) { ascii.bloom = setBloom ? 0.32f : 0f; ascii.fullLit = setQuality == 2; ascii.outline = setOutline; }
-            shadowScale = setQuality == 0 ? 0f : setQuality == 1 ? 0.6f : 1f; SetShadowDistance(shadowBase);
+            if (ascii != null) { ascii.bloom = setBloom ? 0.32f : 0f; ascii.fullLit = false; ascii.litDiv = setQuality == 0 ? 3 : 2; ascii.outline = setOutline; }
+            shadowScale = setQuality == 0 ? 0f : setQuality == 1 ? 0.85f : 1f; SetShadowDistance(shadowBase);
             AudioListener.volume = setSound / 100f;      // (the game has no sounds or music yet: the levels are kept for them)
             // rendering resolution: a share of the display's own resolution (100 % = the most the device can show)
             int sw = Display.main.systemWidth, sh = Display.main.systemHeight; if (sw <= 0 || sh <= 0) { sw = Screen.currentResolution.width; sh = Screen.currentResolution.height; }
@@ -802,7 +802,7 @@ namespace AsciiHero
         // mean frame time (and, where the device reports them, the main-thread, render-thread and GPU times) goes to
         // the log. What a stage saves is what that part of the frame costs.
         static readonly string[] PERF = { "всё включено", "без травы", "без символов (только 3D-сцена)", "без героя", "без анимации и ткани", "без теней", "без свечения",
-            "без интерфейса", "без обводки", "с отдельной камерой глубины (как до 0.35)", "герой: все символы (как в 0.34)", "разрешение 67 %" };
+            "без интерфейса", "без обводки", "с отдельной камерой глубины (как до 0.35)", "герой: все символы (как в 0.34)", "разрешение 67 %", "герой без слоя символов", "без деревьев, камней и брони (только земля и трава)" };
         bool perfRun, perfNoAnim, perfNoGui, perfFullActors; int perfIx; float perfT, perfBase, pWorst; int pN, pFt, savedVsync;
         double pSum, pMain, pRender, pGpu, accU, accA, accG; readonly FrameTiming[] ftBuf = new FrameTiming[1];
         double fMain, fGpu; int fFt;
@@ -816,6 +816,7 @@ namespace AsciiHero
             savedVsync = QualitySettings.vSyncCount; QualitySettings.vSyncCount = 0; Application.targetFrameRate = 240;
             Debug.Log("ТЕСТ ПРОИЗВОДИТЕЛЬНОСТИ · " + VERSION + " · " + SystemInfo.deviceModel + " · " + SystemInfo.graphicsDeviceName + " · экран " + Screen.width + "×" + Screen.height +
                       " @" + Screen.currentResolution.refreshRateRatio.value.ToString("0") + " Гц · качество " + QUALITY[setQuality] + ", трава " + GRASS[setGrass] + " %, разрешение " + RES[setRes] + " %");
+            GlyphLayer.Recount();
             Debug.Log("ТЕСТ · символов на сцене " + GlyphLayer.count + " · на героях " + GlyphLayer.actorGlyphs + ", рисуется " + GlyphLayer.actorGlyphsDrawn + " (уровень " + GlyphLayer.actorLod + ") · " +
                       ascii.formats + " · глубина " + (ascii.depthFromLit ? "из альфы цвета" : "отдельной камерой"));
         }
@@ -835,6 +836,8 @@ namespace AsciiHero
                 case 9: ascii.dbgForceND = on; break;
                 case 10: perfFullActors = on; break;
                 case 11: if (on) { int old = setRes; setRes = 1; ApplySettings(false); setRes = old; } else ApplySettings(false); break;
+                case 12: if (hero != null) foreach (var r in hero.glyphs) if (r != null) r.enabled = !on; break;
+                case 13: if (field != null) foreach (Transform c in field.root.transform) if (c.name != "Ground" && c.name != "Grass") c.gameObject.SetActive(!on); break;
             }
             if (perfRun) { QualitySettings.vSyncCount = 0; Application.targetFrameRate = 240; }
         }
@@ -900,6 +903,7 @@ namespace AsciiHero
             fpsAcc += Time.unscaledDeltaTime; fpsN++;
             if (fpsAcc > 1)
             {
+                if (setShowFps && ascii.surfaceGlyphs) GlyphLayer.Recount();
                 fpsText = Mathf.RoundToInt(fpsN / fpsAcc) + " fps · " + (ascii.surfaceGlyphs ? GlyphLayer.count + " симв." : ascii.cols + "×" + ascii.rows);
                 if (fFt > 0) fpsText += " · CPU " + (fMain / fFt).ToString("0.0") + " · GPU " + (fGpu / fFt).ToString("0.0") + " мс";
                 fpsAcc = 0; fpsN = 0; fMain = fGpu = 0; fFt = 0;

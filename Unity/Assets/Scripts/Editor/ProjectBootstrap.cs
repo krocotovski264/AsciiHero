@@ -55,6 +55,9 @@ namespace AsciiHero.Editor
             AssetDatabase.CreateAsset(pipeline, PipelinePath);
             AssetDatabase.AddObjectToAsset(renderer, pipeline);
             AssetDatabase.SaveAssets();
+            // a 1024 shadow map: with the short shadow range of the world view it is as sharp as 2048 was over 40 m
+            var pso = new SerializedObject(pipeline); var sr = pso.FindProperty("m_MainLightShadowmapResolution");
+            if (sr != null) { sr.intValue = 1024; pso.ApplyModifiedPropertiesWithoutUndo(); }
             LogPipeline(pipeline);
             return pipeline;
         }

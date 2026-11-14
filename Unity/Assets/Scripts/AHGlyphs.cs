@@ -72,6 +72,19 @@ namespace AsciiHero
         }
 
         /// grass blades: one glyph quad per point (positions in the parent's local space)
+        /// the characters really in the scene now (the running 'count' also holds every rebuilt and destroyed mesh)
+        public static int Recount()
+        {
+            int n = 0;
+            foreach (var r in Object.FindObjectsByType<Renderer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            {
+                if (r.gameObject.layer != LAYER || !r.enabled) continue;
+                var smr = r as SkinnedMeshRenderer; Mesh m = smr != null ? smr.sharedMesh : (r.GetComponent<MeshFilter>() != null ? r.GetComponent<MeshFilter>().sharedMesh : null);
+                if (m != null) n += m.vertexCount / 4;
+            }
+            count = n; return n;
+        }
+
         // ---------- characters: even thinning by distance ----------
         class LodEntry { public Renderer r; public Mesh m; public int[] cum; public Bounds b; }
         static readonly List<LodEntry> LODS = new List<LodEntry>();
