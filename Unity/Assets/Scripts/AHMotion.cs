@@ -738,14 +738,14 @@ namespace AsciiHero
         const int SIT_A = 10833, SIT_N = 81;
         const int LEAP_A = 10914, LEAP_N = 38;
         class IdleAct { public string kind, phase = "down"; public float t, w = 1, nextLook, look = -1; public bool o; }
-        IdleAct idleA; readonly List<string> idleDue = new List<string>(); float idleT, leapT = -1, idleW, footLift, idleLook, idleLookP;
+        IdleAct idleA; readonly List<string> idleDue = new List<string>(); float idleClock, leapT = -1, idleW, footLift, idleLook, idleLookP;
         /// 0..1: how far the hero is turned towards the camera (the game adds the turn to his facing)
         public float idleYawW;
         static float Smoother(float x) { x = Mathf.Clamp01(x); return x * x * x * (x * (x * 6 - 15) + 10); }
         /// any input or a hit: idle actions stop (sitting: he gets up first)
         public void PokeIdle()
         {
-            idleT = 0; idleDue.Clear();
+            idleClock = 0; idleDue.Clear();
             if (idleA == null) return;
             if (idleA.kind == "sit") { if (idleA.phase != "up") { idleA.phase = "up"; idleA.t = 0; } } else idleA.o = true;
         }
@@ -766,9 +766,9 @@ namespace AsciiHero
         {
             bool busy = vel > 0.08f || Attacking || guard > 0.05f || combatT > 0 || !limbs[3] || !limbs[4] || !loopMode;
             if (busy && !IdleBusy) PokeIdle();
-            float T0 = idleT; idleT += dt;
+            float T0 = idleClock; idleClock += dt;
             float[] at = { 5, 10, 15, 20 }, chance = { 0.75f, 0.6f, 0.2f, 1 }; string[] kinds = { "look", "shift", "wave", "sit" };
-            for (int k = 0; k < 4; k++) if (T0 < at[k] && idleT >= at[k] && UnityEngine.Random.value < chance[k]) idleDue.Add(kinds[k]);
+            for (int k = 0; k < 4; k++) if (T0 < at[k] && idleClock >= at[k] && UnityEngine.Random.value < chance[k]) idleDue.Add(kinds[k]);
             if (idleA == null && idleDue.Count > 0) { idleA = new IdleAct { kind = idleDue[0], nextLook = 4 + UnityEngine.Random.value * 3 }; idleDue.RemoveAt(0); }
             idleYawW = 0; idleLook = 0; idleLookP = 0; footLift = 0; idleW = 0;
             var I = idleA;
@@ -801,7 +801,7 @@ namespace AsciiHero
                         I.nextLook -= dt; if (I.nextLook <= 0 && I.look < 0) I.look = 0;
                         if (I.look >= 0) { I.look += dt; idleLook = LookYaw(I.look, 2.8f, 0.75f); if (I.look > 2.8f) { I.look = -1; I.nextLook = 4 + UnityEngine.Random.value * 3; } }
                     }
-                    else { fr = 57 + Mathf.Min(1, I.t / 0.85f) * 22; w = 1 - Smoother((I.t - 0.75f) / 0.2f); if (I.t > 0.95f) { idleA = null; idleT = 0; } }
+                    else { fr = 57 + Mathf.Min(1, I.t / 0.85f) * 22; w = 1 - Smoother((I.t - 0.75f) / 0.2f); if (I.t > 0.95f) { idleA = null; idleClock = 0; } }
                     LayClip(SIT_A, fr, w);
                 }
             }
