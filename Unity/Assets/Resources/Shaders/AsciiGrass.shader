@@ -24,6 +24,7 @@ Shader "AsciiHero/Grass"
             float _AsciiRows, _AsciiExposure, _AsciiLinear, _AsciiDepthRef, _AsciiTime;
             float4 _AsciiPush[4];      // points of the body that press the grass: xyz, radius (0 = none)
             float _AsciiGrassThin;     // settings: the share of blades that is not drawn (0 = all)
+            float4 _AsciiWind;         // wind: xy = direction (world xz), z = strength 0..1.5, w = unused
 
             struct Attributes { float4 positionOS : POSITION; float2 corner : TEXCOORD0; float2 seed : TEXCOORD1; };
             struct Varyings { float4 positionCS : SV_POSITION; float2 local : TEXCOORD0; float3 col : TEXCOORD1; float gi : TEXCOORD2; };
@@ -33,8 +34,14 @@ Shader "AsciiHero/Grass"
                 Varyings o;
                 float3 a = TransformObjectToWorld(i.positionOS.xyz);
                 float s = i.seed.x;
-                float h = 0.11 + 0.15 * s;
-                float2 wind = float2(sin(_AsciiTime * 1.1 + a.x * 0.9 + a.z * 0.6), cos(_AsciiTime * 0.8 + a.z * 1.1 + s * 6.0)) * 0.13;
+                float h = 0.165 + 0.225 * s;          // (one and a half times the old blades)
+                // wind: the blades lean downwind, and gusts roll across the field as waves; each blade also flutters a little
+                float2 wd = _AsciiWind.xy; float ws = _AsciiWind.z;
+                float2 wp = float2(-wd.y, wd.x);
+                float gust = 0.5 + 0.5 * sin(dot(a.xz, wd) * 0.85 - _AsciiTime * 2.3 + 0.6 * sin(dot(a.xz, wp) * 0.4 + _AsciiTime * 0.5));
+                gust *= gust;
+                float2 wind = wd * ws * (0.1 + 0.42 * gust)
+                            + float2(sin(_AsciiTime * 4.3 + s * 40.0 + a.x * 3.0), cos(_AsciiTime * 3.7 + s * 23.0 + a.z * 3.0)) * (0.025 + 0.05 * ws * gust);
                 float2 lean = wind; float push = 0;
                 for (int k = 0; k < 4; k++)
                 {
@@ -62,7 +69,7 @@ Shader "AsciiHero/Grass"
                 float3 green = lerp(float3(0.16, 0.50, 0.24), float3(0.50, 0.78, 0.36), frac(s * 13.7));
                 o.col = (green * (0.22 + 0.95 * lum) + lit * 0.5) * depthK * (1.0 - 0.35 * push);
                 o.local = i.corner + 0.5;
-                pVS.xy += i.corner * float2(h * 0.66, h * 1.1);
+                pVS.xy += i.corner * float2(h * 0.44, h * 1.1);       // the characters keep their width, the blades are taller
                 o.positionCS = vis ? TransformWViewToHClip(pVS) : float4(2, 2, 2, 1);
                 return o;
             }

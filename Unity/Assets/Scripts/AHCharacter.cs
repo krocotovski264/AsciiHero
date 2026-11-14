@@ -37,7 +37,7 @@ namespace AsciiHero
         public Transform model;         // scaled for height
         public Human human;
         public CharConfig cfg;
-        public Transform weapon, weaponL, orb, shield, weaponSlide; public float weaponSlideBase = -0.5f;   // shield: local z = its face, local y = its top
+        public Transform weapon, weaponL, orb, shield, weaponSlide, skirt; public Vector3[] skirtRest; public int skirtRings, skirtSegs; public float weaponSlideBase = -0.5f;   // shield: local z = its face, local y = its top
         public List<Renderer> glyphs = new List<Renderer>();   // skinned glyph renderers (limb hiding)
         public static readonly string[] LIMBS = { "head", "armL", "armR", "legL", "legR" };
         public static readonly string[] LIMB_NAME = { "голова", "левая рука", "правая рука", "левая нога", "правая нога" };
@@ -283,7 +283,8 @@ namespace AsciiHero
                 { int a = r * (segs + 1) + s, b = a + segs + 1; idx.Add(a); idx.Add(b); idx.Add(a + 1); idx.Add(a + 1); idx.Add(b); idx.Add(b + 1); }
             var m = new Mesh(); m.SetVertices(v); m.SetTriangles(idx, 0); m.RecalculateNormals(); m.RecalculateBounds();
             MeshGen.AddGlyphUV(m, true);
-            var g = Group("RobeSkirt"); Part(m, "ROBE", g, Vector3.zero);
+            var g = Group("RobeSkirt"); skirt = Part(m, "ROBE", g, Vector3.zero).transform;
+            skirtRest = v.ToArray(); skirtRings = rings; skirtSegs = segs;      // for the cloth simulation (AHCloth)
             Attach("spine05", g, Vector3.zero, Quaternion.identity);
         }
 

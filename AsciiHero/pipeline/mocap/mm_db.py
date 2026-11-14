@@ -79,10 +79,10 @@ for name, fn, a, b, pk, mode in cmu_atk.SPEC:
 #   idleF   113_21 "standing still" - a woman, weight on one leg
 #   shift   139_02 "shifting weight" from foot to foot
 #   wave    141_16 "wave hello" (the game lays it on the upper body only)
-#   sitdown 111_07 "get up from floor", played backwards: lowering onto the ground with a hand down
+#   sitdown a 30 fps ground set: from standing, bending, a hand reaching down, onto the seat, knees up
 #   sitM    built by hand (author.py): sitting cross-legged, hands on the knees
 #   sitF    built by hand: legs folded to one side, the other hand on the floor
-#   getup   111_07 the same get-up forwards
+#   getup   the same set: from sitting, rocking forward over the feet and standing up
 #   leap    83_42  the crouch and spring of the dash
 IDLE = {}
 def best_loop(Q, lo, hi, W):
@@ -92,8 +92,7 @@ def best_loop(Q, lo, hi, W):
         if best is None or e < best[0]: best = (e, a)
     return best[1]
 for name, fn, a4, b4, rev in (('idleM', '142/142_13.bvh', 1199, 1289, 0), ('idleF', '113/113_21.bvh', 30, 130, 0), ('shift', '139/139_02.bvh', 0, 120, 0),
-                              ('wave', '141/141_16.bvh', 1, 56, 0), ('sitdown', '111/111_07.bvh', 372, 437, 1),
-                              ('getup', '111/111_07.bvh', 372, 437, 0), ('leap', '083/83_42.bvh', 67, 105, 0)):
+                              ('wave', '141/141_16.bvh', 1, 56, 0), ('leap', '083/83_42.bvh', 67, 105, 0)):
     c = R.process(fn)
     if name == 'idleF': a4 = best_loop(c['Q'], a4, b4, 80); b4 = a4 + 80
     m = b4 - a4; sl = slice(a4, b4)
@@ -111,6 +110,16 @@ for name, fn, a4, b4, rev in (('idleM', '142/142_13.bvh', 1199, 1289, 0), ('idle
     valid.append(np.zeros(m, dtype=bool)); ranges.append([total, total + m, name])
     IDLE[name] = {'a': total, 'n': m, 'minY': round(float(RO[:, 1].min()), 3)}; total += m
     print(name, fn, a4, b4, m, 'minY %.2f' % RO[:, 1].min(), 'y0 %.2f y1 %.2f' % (RO[0, 1], RO[-1, 1]))
+import ground as lafan
+for name, fn, a, b in (('sitdown', 'multipleActions1_subject1.bvh', 123, 173), ('getup', 'multipleActions1_subject3.bvh', 911, 945)):
+    c = lafan.process(fn, a, b); m = c['n']; RO = c['RO'].copy()
+    ref = 0 if name == 'sitdown' else -1
+    RO[:, 1] -= RO[ref, 1]; RO[:, 0] -= RO[ref, 0]; RO[:, 2] -= RO[ref, 2]
+    rows['Q'].append(c['Q']); rows['RO'].append(RO); rows['F'].append(np.zeros((m, 27)))
+    rows['RM'].append(np.zeros((m, 3))); rows['CON'].append(c['con'])
+    valid.append(np.zeros(m, dtype=bool)); ranges.append([total, total + m, name])
+    IDLE[name] = {'a': total, 'n': m, 'minY': round(float(RO[:, 1].min()), 3)}; total += m
+    print(name, fn, a, b, m, 'y0 %.2f y1 %.2f' % (RO[0, 1], RO[-1, 1]))
 import author
 for name, kind in (('sitM', 'lotus'), ('sitF', 'side')):
     q, ro = author.pose(kind); m = 2

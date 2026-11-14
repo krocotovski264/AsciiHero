@@ -47,41 +47,35 @@ Shader "AsciiHero/Lit"
         // cloth (the robe): the hem trails behind the motion and flutters; in the dash flight it billows harder
         float _ClothDash;      // per renderer (MaterialPropertyBlock)
         float4 _AsciiHeroVel; float _AsciiTime;
-        float4 _AsciiHeroTrail[6];   // where the hero was 0, 0.06, 0.12 ... 0.3 s ago (xyz)
-        float3 HeroTrail(float d)
-        {
-            float x = saturate(d / 0.3) * 5.0; int k = min((int)x, 4); float f = x - k;
-            return lerp(_AsciiHeroTrail[k].xyz, _AsciiHeroTrail[k + 1].xyz, f);
-        }
-        // The cloak hangs from the shoulders and flies like a rag: every part of it follows the path the body took a moment
-        // earlier (the hem the longest ago), so it streams out behind, sweeps round in a turn and keeps rippling. It swings
-        // about the shoulder line - it never stretches or comes loose - the back of it furthest, the front edges less.
+        // Cloth (the robe's skirt): simulated on the CPU (AHCloth) as a grid of particles - Verlet integration, distance
+        // constraints relaxed a few times per step, collisions projected out of the legs and hips, the top ring pinned to the
+        // waist. Here every vertex of the skirt is moved by the grid's displacement from its rest place (bilinear, wrapping
+        // round the skirt). Foliage (flag 2) sways in the wind.
+        #define CLOTH_COLS 12
+        #define CLOTH_ROWS 8
+        float4 _ClothGrid[96];        // world displacement of each particle from its rest place
+        float4 _ClothMap;             // skirt mesh: x = centre z, y = top y, z = bottom y
+        float _ClothSim;              // per renderer: 1 = this is the simulated skirt
+        float4 _AsciiWind;            // xy = direction (world xz), z = strength
         float3 ClothWS(float3 ws, float3 os)
         {
-            if (_Cloth < 0.5) return ws;
-            float w = saturate((1.38 - os.y) / 1.1); w = w * w * (3.0 - 2.0 * w);
-            float t = _AsciiTime, fd = 1.0 + 0.8 * _ClothDash;
-            float3 piv = TransformObjectToWorld(float3(0, 1.42, 0));
-            float3 trail = HeroTrail(0.3 * w) - HeroTrail(0.0); trail.y = 0;
-            float tl = length(trail), sp = min(length(_AsciiHeroVel.xz), 4.0);
-            float3 radial = TransformObjectToWorldDir(normalize(float3(os.x, 0, os.z) + 1e-4));
-            float ang = atan2(os.x, os.z);
-            if (length(TransformObjectToWorld(float3(0, 0, 0)).xz - _AsciiHeroTrail[0].xz) > 0.6) tl = 0;     // (only the hero's own cloak)
-            if (tl > 1e-3)
-            {
-                float3 td = trail / tl;
-                float backK = 0.3 + 0.7 * saturate(dot(radial, td) * 0.5 + 0.5);
-                float th = min(1.25, tl * 1.1 + 0.6 * _ClothDash) * backK * w;
-                th += 0.08 * sin(t * 7.0 * fd - os.y * 9.0 + ang * 2.0) * saturate(tl * 2.0) * w;     // it ripples as it flies
-                float3 ax = normalize(cross(td, float3(0, 1, 0)) + 1e-5);     // (turns the hanging cloth towards the trail)
-                float3 v = ws - piv; float c = cos(th), s = sin(th);
-                v = v * c + cross(ax, v) * s + ax * dot(ax, v) * (1.0 - c);
-                ws = piv + v;
+            if (_Cloth > 1.5)
+            {   // leaves: the crown leans downwind with the gusts, every bit of it flutters
+                float2 wd = _AsciiWind.xy; float st = _AsciiWind.z, t = _AsciiTime;
+                float gust = 0.5 + 0.5 * sin(dot(ws.xz, wd) * 0.85 - t * 2.3); gust *= gust;
+                float hk = saturate(ws.y / 3.5);
+                float3 sway = float3(wd.x, 0, wd.y) * st * (0.04 + 0.11 * gust) * hk;
+                float3 fl = float3(sin(t * 5.3 + dot(ws, float3(4.1, 2.3, 3.7))), 0.6 * sin(t * 6.1 + dot(ws, float3(2.9, 3.3, 1.7))), cos(t * 4.7 + dot(ws, float3(1.3, 3.9, 2.1))));
+                return ws + sway + fl * (0.012 + 0.025 * st * gust) * hk;
             }
-            // a light flutter all the time, waves running down the cloth
-            float wave = sin(t * 6.5 * fd - os.y * 14.0 + ang * 3.0) + 0.5 * sin(t * 11.0 * fd - os.y * 23.0 + ang * 5.0 + 1.7);
-            float amp = (0.012 + 0.012 * sp) * (1.0 + 2.0 * _ClothDash);
-            return ws + radial * wave * amp * w;
+            if (_Cloth < 0.5 || _ClothSim < 0.5) return ws;
+            float u = frac(atan2(os.z - _ClothMap.x, os.x) / 6.2831853 + 1.0) * CLOTH_COLS;
+            float v = saturate((_ClothMap.y - os.y) / max(_ClothMap.y - _ClothMap.z, 1e-3)) * (CLOTH_ROWS - 1);
+            int c0 = (int)floor(u) % CLOTH_COLS, c1 = (c0 + 1) % CLOTH_COLS; float fu = frac(u);
+            int r0 = min((int)floor(v), CLOTH_ROWS - 2); float fv = saturate(v - r0);
+            float3 d00 = _ClothGrid[r0 * CLOTH_COLS + c0].xyz, d01 = _ClothGrid[r0 * CLOTH_COLS + c1].xyz;
+            float3 d10 = _ClothGrid[(r0 + 1) * CLOTH_COLS + c0].xyz, d11 = _ClothGrid[(r0 + 1) * CLOTH_COLS + c1].xyz;
+            return ws + lerp(lerp(d00, d01, fu), lerp(d10, d11, fu), fv);
         }
         float3 DashWS(float3 ws)
         {

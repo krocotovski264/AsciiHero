@@ -767,12 +767,12 @@ namespace AsciiHero
         // The dash plays a crouch-and-spring (mocap leap) over the body.
         const int SHIFT_A = 10663, SHIFT_N = 120;
         const int WAVE_A = 10783, WAVE_N = 55;
-        const int SITDOWN_A = 10838, SITDOWN_N = 65;
-        const int GETUP_A = 10903, GETUP_N = 65;
-        const int LEAP_A = 10968, LEAP_N = 38;
-        const int SITM_A = 11006, SITM_N = 2;
-        const int SITF_A = 11008, SITF_N = 2;
-        class IdleAct { public string kind, phase = "down"; public float t, w = 1, nextLook, look = -1, p = -1, g0, te; public bool o; }
+        const int LEAP_A = 10838, LEAP_N = 38;
+        const int SITDOWN_A = 10876, SITDOWN_N = 50;
+        const int GETUP_A = 10926, GETUP_N = 34;
+        const int SITM_A = 10960, SITM_N = 2;
+        const int SITF_A = 10962, SITF_N = 2;
+        class IdleAct { public string kind, phase = "down"; public float t, w = 1, nextLook, look = -1, p = -1, g0, te; public bool o, wantUp; }
         IdleAct idleA; readonly List<string> idleDue = new List<string>(); float idleClock, leapT = -1, idleW, footLift, idleLook, idleLookP, sitW;
         /// 0..1: how far the hero is turned towards the camera (the game adds the turn to his facing)
         public float idleYawW;
@@ -783,12 +783,9 @@ namespace AsciiHero
             idleClock = 0; idleDue.Clear();
             if (idleA == null) return;
             if (idleA.kind == "sit")
-            {
-                if (idleA.phase != "up")
-                {   // still going down: straight back up the same way (the sit-down is the get-up played backwards)
-                    if (idleA.phase == "down") { idleA.g0 = GETUP_N - 1 - Mathf.Min(SITDOWN_N - 1, idleA.t * 36); idleA.p = -1; }
-                    idleA.phase = "up"; idleA.t = 0;
-                }
+            {   // still going down: he finishes sitting and then gets up (one movement is never cut off by the next)
+                if (idleA.phase == "down") idleA.wantUp = true;
+                else if (idleA.phase == "sit") { idleA.phase = "up"; idleA.t = 0; }
             }
             else idleA.o = true;
         }
@@ -839,12 +836,12 @@ namespace AsciiHero
                     // his hands on his knees, a woman with her legs folded to one side and a hand on the floor - and up again
                     int SA = ch.cfg.sex == 'f' ? SITF_A : SITM_A;
                     if (I.phase == "down")
-                    {
-                        float fr = Mathf.Min(SITDOWN_N - 1, I.t * 36), w = Smoother(I.t / 0.3f);
+                    {   // (captured: bending, a hand reaching down, onto the seat with the knees up; then the legs settle into the pose)
+                        float fr = Mathf.Min(SITDOWN_N - 1, I.t * 30), w = Smoother(I.t / 0.3f);
                         LayClip(SITDOWN_A, fr, w);
-                        LayClip(SA, 0, w * Smoother((fr - (SITDOWN_N - 26)) / 25f));          // the last part settles into the pose
-                        sitW = w;
-                        if (fr >= SITDOWN_N - 1) { I.phase = "sit"; I.t = 0; I.p = 0; }
+                        LayClip(SA, 0, w * Smoother((fr - (SITDOWN_N - 18)) / 17f));
+                        sitW = w * Smoother((fr - 20f) / 12f);
+                        if (fr >= SITDOWN_N - 1) { I.phase = I.wantUp ? "up" : "sit"; I.t = 0; I.p = 0; }
                     }
                     else if (I.phase == "sit")
                     {
@@ -853,13 +850,14 @@ namespace AsciiHero
                         if (I.look >= 0) { I.look += dt; idleLook = LookYaw(I.look, 2.8f, 0.7f); if (I.look > 2.8f) { I.look = -1; I.nextLook = 4 + UnityEngine.Random.value * 3; } }
                     }
                     else
-                    {   // getting up: out of the sitting pose (cross-faded), or straight back up if he was still going down
-                        float fr = Mathf.Min(GETUP_N - 1, I.g0 + I.t * 34.5f);
+                    {   // getting up (captured): the pose first gathers into the start of it - knees up, arms forward - then he
+                        // rocks forward over his feet and stands
+                        float fr = Mathf.Min(GETUP_N - 1, Mathf.Max(0, I.t - 0.4f) * 30);
                         if (fr >= GETUP_N - 1) I.te += dt;
                         float o = 1 - Smoother(I.te / 0.3f);
-                        if (I.p >= 0) LayClip(SA, 0, o);
-                        LayClip(GETUP_A, fr, (I.p >= 0 ? Smoother(I.t / 0.5f) : 1) * o);
-                        sitW = (1 - Smoother((fr - (GETUP_N - 30)) / 25f)) * o;
+                        LayClip(SA, 0, o);
+                        LayClip(GETUP_A, fr, Smoother(I.t / 0.45f) * o);
+                        sitW = (1 - Smoother((fr - (GETUP_N - 16)) / 12f)) * o;
                         if (I.te > 0.3f) { idleA = null; idleClock = 0; }
                     }
                 }

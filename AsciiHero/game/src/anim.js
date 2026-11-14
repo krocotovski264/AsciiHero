@@ -543,12 +543,12 @@ const twoHanded = A => { const w = A.char.cfgWeapon || 'none'; return w !== 'shi
 //   20 s        sits down on the ground (mocap) and stays there, looking round every 4-7 s, until something happens;
 //               then he gets up (mocap) before he can move
 // The dash plays a crouch-and-spring (mocap leap) over the body.
-const IDLE = {"shift": {"a": 10663, "n": 120, "minY": -0.007}, "wave": {"a": 10783, "n": 55, "minY": 0.0}, "sitdown": {"a": 10838, "n": 65, "minY": -0.884}, "getup": {"a": 10903, "n": 65, "minY": -0.884}, "leap": {"a": 10968, "n": 38, "minY": -0.164}, "sitM": {"a": 11006, "n": 2, "minY": -0.784}, "sitF": {"a": 11008, "n": 2, "minY": -0.784}};
+const IDLE = {"shift": {"a": 10663, "n": 120, "minY": -0.007}, "wave": {"a": 10783, "n": 55, "minY": 0.0}, "leap": {"a": 10838, "n": 38, "minY": -0.164}, "sitdown": {"a": 10876, "n": 50, "minY": -0.779}, "getup": {"a": 10926, "n": 34, "minY": -0.88}, "sitM": {"a": 10960, "n": 2, "minY": -0.784}, "sitF": {"a": 10962, "n": 2, "minY": -0.784}};
 const smoother = x => { x = clamp(x, 0, 1); return x * x * x * (x * (x * 6 - 15) + 10); };
 export function pokeIdle(A) {
   A.idleT = 0; A.idleDue = [];
   const I = A.idle; if (!I) return;
-  if (I.kind === 'sit') { if (I.phase !== 'up') { if (I.phase === 'down') { I.g0 = IDLE.getup.n - 1 - Math.min(IDLE.sitdown.n - 1, I.t * 36); I.p = undefined; } I.phase = 'up'; I.t = 0; } } else I.out = true;
+  if (I.kind === 'sit') { if (I.phase === 'down') I.wantUp = true; else if (I.phase === 'sit') { I.phase = 'up'; I.t = 0; } } else I.out = true;
 }
 export const idleBusy = A => !!(A.idle && A.idle.kind === 'sit');
 export function startLeap(A) { A.leap = { t: 0 }; }
@@ -581,19 +581,19 @@ function idleUpdate(A, dt) {
       // knees, a woman with her legs folded to one side and a hand on the floor - and up again
       const SD = IDLE.sitdown, GU = IDLE.getup, SA = A.char.cfgSex === 'f' ? IDLE.sitF.a : IDLE.sitM.a;
       if (I.phase === 'down') {
-        const fr = Math.min(SD.n - 1, I.t * 36), w = smoother(I.t / 0.3);
-        A.idleClips.push({ a: SD.a, fr, w }); A.idleClips.push({ a: SA, fr: 0, w: w * smoother((fr - (SD.n - 26)) / 25) }); A.sitW = w;
-        if (fr >= SD.n - 1) { I.phase = 'sit'; I.t = 0; I.p = 0; }
+        const fr = Math.min(SD.n - 1, I.t * 30), w = smoother(I.t / 0.3);
+        A.idleClips.push({ a: SD.a, fr, w }); A.idleClips.push({ a: SA, fr: 0, w: w * smoother((fr - (SD.n - 18)) / 17) }); A.sitW = w * smoother((fr - 20) / 12);
+        if (fr >= SD.n - 1) { I.phase = I.wantUp ? 'up' : 'sit'; I.t = 0; I.p = 0; }
       } else if (I.phase === 'sit') {
         A.idleClips.push({ a: SA, fr: 0, w: 1 }); A.sitW = 1;
         I.nextLook -= dt; if (I.nextLook <= 0 && I.look < 0) I.look = 0;
         if (I.look >= 0) { I.look += dt; A.idleLook = lookYaw(I.look, 2.8, 0.7); if (I.look > 2.8) { I.look = -1; I.nextLook = 4 + Math.random() * 3; } }
       } else {
-        const fr = Math.min(GU.n - 1, (I.g0 || 0) + I.t * 34.5), end = fr >= GU.n - 1 ? (I.te = (I.te || 0) + dt) : 0;
+        const fr = Math.min(GU.n - 1, Math.max(0, I.t - 0.4) * 30), end = fr >= GU.n - 1 ? (I.te = (I.te || 0) + dt) : 0;
         const out = 1 - smoother(end / 0.3);
-        if (I.p !== undefined) A.idleClips.push({ a: SA, fr: 0, w: out });
-        A.idleClips.push({ a: GU.a, fr, w: (I.p !== undefined ? smoother(I.t / 0.5) : 1) * out });
-        A.sitW = (1 - smoother((fr - (GU.n - 30)) / 25)) * out;
+        A.idleClips.push({ a: SA, fr: 0, w: out });
+        A.idleClips.push({ a: GU.a, fr, w: smoother(I.t / 0.45) * out });
+        A.sitW = (1 - smoother((fr - (GU.n - 16)) / 12)) * out;
         if (end > 0.3) { A.idle = null; A.idleT = 0; }
       }
     }

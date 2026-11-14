@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.31.1 · Unity";
+        public const string VERSION = "beta 0.32 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -230,7 +230,6 @@ namespace AsciiHero
             return m;
         }
 
-        readonly List<float> trailT = new List<float>(); readonly List<Vector3> trailP = new List<Vector3>(); readonly Vector4[] trailArr = new Vector4[6];
         void Damage(int pct)
         {
             if (hp <= 0 || !ready) return;
@@ -567,6 +566,14 @@ namespace AsciiHero
                     pc.rs.Add(r); if (kv.Value != null) pc.rs.Add(kv.Value);
                 }
             }
+            // the robe's skirt is simulated cloth
+            cloak = null; cloakRs.Clear();
+            if (hero.skirt != null)
+            {
+                cloak = new Cloak(hero);
+                var sr = hero.skirt.GetComponent<Renderer>(); Renderer gr;
+                if (sr != null) { cloakRs.Add(sr); if (GlyphLayer.pairs.TryGetValue(sr, out gr) && gr != null) cloakRs.Add(gr); }
+            }
             player = new MotionActor(hero);
             player.useMM = animMode == 1;
             player.SetLimbs(limbs);
@@ -825,6 +832,8 @@ namespace AsciiHero
         static Vector3 Mirror(Vector3 v) { return new Vector3(-v.x, v.y, v.z); }
 
         // ---------- actions: attack, guard, dash ----------
+        Cloak cloak; readonly List<Renderer> cloakRs = new List<Renderer>(); MaterialPropertyBlock clothMpb;
+        Vector3 windV; float windA = 0.7f;
         class Piece { public string kind = ""; public List<Renderer> rs = new List<Renderer>(); public float delay, om = 11, zeta = 0.45f, lift = 0.3f, wob, turns = 1, side; public Vector3 axis = Vector3.up; }
         readonly List<Piece> pieces = new List<Piece>(); MaterialPropertyBlock shiftMpb;
         const float DASH_DIST = 2.0f, DASH_T = 0.1f; float dashAnim = 0.4f, dashSettle = 0;
@@ -949,13 +958,7 @@ namespace AsciiHero
                     }
                     continue;
                 }
-                if (pc.kind == "robe")
-                {
-                    float fl = last ? 0 : (1 - sm) * Mathf.Min(1, tau * 6);
-                    Vector3 shR = Around(pc, back * (1 - p) + sideV * (pc.side * arc + 0.1f * Mathf.Sin(tau * 9) * fl) + Vector3.up * (pc.lift * arc + 0.07f * Mathf.Sin(tau * 13) * fl));
-                    SetShift(pc, shR, new Vector4(sideV.x, 0, sideV.z, tau > 0 && !last ? (0.5f * arc + 0.18f * Mathf.Sin(tau * 11)) * (1 - sm * sm) + 1e-4f : 0), fl);     // it streams out behind and billows
-                    continue;
-                }
+                if (pc.kind == "robe") { SetShift(pc, Vector3.zero, new Vector4(0, 1, 0, 0)); continue; }     // the robe stays on the body: the cloth simulation streams the skirt out behind
                 Vector3 sh = Around(pc, back * (1 - p) + sideV * (pc.side * arc) + Vector3.up * (pc.lift * arc));
                 SetShift(pc, sh, new Vector4(pc.axis.x, pc.axis.y, pc.axis.z, tau > 0 && !last ? pc.turns * Mathf.PI * 2 * (1 - sm) + pc.wob * (sm - p) * 3 : 0));
             }
@@ -1004,20 +1007,16 @@ namespace AsciiHero
             // grass: the hero and a point trailing behind him push the blades aside
             heroTrail = Vector3.Lerp(heroTrail, pos, Mathf.Min(1, dt * 2.2f));
             Shader.SetGlobalVector("_AsciiHeroVel", player != null ? (Vector4)player.Velocity : Vector4.zero);
-            // the path the hero took over the last 0.3 s, for the cloak (it streams along it, see ClothWS)
+            // wind: its direction wanders slowly, its strength rises and falls in gusts (grass, leaves and the cloak follow it)
             {
-                if (trailP.Count > 0 && (trailP[trailP.Count - 1] - hero.go.transform.position).sqrMagnitude > 9f) { trailT.Clear(); trailP.Clear(); }     // a respawn or a new place: no streaming
-                trailT.Add(tNow); trailP.Add(hero.go.transform.position);
-                while (trailT.Count > 2 && trailT[1] < tNow - 0.4f) { trailT.RemoveAt(0); trailP.RemoveAt(0); }
-                for (int k = 0; k < 6; k++)
-                {
-                    float tt = tNow - k * 0.06f; int j = trailT.Count - 1; while (j > 0 && trailT[j - 1] > tt) j--;
-                    Vector3 v = trailP[j];
-                    if (j > 0 && trailT[j] > tt) { float f = Mathf.InverseLerp(trailT[j - 1], trailT[j], tt); v = Vector3.Lerp(trailP[j - 1], trailP[j], f); }
-                    trailArr[k] = v;
-                }
-                Shader.SetGlobalVectorArray("_AsciiHeroTrail", trailArr);
+                windA += dt * 0.04f * Mathf.Sin(tNow * 0.031f);
+                float gust = Mathf.Max(0, Mathf.Sin(tNow * 0.71f) * Mathf.Sin(tNow * 0.37f + 1f));
+                float st = 0.45f + 0.25f * Mathf.Sin(tNow * 0.13f) + 0.5f * gust;
+                Vector2 wd = new Vector2(Mathf.Cos(windA), Mathf.Sin(windA));
+                Shader.SetGlobalVector("_AsciiWind", new Vector4(wd.x, wd.y, st, 0));
+                windV = new Vector3(wd.x, 0, wd.y) * (st * 2.2f);
             }
+            if (cloak != null) { cloak.Update(dt, windV); if (clothMpb == null) clothMpb = new MaterialPropertyBlock(); cloak.Apply(clothMpb, cloakRs); }
             // grass is pressed down by the body itself - the feet, the pelvis over it, a weapon swept low - not by a collision circle
             {
                 var hb = hero.human; Transform fL = hb.Bone("foot.L"), fR = hb.Bone("foot.R"), rt = hb.Bone("root");
