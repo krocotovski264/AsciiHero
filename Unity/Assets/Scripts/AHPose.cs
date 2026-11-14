@@ -49,6 +49,9 @@ namespace AsciiHero
                 case "grip":
                     uaL = V(0.28f, -1, 0.04f); faL = V(0.16f, -1, 0.32f); uaR = V(-0.3f, -1, 0.1f); faR = V(-0.12f, -0.75f, 0.75f);
                     curlL = 0.35f; curlR = 1.15f; thumb = 0.2f; thumbR = 0.7f; break;
+                case "dual":
+                    uaL = V(0.3f, -1, 0.1f); faL = V(0.12f, -0.75f, 0.75f); uaR = V(-0.3f, -1, 0.1f); faR = V(-0.12f, -0.75f, 0.75f);
+                    curlL = 1.15f; curlR = 1.15f; thumb = 0.7f; thumbR = 0.7f; break;
                 case "shield":
                     uaL = V(0.35f, -1, 0.25f); faL = V(-0.25f, -0.15f, 1); uaR = V(-0.3f, -1, 0.1f); faR = V(-0.12f, -0.75f, 0.75f);
                     curlL = 1.1f; curlR = 1.15f; thumb = 0.6f; thumbR = 0.7f; break;

@@ -15,7 +15,7 @@ export const WEAPONS = [
   { id: 'none', name: 'Без оружия', desc: 'Пустые руки' },
   { id: 'sword', name: 'Меч', desc: 'Одноручный стальной клинок' },
   { id: 'shield', name: 'Меч и щит', desc: 'Клинок и каплевидный щит' },
-  { id: 'axe', name: 'Боевой топор', desc: 'Секира на длинном древке' },
+  { id: 'axe', name: 'Два томагавка', desc: 'По короткому топору в каждой руке' },
   { id: 'spear', name: 'Копьё', desc: 'Длинное древко с наконечником' },
   { id: 'staff', name: 'Посох', desc: 'Посох с магическим кристаллом' },
 ];
@@ -135,7 +135,7 @@ export function buildCharacter(cfg, mats) {
 
   // ---- pose depends on weapon ----
   const W = cfg.weapon;
-  applyPose(h, W === 'shield' ? 'shield' : W === 'none' ? 'relaxed' : 'grip');
+  applyPose(h, W === 'shield' ? 'shield' : W === 'none' ? 'relaxed' : W === 'axe' ? 'dual' : 'grip');
   if (W !== 'none') addWeapon(group, h, mats, W);
   if (W === 'shield') addShield(group, h, mats);
 
@@ -240,6 +240,16 @@ function robeSkirt(h, mats, yTop, skeleton, skinned) {
 }
 
 // weapon in the right hand
+// a tomahawk: short haft, small bearded head with a spike behind (one in each hand)
+function tomahawk(g, mats) {
+  const haft = mesh(cyl(0.014, 0.012, 0.5, 8), mats.WOOD); haft.position.y = 0.17; g.add(haft);
+  const s = new THREE.Shape();
+  s.moveTo(0, -0.025); s.lineTo(0.035, -0.022); s.quadraticCurveTo(0.08, -0.06, 0.12, -0.085); s.quadraticCurveTo(0.1, 0.0, 0.12, 0.07); s.quadraticCurveTo(0.08, 0.05, 0.035, 0.022); s.lineTo(0, 0.025); s.lineTo(0, -0.025);
+  const head = mesh(new THREE.ExtrudeGeometry(s, { depth: 0.01, bevelEnabled: true, bevelThickness: 0.004, bevelSize: 0.003, bevelSegments: 1 }), mats.STEEL);
+  head.position.set(0.01, 0.38, -0.005); g.add(head);
+  const spike = mesh(new THREE.ConeGeometry(0.012, 0.06, 6), mats.STEEL); spike.rotation.z = Math.PI / 2; spike.position.set(-0.04, 0.38, 0); g.add(spike);
+  const wrap = mesh(cyl(0.017, 0.017, 0.11, 8), mats.LEATHER2); g.add(wrap);
+}
 function addWeapon(group, h, mats, W) {
   const fr = handFrameWorld(h, 'R');
   // grip centre: inside the curled fingers
@@ -260,14 +270,7 @@ function addWeapon(group, h, mats, W) {
     const bl = mesh(bladeGeom(0.78, 0.024, 0.019, 0.004, 0.1), mats.STEEL); bl.position.y = 0.075; g.add(bl);
     const fuller = mesh(box(0.008, 0.5, 0.0112), mats.DARK); fuller.position.y = 0.37; g.add(fuller);
   } else if (W === 'axe') {
-    const haft = mesh(cyl(0.017, 0.015, 0.95, 10), mats.WOOD); haft.position.y = 0.3; g.add(haft);
-    const s = new THREE.Shape();
-    s.moveTo(0, -0.04); s.lineTo(0.05, -0.035); s.quadraticCurveTo(0.13, -0.09, 0.2, -0.13); s.quadraticCurveTo(0.17, 0.0, 0.2, 0.13); s.quadraticCurveTo(0.13, 0.09, 0.05, 0.035); s.lineTo(0, 0.04); s.lineTo(0, -0.04);
-    const head = mesh(new THREE.ExtrudeGeometry(s, { depth: 0.012, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.004, bevelSegments: 1 }), mats.STEEL);
-    head.position.set(0.012, 0.66, -0.006); g.add(head);
-    const spike = mesh(new THREE.ConeGeometry(0.02, 0.09, 6), mats.STEEL); spike.rotation.z = Math.PI / 2; spike.position.set(-0.06, 0.66, 0); g.add(spike);
-    const cap = mesh(cyl(0.024, 0.024, 0.1, 8), mats.STEEL); cap.position.y = 0.66; g.add(cap);
-    const wrap = mesh(cyl(0.02, 0.02, 0.16, 10), mats.LEATHER2); g.add(wrap);
+    tomahawk(g, mats);
   } else if (W === 'spear') {
     const shaft = mesh(cyl(0.015, 0.013, 2.1, 10), mats.WOOD); shaft.position.y = 0.55; g.add(shaft);
     const tip = mesh(bladeGeom(0.24, 0.03, 0.032, 0.006, 0.14), mats.STEEL); tip.position.y = 1.63; g.add(tip);
@@ -284,6 +287,12 @@ function addWeapon(group, h, mats, W) {
   }
   attach(h, 'wrist.R', g0, basis);
   group.userData.weapon = g0;
+  if (W === 'axe') {     // the second tomahawk, in the left hand
+    const fl = handFrameWorld(h, 'L'), gripL = fl.W.clone().addScaledVector(fl.f, 0.075).addScaledVector(fl.n, -0.028);
+    const bL = new THREE.Matrix4().makeBasis(side, up, fwd).setPosition(gripL);
+    const gL0 = new THREE.Group(), gL = new THREE.Group(); gL.rotation.y = -Math.PI / 2; gL0.add(gL); tomahawk(gL, mats);
+    attach(h, 'wrist.L', gL0, bL); group.userData.weaponL = gL0;
+  }
 }
 
 function addShield(group, h, mats) {

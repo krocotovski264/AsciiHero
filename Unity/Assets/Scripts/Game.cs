@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.26 · Unity";
+        public const string VERSION = "beta 0.27 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -45,6 +45,7 @@ namespace AsciiHero
         Character hero; MotionActor player;
         bool world; Tavern tavern; Field field; Location loc; Character bartenderChar; MotionActor bartender;
         // integrity instead of a health bar: five limbs (head, armL, armR, legL, legR), each worth 20 %
+        readonly Vector4[] pushPts = new Vector4[4]; static readonly Vector4 FAR = new Vector4(9999, 0, 9999, 0);
         int hp = 100; readonly bool[] limbs = { true, true, true, true, true }; float respawnT; Vector3 heroTrail;
         int LimbCount() { int n = 0; foreach (var b in limbs) if (b) n++; return n; }
         GameObject editorRoot, worldLightsRoot; Light key, rim, fill, heroLight;
@@ -601,6 +602,7 @@ namespace AsciiHero
             if (field != null) field.SetActive(false);
             worldLightsRoot.SetActive(false); editorRoot.SetActive(true);
             Shader.SetGlobalVector("_AsciiHeroA", new Vector4(0, -99, 0, 0)); Shader.SetGlobalVector("_AsciiHeroB", new Vector4(0, -99, 0, 0)); Shader.SetGlobalVector("_AsciiHeroVel", Vector4.zero);
+            for (int i = 0; i < 4; i++) pushPts[i] = FAR; Shader.SetGlobalVectorArray("_AsciiPush", pushPts);
             hero.go.transform.position = Vector3.zero; hero.go.transform.rotation = Quaternion.identity;
             player.speed = 0; player.heading = 0; player.ResetSim(); lockOn = false;
             sceneCam.fieldOfView = 36; ascii.exposure = 1; ascii.actorBoost = 0; Shader.SetGlobalFloat("_AsciiLod", 1);
@@ -824,7 +826,7 @@ namespace AsciiHero
         class Piece { public string kind = ""; public List<Renderer> rs = new List<Renderer>(); public float delay, om = 11, zeta = 0.45f, lift = 0.3f, wob, turns = 1, side; public Vector3 axis = Vector3.up; }
         readonly List<Piece> pieces = new List<Piece>(); MaterialPropertyBlock shiftMpb;
         const float DASH_DIST = 2.0f, DASH_T = 0.1f; float dashAnim = 0.4f, dashSettle = 0;
-        float dashT = 9, dashCd, dashMist; Vector3 dashFrom, dashDir; Vector2? moveDir; bool dashShifted;
+        float dashT = 9, dashCd, dashMist, dashLen = 2; Vector3 dashFrom, dashDir; Vector2? moveDir; bool dashShifted;
         Rect atkRect, defRect, dashRect;
         void DoAttack() { if (world && player != null && dashT >= DASH_T) player.StartAttack(); }
         void DoDash()
@@ -833,6 +835,11 @@ namespace AsciiHero
             // moving: where the stick points; standing: where the hero looks
             Vector3 d = moveDir.HasValue ? new Vector3(moveDir.Value.x, 0, moveDir.Value.y) : new Vector3(Mathf.Sin(player.heading), 0, Mathf.Cos(player.heading));
             dashDir = d.normalized; dashT = 0; dashFrom = pos; dashMist = 0;
+            // the shadow passes straight through trees, rocks and furniture; it only has to come out on free ground:
+            // if the end of the dash is inside something it goes on until it is clear (or, failing that, stops short)
+            dashLen = DASH_DIST;
+            System.Func<float, bool> free = l => { var q = new Vector2(pos.x + dashDir.x * l, pos.z + dashDir.z * l); return (loc.Collide(q, 0.27f) - q).sqrMagnitude < 1e-6f; };
+            if (!free(dashLen)) { float l = dashLen; while (l < DASH_DIST + 1.5f && !free(l)) l += 0.1f; if (free(l)) dashLen = l; else { l = DASH_DIST; while (l > 0 && !free(l)) l -= 0.1f; dashLen = Mathf.Max(0, l); } }
             // the armour follows piece by piece, one after another, like a suit assembling itself. Every piece is pulled in
             // by its own spring: it accelerates gently, overshoots its place, swings back and only then settles; it tumbles
             // on the way. Order, timing, stiffness, path and spin are drawn anew for every dash.
@@ -856,6 +863,13 @@ namespace AsciiHero
             dashAnim = at + 0.3f; dashSettle = at + 1.3f; dashCd = dashAnim + 0.5f;
             player.Teleport(0, 0, Mathf.Atan2(dashDir.x, dashDir.z));
         }
+        // a flying piece of armour does not go into a tree or a rock: it slides round it
+        Vector3 Around(Piece pc, Vector3 sh)
+        {
+            if (pc.rs.Count == 0 || pc.rs[0] == null) return sh;
+            Vector3 c = pc.rs[0].bounds.center + sh; var q = new Vector2(c.x, c.z); var q2 = loc.Collide(q, 0.16f);
+            return sh + new Vector3(q2.x - q.x, 0, q2.y - q.y);
+        }
         void SetShift(Piece pc, Vector3 v, Vector4 spin, float cloth = 0)
         {
             if (shiftMpb == null) shiftMpb = new MaterialPropertyBlock();
@@ -878,7 +892,7 @@ namespace AsciiHero
             if (dashT < DASH_T)
             {   // the shadow itself crosses the distance in a tenth of a second
                 float kk = Mathf.Min(dt, DASH_T - dashT) / DASH_T;
-                var dp = loc.Collide(new Vector2(pos.x + dashDir.x * DASH_DIST * kk, pos.z + dashDir.z * DASH_DIST * kk), 0.27f);
+                var dp = new Vector2(pos.x + dashDir.x * dashLen * kk, pos.z + dashDir.z * dashLen * kk);      // no collision on the way
                 player.Teleport(dp.x - pos.x, dp.y - pos.z, player.heading);
                 pos = new Vector3(dp.x, 0, dp.y);
             }
@@ -909,11 +923,11 @@ namespace AsciiHero
                 if (pc.kind == "robe")
                 {
                     float fl = last ? 0 : (1 - sm) * Mathf.Min(1, tau * 6);
-                    Vector3 shR = back * (1 - p) + sideV * (pc.side * arc + 0.1f * Mathf.Sin(tau * 9) * fl) + Vector3.up * (pc.lift * arc + 0.07f * Mathf.Sin(tau * 13) * fl);
+                    Vector3 shR = Around(pc, back * (1 - p) + sideV * (pc.side * arc + 0.1f * Mathf.Sin(tau * 9) * fl) + Vector3.up * (pc.lift * arc + 0.07f * Mathf.Sin(tau * 13) * fl));
                     SetShift(pc, shR, new Vector4(sideV.x, 0, sideV.z, tau > 0 && !last ? (0.5f * arc + 0.18f * Mathf.Sin(tau * 11)) * (1 - sm * sm) + 1e-4f : 0), fl);     // it streams out behind and billows
                     continue;
                 }
-                Vector3 sh = back * (1 - p) + sideV * (pc.side * arc) + Vector3.up * (pc.lift * arc);
+                Vector3 sh = Around(pc, back * (1 - p) + sideV * (pc.side * arc) + Vector3.up * (pc.lift * arc));
                 SetShift(pc, sh, new Vector4(pc.axis.x, pc.axis.y, pc.axis.z, tau > 0 && !last ? pc.turns * Mathf.PI * 2 * (1 - sm) + pc.wob * (sm - p) * 3 : 0));
             }
             // mist hangs along the path
@@ -957,7 +971,16 @@ namespace AsciiHero
             // grass: the hero and a point trailing behind him push the blades aside
             heroTrail = Vector3.Lerp(heroTrail, pos, Mathf.Min(1, dt * 2.2f));
             Shader.SetGlobalVector("_AsciiHeroVel", player != null ? (Vector4)player.Velocity : Vector4.zero);
-            Shader.SetGlobalVector("_AsciiHeroA", new Vector4(pos.x, 0, pos.z, 0)); Shader.SetGlobalVector("_AsciiHeroB", new Vector4(heroTrail.x, 0, heroTrail.z, 0));
+            // grass is pressed down by the body itself - the feet, the pelvis over it, a weapon swept low - not by a collision circle
+            {
+                var hb = hero.human; Transform fL = hb.Bone("foot.L"), fR = hb.Bone("foot.R"), rt = hb.Bone("root");
+                pushPts[0] = fL != null && limbs[3] ? new Vector4(fL.position.x, fL.position.y, fL.position.z, 0.24f) : FAR;
+                pushPts[1] = fR != null && limbs[4] ? new Vector4(fR.position.x, fR.position.y, fR.position.z, 0.24f) : FAR;
+                pushPts[2] = rt != null ? new Vector4(rt.position.x, rt.position.y - 0.55f, rt.position.z, 0.3f) : FAR;
+                Vector3 tip = hero.weapon != null ? hero.weapon.TransformPoint(0, 0.7f, 0) : Vector3.down * 99;
+                pushPts[3] = tip.y < 0.5f ? new Vector4(tip.x, tip.y, tip.z, 0.16f) : FAR;
+                Shader.SetGlobalVectorArray("_AsciiPush", pushPts);
+            }
             labelT -= dt; if (labelT <= 0) { labelT = 0.25f; animLabel = player.label; }
             if (loc == tavern)
             {

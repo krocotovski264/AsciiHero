@@ -28,7 +28,7 @@ namespace AsciiHero
             new[] { "none", "Без оружия", "Пустые руки" },
             new[] { "sword", "Меч", "Одноручный стальной клинок" },
             new[] { "shield", "Меч и щит", "Клинок и каплевидный щит" },
-            new[] { "axe", "Боевой топор", "Секира на длинном древке" },
+            new[] { "axe", "Два томагавка", "По короткому топору в каждой руке" },
             new[] { "spear", "Копьё", "Длинное древко с наконечником" },
             new[] { "staff", "Посох", "Посох с магическим кристаллом" },
         };
@@ -37,7 +37,7 @@ namespace AsciiHero
         public Transform model;         // scaled for height
         public Human human;
         public CharConfig cfg;
-        public Transform weapon, orb, shield, weaponSlide;   // shield: local z = its face, local y = its top
+        public Transform weapon, weaponL, orb, shield, weaponSlide;   // shield: local z = its face, local y = its top
         public List<Renderer> glyphs = new List<Renderer>();   // skinned glyph renderers (limb hiding)
         public static readonly string[] LIMBS = { "head", "armL", "armR", "legL", "legR" };
         public static readonly string[] LIMB_NAME = { "голова", "левая рука", "правая рука", "левая нога", "правая нога" };
@@ -169,7 +169,7 @@ namespace AsciiHero
             }
 
             string W = cfg.weapon;
-            Pose.Apply(h, W == "shield" ? "shield" : W == "none" ? "relaxed" : "grip");
+            Pose.Apply(h, W == "shield" ? "shield" : W == "none" ? "relaxed" : W == "axe" ? "dual" : "grip");
             if (W != "none") AddWeapon(W);
             if (W == "shield") AddShield();
         }
@@ -300,6 +300,19 @@ namespace AsciiHero
             return MeshGen.Extrude(s, thick * 2.8f);
         }
 
+        // a tomahawk: short haft, small bearded head with a spike behind
+        void Tomahawk(Transform g)
+        {
+            Part(MeshGen.Cylinder(0.014f, 0.012f, 0.5f, 8), "WOOD", g, new Vector3(0, 0.17f, 0));
+            var s = new List<Vector2> { new Vector2(0, -0.025f), new Vector2(0.035f, -0.022f) };
+            s.AddRange(Bez(new Vector2(0.035f, -0.022f), new Vector2(0.08f, -0.06f), new Vector2(0.12f, -0.085f), 5));
+            s.AddRange(Bez(new Vector2(0.12f, -0.085f), new Vector2(0.1f, 0f), new Vector2(0.12f, 0.07f), 6));
+            s.AddRange(Bez(new Vector2(0.12f, 0.07f), new Vector2(0.08f, 0.05f), new Vector2(0.035f, 0.022f), 5));
+            s.Add(new Vector2(0, 0.025f));
+            Part(MeshGen.Extrude(s, 0.016f), "STEEL", g, new Vector3(0.01f, 0.38f, 0));
+            Part(MeshGen.Cylinder(0.012f, 0f, 0.06f, 6), "STEEL", g, new Vector3(-0.04f, 0.38f, 0), Quaternion.Euler(0, 0, 90));
+            Part(MeshGen.Cylinder(0.017f, 0.017f, 0.11f, 8), "LEATHER2", g, Vector3.zero);
+        }
         void AddWeapon(string W)
         {
             var fr = Pose.Hand(human, "R");
@@ -328,19 +341,7 @@ namespace AsciiHero
                 Part(Blade(0.78f, 0.024f, 0.019f, 0.004f, 0.1f), "STEEL", g, new Vector3(0, 0.075f, 0));
                 Part(MeshGen.Box(0.008f, 0.5f, 0.0125f), "DARK", g, new Vector3(0, 0.37f, 0));
             }
-            else if (W == "axe")
-            {
-                Part(MeshGen.Cylinder(0.017f, 0.015f, 0.95f, 10), "WOOD", g, new Vector3(0, 0.3f, 0));
-                var s = new List<Vector2> { new Vector2(0, -0.04f), new Vector2(0.05f, -0.035f) };
-                s.AddRange(Bez(new Vector2(0.05f, -0.035f), new Vector2(0.13f, -0.09f), new Vector2(0.2f, -0.13f), 5));
-                s.AddRange(Bez(new Vector2(0.2f, -0.13f), new Vector2(0.17f, 0f), new Vector2(0.2f, 0.13f), 6));
-                s.AddRange(Bez(new Vector2(0.2f, 0.13f), new Vector2(0.13f, 0.09f), new Vector2(0.05f, 0.035f), 5));
-                s.Add(new Vector2(0, 0.04f));
-                Part(MeshGen.Extrude(s, 0.024f), "STEEL", g, new Vector3(0.012f, 0.66f, 0));
-                Part(MeshGen.Cylinder(0.02f, 0f, 0.09f, 6), "STEEL", g, new Vector3(-0.06f, 0.66f, 0), Quaternion.Euler(0, 0, 90));
-                Part(MeshGen.Cylinder(0.024f, 0.024f, 0.1f, 8), "STEEL", g, new Vector3(0, 0.66f, 0));
-                Part(MeshGen.Cylinder(0.02f, 0.02f, 0.16f, 10), "LEATHER2", g, Vector3.zero);
-            }
+            else if (W == "axe") Tomahawk(g);
             else if (W == "spear")
             {
                 Part(MeshGen.Cylinder(0.015f, 0.013f, 2.1f, 10), "WOOD", g, new Vector3(0, 0.55f, 0));
@@ -367,6 +368,13 @@ namespace AsciiHero
             // convert world placement into model space (model scale is 1 while building)
             Attach("wrist.R", g0, model.InverseTransformPoint(grip), Quaternion.Inverse(model.rotation) * rot);
             weapon = g0;
+            if (W == "axe")
+            {   // the second tomahawk, in the left hand
+                var fl = Pose.Hand(human, "L"); Vector3 gripL = fl.W + fl.f * 0.075f - fl.n * 0.028f;
+                var gL0 = Group("WeaponL"); var gL = Group("Holder"); gL.SetParent(gL0, false); gL.localRotation = Quaternion.Euler(0, -90, 0); Tomahawk(gL);
+                Attach("wrist.L", gL0, model.InverseTransformPoint(gripL), Quaternion.Inverse(model.rotation) * rot);
+                weaponL = gL0;
+            }
         }
 
         void AddShield()

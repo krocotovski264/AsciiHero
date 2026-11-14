@@ -72,7 +72,7 @@ for name, fn, a, b, pk, mode in cmu_atk.SPEC:
     rows['Q'].append(c['Q']); rows['RO'].append(c['RO']); rows['F'].append(np.zeros((m, 27)))
     rows['RM'].append(np.zeros((m, 3))); rows['CON'].append(c['con'])
     valid.append(np.zeros(m, dtype=bool)); ranges.append([total, total + m, name])
-    ATK.append({'name': name, 'a': total, 'n': m, 'peak': int(c['peak']), 'blade': np.round(c['blade'], 3).tolist()}); total += m
+    ATK.append({'name': name, 'a': total, 'n': m, 'peak': int(c['peak']), 'blade': np.round(c['blade'], 3).tolist(), 'bladeL': np.round(c['bladeL'], 3).tolist()}); total += m
     print(name, m, 'peak', c['peak'])
 _json.dump(ATK, open('atk.json', 'w'))
 print('frames', total)

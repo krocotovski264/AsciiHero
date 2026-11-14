@@ -22,7 +22,7 @@ Shader "AsciiHero/Grass"
             TEXTURE2D(_AsciiLitTex); SAMPLER(sampler_AsciiLitTex);
             TEXTURE2D(_AsciiNDTex); SAMPLER(sampler_AsciiNDTex);
             float _AsciiRows, _AsciiExposure, _AsciiLinear, _AsciiDepthRef, _AsciiTime;
-            float4 _AsciiHeroA, _AsciiHeroB;
+            float4 _AsciiPush[4];      // points of the body that press the grass: xyz, radius (0 = none)
             float _AsciiGrassThin;     // settings: the share of blades that is not drawn (0 = all)
 
             struct Attributes { float4 positionOS : POSITION; float2 corner : TEXCOORD0; float2 seed : TEXCOORD1; };
@@ -35,11 +35,15 @@ Shader "AsciiHero/Grass"
                 float s = i.seed.x;
                 float h = 0.11 + 0.15 * s;
                 float2 wind = float2(sin(_AsciiTime * 1.1 + a.x * 0.9 + a.z * 0.6), cos(_AsciiTime * 0.8 + a.z * 1.1 + s * 6.0)) * 0.13;
-                float2 dA = a.xz - _AsciiHeroA.xz, dB = a.xz - _AsciiHeroB.xz;
-                float pa = smoothstep(0.75, 0.12, length(dA)), pb = smoothstep(0.6, 0.1, length(dB)) * 0.75;
-                float2 lean = wind + normalize(dA + 1e-4) * pa * 0.95 + normalize(dB + 1e-4) * pb * 0.6;
+                float2 lean = wind; float push = 0;
+                for (int k = 0; k < 4; k++)
+                {
+                    float4 P = _AsciiPush[k]; if (P.w < 0.01) continue;
+                    float2 d = a.xz - P.xz; float near = saturate(1.0 - (P.y - h) / 0.35);       // only what is down among the blades presses them
+                    float pk = smoothstep(P.w, P.w * 0.2, length(d)) * near;
+                    lean += normalize(d + 1e-4) * pk * 0.95; push = max(push, pk);
+                }
                 float ll = length(lean); if (ll > 0.96) { lean *= 0.96 / ll; ll = 0.96; }
-                float push = max(pa, pb);
                 float3 tip = a + float3(lean.x, sqrt(1.0 - ll * ll), lean.y) * h;
                 float3 pVS = TransformWorldToView((a + tip) * 0.5);
                 float4 bclip = TransformWorldToHClip(a);

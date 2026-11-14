@@ -56,6 +56,7 @@ const V = (x, y, z) => new THREE.Vector3(x, y, z).normalize();
 export const POSES = {
   relaxed: { uaL: V(0.28, -1, 0.04), faL: V(0.16, -1, 0.32), uaR: V(-0.28, -1, 0.04), faR: V(-0.16, -1, 0.32), curlL: 0.35, curlR: 0.35, thumb: 0.2 },
   grip:    { uaL: V(0.28, -1, 0.04), faL: V(0.16, -1, 0.32), uaR: V(-0.3, -1, 0.1), faR: V(-0.12, -0.75, 0.75), curlL: 0.35, curlR: 1.15, thumbR: 0.7, thumb: 0.2 },
+  dual:    { uaL: V(0.3, -1, 0.1), faL: V(0.12, -0.75, 0.75), uaR: V(-0.3, -1, 0.1), faR: V(-0.12, -0.75, 0.75), curlL: 1.15, curlR: 1.15, thumb: 0.7, thumbR: 0.7 },
   shield:  { uaL: V(0.35, -1, 0.25), faL: V(-0.25, -0.15, 1), uaR: V(-0.3, -1, 0.1), faR: V(-0.12, -0.75, 0.75), curlL: 1.1, curlR: 1.15, thumb: 0.6, thumbR: 0.7 },
 };
 export function applyPose(h, name) {

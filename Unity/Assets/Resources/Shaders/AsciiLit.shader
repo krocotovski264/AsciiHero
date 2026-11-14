@@ -48,14 +48,19 @@ Shader "AsciiHero/Lit"
         float _ClothDash;      // per renderer (MaterialPropertyBlock)
         float4 _AsciiHeroVel; float _AsciiTime;
         float3 ClothWS(float3 ws, float3 os)
-        {
-            if (_Cloth < 0.5) return ws;
-            float w = saturate((1.05 - os.y) / 0.8); w *= w;      // the hem moves most, the shoulders hardly at all
-            float sp = length(_AsciiHeroVel.xz), t = _AsciiTime, f = 1.0 + 0.8 * _ClothDash;
-            float amp = (0.012 + 0.016 * sp) * (1.0 + 4.0 * _ClothDash);
-            float3 fl = float3(sin(t * 7.0 * f + os.y * 11.0 + os.x * 6.0), 0.35 * sin(t * 5.3 * f + os.x * 9.0), cos(t * 6.3 * f + os.y * 9.0 + os.z * 7.0));
-            return ws - _AsciiHeroVel.xyz * (0.08 * w) + fl * amp * w + float3(0, 0.03 * w * min(sp, 3.0) / 3.0, 0);
-        }
+            {
+                if (_Cloth < 0.5) return ws;
+                // weight: nothing at the shoulders, growing down to the hem
+                float w = saturate((1.2 - os.y) / 0.95); w = w * w * (3.0 - 2.0 * w);
+                float sp = min(length(_AsciiHeroVel.xz), 3.5), t = _AsciiTime, f = 1.0 + 0.8 * _ClothDash;
+                float ang = atan2(os.x, os.z);
+                // waves run down the cloth and round it; the hem swings out, trails behind the motion and lifts in a run
+                float wave = sin(t * 6.5 * f - os.y * 14.0 + ang * 3.0) + 0.5 * sin(t * 11.0 * f - os.y * 23.0 + ang * 5.0 + 1.7);
+                float amp = (0.022 + 0.032 * sp) * (1.0 + 3.0 * _ClothDash);
+                float3 radial = TransformObjectToWorldDir(normalize(float3(os.x, 0, os.z) + 1e-4));
+                float3 sway = float3(sin(t * 4.3 * f + ang * 2.0 + os.y * 7.0), 0.3 * sin(t * 5.1 * f + ang), cos(t * 3.7 * f + ang * 3.0 + os.y * 5.0));
+                return ws + (radial * wave * amp + sway * amp * 0.6 - _AsciiHeroVel.xyz * 0.2 + float3(0, 0.09 * sp / 3.5, 0)) * w;
+            }
         float3 DashWS(float3 ws)
         {
             if (_DashSpin.w != 0.0)

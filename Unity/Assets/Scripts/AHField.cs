@@ -96,7 +96,7 @@ namespace AsciiHero
                 piles.Add(pile);
             }
             // grass
-            var pts = new List<Vector3>(); var seeds = new List<float>(); int N = Mathf.RoundToInt(HX * 2 * HZ * 2 * 60);
+            var pts = new List<Vector3>(); var seeds = new List<float>(); int N = Mathf.RoundToInt(HX * 2 * HZ * 2 * 120);      // dense grass (the settings can thin it out)
             for (int i = 0; i < N; i++)
             {
                 float x = (Rnd() * 2 - 1) * (HX + 2), z = (Rnd() * 2 - 1) * (HZ + 2); bool blocked = false;
