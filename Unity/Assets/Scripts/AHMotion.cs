@@ -323,11 +323,42 @@ namespace AsciiHero
                 // a cut takes the arms over completely (the shield arm keeps its pose)
                 float mk = mask[k]; if (!(shieldArm && MotionDB.bones[k].EndsWith(".L"))) mk *= 1 - ovW; else mk *= 1 - bashW;
                 var q = outQ[k]; if (mk > 0) q = Quaternion.Slerp(q, baseQ[map[k]], mk);
-                B[map[k]].localRotation = q;
+                finQ[k] = q;
             }
+            Inertial(dt);
+            for (int k = 0; k < nb; k++) if (map[k] >= 0) B[map[k]].localRotation = finQ[k];
             H.root.localPosition = rootPos + ro;
             Injuries(dt);
             Orb(t);
+        }
+        // ---------- inertial blending ----------
+        // Whatever starts, stops or takes over (an attack, the guard, an idle action, sitting down, getting up), the
+        // skeleton never jumps into the new pose: a sudden change of the layered pose between two frames is taken up
+        // as an offset that then fades out, so the body moves smoothly into the new pose.
+        Quaternion[] finQ = new Quaternion[0], inPrev, inOff; Vector3 inPrevRo, inOffRo; bool inReady;
+        const float IN_HALF = 0.1f;
+        void Inertial(float dt)
+        {
+            int nb = MotionDB.nb;
+            if (finQ.Length != nb) finQ = new Quaternion[nb];
+            if (!inReady || inPrev == null || inPrev.Length != nb)
+            {
+                inPrev = new Quaternion[nb]; inOff = new Quaternion[nb];
+                for (int k = 0; k < nb; k++) { inPrev[k] = finQ[k]; inOff[k] = Quaternion.identity; }
+                inPrevRo = ro; inOffRo = Vector3.zero; inReady = true; return;
+            }
+            float decay = 1 - Mathf.Exp(-dt * LN2 / IN_HALF), thr = Mathf.Max(14f, 1800f * dt), jump = 0;
+            for (int k = 0; k < nb; k++) if (map[k] >= 0) jump = Mathf.Max(jump, Quaternion.Angle(inPrev[k], inOff[k] * finQ[k]));
+            bool snap = jump > thr || ((inOffRo + ro) - inPrevRo).magnitude > Mathf.Max(0.035f, 1.2f * dt);
+            for (int k = 0; k < nb; k++)
+            {
+                if (map[k] < 0) continue;
+                if (snap) inOff[k] = inPrev[k] * Quaternion.Inverse(finQ[k]);        // take the jump up...
+                inOff[k] = Quaternion.Slerp(inOff[k], Quaternion.identity, decay);    // ...and let it fade
+                finQ[k] = inOff[k] * finQ[k]; inPrev[k] = finQ[k];
+            }
+            if (snap) inOffRo = inPrevRo - ro;
+            inOffRo *= 1 - decay; ro += inOffRo; inPrevRo = ro;
         }
         void Orb(float t)
         {
@@ -736,11 +767,12 @@ namespace AsciiHero
         const int SHIFT_A = 10663, SHIFT_N = 120;
         const int WAVE_A = 10783, WAVE_N = 55;
         const int SITDOWN_A = 10838, SITDOWN_N = 65;
-        const int SITLOOP_A = 10903, SITLOOP_N = 360;
-        const int GETUP_A = 11263, GETUP_N = 65;
-        const int LEAP_A = 11328, LEAP_N = 38;
+        const int GETUP_A = 10903, GETUP_N = 65;
+        const int LEAP_A = 10968, LEAP_N = 38;
+        const int SITM_A = 11006, SITM_N = 2;
+        const int SITF_A = 11008, SITF_N = 2;
         class IdleAct { public string kind, phase = "down"; public float t, w = 1, nextLook, look = -1, p = -1, g0, te; public bool o; }
-        IdleAct idleA; readonly List<string> idleDue = new List<string>(); float idleClock, leapT = -1, idleW, footLift, idleLook, idleLookP;
+        IdleAct idleA; readonly List<string> idleDue = new List<string>(); float idleClock, leapT = -1, idleW, footLift, idleLook, idleLookP, sitW;
         /// 0..1: how far the hero is turned towards the camera (the game adds the turn to his facing)
         public float idleYawW;
         static float Smoother(float x) { x = Mathf.Clamp01(x); return x * x * x * (x * (x * 6 - 15) + 10); }
@@ -772,13 +804,6 @@ namespace AsciiHero
         {
             if (w <= 0.001f) return; Vector3 r0 = Vector3.zero; SamplePose(a + fr, atkQ, ref r0, null); Lay(atkQ, r0, w, true, false, upper); idleW = Mathf.Max(idleW, w);
         }
-        // the sitting clip loops with its end cross-faded into its start
-        const int SIT_W = 15;
-        void SitLoopAt(float p, float w)
-        {
-            int L = SITLOOP_N - SIT_W;
-            if (p < SIT_W) { LayClip(SITLOOP_A, p + L, w); LayClip(SITLOOP_A, p, w * Smoother(p / SIT_W)); } else LayClip(SITLOOP_A, p, w);
-        }
         void IdleUpdate(float dt)
         {
             bool busy = vel > 0.08f || Attacking || guard > 0.05f || combatT > 0 || !limbs[3] || !limbs[4] || !loopMode;
@@ -787,7 +812,7 @@ namespace AsciiHero
             float[] at = { 5, 10, 15, 20 }, chance = { 0.75f, 0.6f, 0.2f, 1 }; string[] kinds = { "look", "shift", "wave", "sit" };
             for (int k = 0; k < 4; k++) if (T0 < at[k] && idleClock >= at[k] && UnityEngine.Random.value < chance[k]) idleDue.Add(kinds[k]);
             if (idleA == null && idleDue.Count > 0) { idleA = new IdleAct { kind = idleDue[0], nextLook = 4 + UnityEngine.Random.value * 3 }; idleDue.RemoveAt(0); }
-            idleYawW = 0; idleLook = 0; idleLookP = 0; footLift = 0; idleW = 0;
+            idleYawW = 0; idleLook = 0; idleLookP = 0; footLift = 0; idleW = 0; sitW = 0;
             var I = idleA;
             if (I != null)
             {
@@ -809,27 +834,31 @@ namespace AsciiHero
                     if (I.t > 3.3f || fade <= 0) idleA = null;
                 }
                 else
-                {   // sit: down onto the ground (a hand goes down first), sitting there knees up leaning back on a hand, and up again
+                {   // sit: down onto the ground with a hand down (mocap), then the sitting pose - a man cross-legged with
+                    // his hands on his knees, a woman with her legs folded to one side and a hand on the floor - and up again
+                    int SA = ch.cfg.sex == 'f' ? SITF_A : SITM_A;
                     if (I.phase == "down")
                     {
-                        float fr = Mathf.Min(SITDOWN_N - 1, I.t * 36);
-                        LayClip(SITDOWN_A, fr, Smoother(I.t / 0.3f));
+                        float fr = Mathf.Min(SITDOWN_N - 1, I.t * 36), w = Smoother(I.t / 0.3f);
+                        LayClip(SITDOWN_A, fr, w);
+                        LayClip(SA, 0, w * Smoother((fr - (SITDOWN_N - 26)) / 25f));          // the last part settles into the pose
+                        sitW = w;
                         if (fr >= SITDOWN_N - 1) { I.phase = "sit"; I.t = 0; I.p = 0; }
                     }
                     else if (I.phase == "sit")
                     {
-                        I.p = (I.p + dt * 30) % (SITLOOP_N - SIT_W);
-                        LayClip(SITDOWN_A, SITDOWN_N - 1, 1); SitLoopAt(I.p, Smoother(I.t / 0.7f));
+                        LayClip(SA, 0, 1); sitW = 1;
                         I.nextLook -= dt; if (I.nextLook <= 0 && I.look < 0) I.look = 0;
                         if (I.look >= 0) { I.look += dt; idleLook = LookYaw(I.look, 2.8f, 0.7f); if (I.look > 2.8f) { I.look = -1; I.nextLook = 4 + UnityEngine.Random.value * 3; } }
                     }
                     else
-                    {   // getting up: out of the sitting loop (cross-faded), or straight back up if he was still going down
+                    {   // getting up: out of the sitting pose (cross-faded), or straight back up if he was still going down
                         float fr = Mathf.Min(GETUP_N - 1, I.g0 + I.t * 34.5f);
                         if (fr >= GETUP_N - 1) I.te += dt;
                         float o = 1 - Smoother(I.te / 0.3f);
-                        if (I.p >= 0) SitLoopAt(I.p, o);
-                        LayClip(GETUP_A, fr, (I.p >= 0 ? Smoother(I.t / 0.4f) : 1) * o);
+                        if (I.p >= 0) LayClip(SA, 0, o);
+                        LayClip(GETUP_A, fr, (I.p >= 0 ? Smoother(I.t / 0.5f) : 1) * o);
+                        sitW = (1 - Smoother((fr - (GETUP_N - 30)) / 25f)) * o;
                         if (I.te > 0.3f) { idleA = null; idleClock = 0; }
                     }
                 }
@@ -913,6 +942,7 @@ namespace AsciiHero
         public bool StartAttack()
         {
             if (Attacking) { atkQueued = true; return false; }
+            if (IdleBusy) { PokeIdle(); return false; }       // sitting: he gets up first
             if (!limbs[2]) return false;
             string Wn = ch.cfg.weapon; var list = new List<int>(AttackList(Wn)); int type;
             if (Velocity.magnitude > 0.5f && Wn != "spear" && Wn != "staff")
@@ -991,13 +1021,13 @@ namespace AsciiHero
                     BladeW(gq * dir, calm); float up = calm * (1 - wRun);
                     AimW("upperarm01.R", "lowerarm01.R", gq * V(0.2f, -0.82f, 0.45f), up); AimW("lowerarm01.R", "wrist.R", gq * V(0.05f, 0.3f, 0.95f), up); BladeW(gq * dir, calm);
                 }
-                if (ch.weaponSlide != null) ch.weaponSlide.localPosition = new Vector3(0, -0.5f + 0.5f * Mathf.Max(wRun, 1 - calm), 0);
+                if (ch.weaponSlide != null) ch.weaponSlide.localPosition = new Vector3(0, Mathf.Lerp(ch.weaponSlideBase, -0.4f, Mathf.Max(wRun, 1 - calm)), 0);       // (-0.4: the hand at the middle of the staff)
             }
             // in the stance the shield is carried out in front of the body
             if (st > 0.01f && Wc == "shield" && limbs[1])
             { AimW("upperarm01.L", "lowerarm01.L", gq * V(-0.28f, -0.72f, 0.63f), 0.85f * st); AimW("lowerarm01.L", "wrist.L", gq * V(0.3f, 0.2f, 0.93f), 0.85f * st); }
             // guard
-            guard += ((guardHeld ? 1f : 0f) - guard) * (1 - Mathf.Exp(-dt * LN2 / 0.06f));
+            guard += ((guardHeld && !IdleBusy ? 1f : 0f) - guard) * (1 - Mathf.Exp(-dt * LN2 / 0.06f));
             float gw = guard; bool shield = Wc == "shield";
             if (gw > 0.01f)
             {
@@ -1101,7 +1131,13 @@ namespace AsciiHero
             for (int si = 0; si < 2; si++)
             {
                 string s = SIDES[si];
-                Hinge("upperleg01." + s, "lowerleg01." + s, "foot." + s, true, 2.45f, Z);      // knee: 0..140 degrees
+                if (sitW < 0.999f)
+                {   // (sitting cross-legged the knees bend out of the forward plane: the knee hinge is let go)
+                    Transform a = H.Bone("upperleg01." + s), b = H.Bone("lowerleg01." + s), c = H.Bone("foot." + s);
+                    Quaternion qa = a.rotation, qb = b.rotation, qc = c.rotation;
+                    Hinge("upperleg01." + s, "lowerleg01." + s, "foot." + s, true, 2.45f, Z);      // knee: 0..140 degrees
+                    if (sitW > 0.001f) { a.rotation = Quaternion.Slerp(a.rotation, qa, sitW); b.rotation = Quaternion.Slerp(b.rotation, qb, sitW); c.rotation = Quaternion.Slerp(c.rotation, qc, sitW); }
+                }
                 Hinge("upperarm01." + s, "lowerarm01." + s, "wrist." + s, false, 2.53f, Z);    // elbow: up to 145 degrees
             }
             // neck: the head stays within about 57 degrees of its rest attitude on the chest
@@ -1222,6 +1258,7 @@ namespace AsciiHero
                     target.x += o.x * footLift; target.z += o.z * footLift; target.y += 0.32f * footLift * scaleY;
                 }
                 target.y = Mathf.Max(target.y, groundAnkle);
+                if (sitW > 0.001f) target = Vector3.Lerp(target, ap, sitW);       // sitting: the legs keep the pose they were given
                 float l1 = Vector3.Distance(kp, hp), l2 = Vector3.Distance(ap, kp), over = Vector3.Distance(target, hp) - (l1 + l2) * 0.99f;
                 if (F.rel > 0.5f && over > 0) drop = Mathf.Max(drop, over);
                 legs[si] = new LegInfo { hip = hip, knee = knee, foot = foot, toe = toe, target = target, l1 = l1, l2 = l2 };

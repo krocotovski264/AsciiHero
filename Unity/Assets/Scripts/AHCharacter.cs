@@ -37,7 +37,7 @@ namespace AsciiHero
         public Transform model;         // scaled for height
         public Human human;
         public CharConfig cfg;
-        public Transform weapon, weaponL, orb, shield, weaponSlide;   // shield: local z = its face, local y = its top
+        public Transform weapon, weaponL, orb, shield, weaponSlide; public float weaponSlideBase = -0.5f;   // shield: local z = its face, local y = its top
         public List<Renderer> glyphs = new List<Renderer>();   // skinned glyph renderers (limb hiding)
         public static readonly string[] LIMBS = { "head", "armL", "armR", "legL", "legR" };
         public static readonly string[] LIMB_NAME = { "голова", "левая рука", "правая рука", "левая нога", "правая нога" };
@@ -169,7 +169,7 @@ namespace AsciiHero
             }
 
             string W = cfg.weapon;
-            Pose.Apply(h, W == "shield" ? "shield" : W == "none" ? "relaxed" : W == "axe" ? "dual" : "grip");
+            Pose.Apply(h, W == "shield" ? "shield" : W == "none" ? "relaxed" : W == "axe" ? "dual" : W == "staff" ? "staff" : "grip");
             if (W != "none") AddWeapon(W);
             if (W == "shield") AddShield();
         }
@@ -313,15 +313,33 @@ namespace AsciiHero
             Part(MeshGen.Cylinder(0.012f, 0f, 0.06f, 6), "STEEL", g, new Vector3(-0.04f, 0.38f, 0), Quaternion.Euler(0, 0, 90));
             Part(MeshGen.Cylinder(0.017f, 0.017f, 0.11f, 8), "LEATHER2", g, Vector3.zero);
         }
+        // Grips (after fencing and woodcraft references): every weapon lies across the closed fist - the haft runs from the
+        // heel of the hand out past the thumb and index finger, the fingers and thumb wrapped round it (hammer grip). Sword:
+        // the edge in line with the knuckles, the pommel under the little finger. Tomahawk: held near the end of the
+        // haft with a little of it showing below the fist, head up and edge forward. Spear: at its balance point, the middle.
+        // Staff: upright in a fist held thumb-up, the forearm level. Where the weapon is carried (sword and tomahawk: point
+        // ahead and low; spear: level, point ahead; staff: upright) the wrist turns at most 25 degrees towards it and the
+        // rest is taken up by the grip lying diagonally across the palm, as a real hand does - never a bent-back wrist.
+        static Vector3 CarryDir(string W)
+        {
+            return (W == "spear" ? new Vector3(0, 0.08f, 1f) : W == "staff" ? new Vector3(0, 1f, 0.05f) : new Vector3(0, -0.6f, 0.8f)).normalized;
+        }
+        Quaternion GripIn(string side, string W, out Vector3 grip)
+        {
+            Vector3 D = CarryDir(W);
+            var wr = human.Bone("wrist." + side); var fr = Pose.Hand(human, side);
+            Quaternion full = Quaternion.FromToRotation(fr.a, D); float ang = Quaternion.Angle(Quaternion.identity, full);
+            if (ang > 0.1f && wr != null) wr.rotation = Quaternion.Slerp(Quaternion.identity, full, Mathf.Min(1f, 25f / ang)) * wr.rotation;
+            fr = Pose.Hand(human, side);
+            grip = fr.W + fr.f * 0.08f - fr.n * 0.03f;                     // the middle of the closed fist
+            Vector3 fp = (fr.f - D * Vector3.Dot(fr.f, D)).normalized;       // the knuckles' direction, across the haft
+            // sword: edge towards the knuckles (blade width on local x); tomahawk: head (holder +z) towards the knuckles
+            Vector3 fwd = W == "sword" || W == "shield" ? Vector3.Cross(fp, D) : fp;
+            return Quaternion.LookRotation(fwd, D);
+        }
         void AddWeapon(string W)
         {
-            var fr = Pose.Hand(human, "R");
-            // hand frame is in world space; the model sits at the origin while it is being built
-            Vector3 grip = fr.W + fr.f * 0.075f - fr.n * 0.028f;
-            // sword and axe hang low along the leg, 10 degrees off it; the spear is carried level at its middle, point ahead; the staff stands upright
-            Vector3 up = (W == "spear" ? new Vector3(0, 0.08f, 1f) : W == "staff" ? Vector3.up : new Vector3(0, -0.985f, 0.174f)).normalized;
-            Vector3 fwd = Vector3.Cross(Vector3.right, up).normalized;
-            var rot = Quaternion.LookRotation(fwd, up);
+            Vector3 grip; var rot = GripIn("R", W, out grip);
             var g0 = Group("Weapon"); var g = g0;
             // axe: turned on its haft so the head points ahead (down the line of the cut), not sideways. Spear: gripped at the
             // middle. Staff: gripped a metre above its foot; the holder slides when the hand moves to the middle (running, fighting).
@@ -330,7 +348,7 @@ namespace AsciiHero
                 g = Group("Holder"); g.SetParent(g0, false);
                 if (W == "axe") g.localRotation = Quaternion.Euler(0, -90, 0);
                 if (W == "spear") g.localPosition = new Vector3(0, -0.55f, 0);
-                if (W == "staff") { g.localPosition = new Vector3(0, -0.5f, 0); weaponSlide = g; }
+                if (W == "staff") { weaponSlideBase = 0.5f - grip.y; g.localPosition = new Vector3(0, weaponSlideBase, 0); weaponSlide = g; }     // its foot on the ground
             }
             if (W == "sword" || W == "shield")
             {
@@ -370,9 +388,9 @@ namespace AsciiHero
             weapon = g0;
             if (W == "axe")
             {   // the second tomahawk, in the left hand
-                var fl = Pose.Hand(human, "L"); Vector3 gripL = fl.W + fl.f * 0.075f - fl.n * 0.028f;
+                Vector3 gripL; var rotL = GripIn("L", W, out gripL);
                 var gL0 = Group("WeaponL"); var gL = Group("Holder"); gL.SetParent(gL0, false); gL.localRotation = Quaternion.Euler(0, -90, 0); Tomahawk(gL);
-                Attach("wrist.L", gL0, model.InverseTransformPoint(gripL), Quaternion.Inverse(model.rotation) * rot);
+                Attach("wrist.L", gL0, model.InverseTransformPoint(gripL), Quaternion.Inverse(model.rotation) * rotL);
                 weaponL = gL0;
             }
         }

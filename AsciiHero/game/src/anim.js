@@ -543,7 +543,7 @@ const twoHanded = A => { const w = A.char.cfgWeapon || 'none'; return w !== 'shi
 //   20 s        sits down on the ground (mocap) and stays there, looking round every 4-7 s, until something happens;
 //               then he gets up (mocap) before he can move
 // The dash plays a crouch-and-spring (mocap leap) over the body.
-const IDLE = {"shift": {"a": 10663, "n": 120, "minY": -0.007}, "wave": {"a": 10783, "n": 55, "minY": 0.0}, "sitdown": {"a": 10838, "n": 65, "minY": -0.884}, "sitloop": {"a": 10903, "n": 360, "minY": -0.813}, "getup": {"a": 11263, "n": 65, "minY": -0.884}, "leap": {"a": 11328, "n": 38, "minY": -0.164}};
+const IDLE = {"shift": {"a": 10663, "n": 120, "minY": -0.007}, "wave": {"a": 10783, "n": 55, "minY": 0.0}, "sitdown": {"a": 10838, "n": 65, "minY": -0.884}, "getup": {"a": 10903, "n": 65, "minY": -0.884}, "leap": {"a": 10968, "n": 38, "minY": -0.164}, "sitM": {"a": 11006, "n": 2, "minY": -0.784}, "sitF": {"a": 11008, "n": 2, "minY": -0.784}};
 const smoother = x => { x = clamp(x, 0, 1); return x * x * x * (x * (x * 6 - 15) + 10); };
 export function pokeIdle(A) {
   A.idleT = 0; A.idleDue = [];
@@ -562,7 +562,7 @@ function idleUpdate(A, dt) {
   const T0 = A.idleT || 0; A.idleT = T0 + dt; A.idleDue = A.idleDue || [];
   for (const [at, kind, ch] of [[5, 'look', 0.75], [10, 'shift', 0.6], [15, 'wave', 0.2], [20, 'sit', 1]]) if (T0 < at && A.idleT >= at && Math.random() < ch) A.idleDue.push(kind);
   if (!A.idle && A.idleDue.length) { const kind = A.idleDue.shift(); A.idle = { kind, t: 0, w: 0, phase: 'down', nextLook: 4 + Math.random() * 3, look: -1 }; }
-  const I = A.idle; A.idleYawW = 0; A.idleLook = 0; A.idleLookP = 0; A.footLift = 0; A.idleClips = [];
+  const I = A.idle; A.idleYawW = 0; A.idleLook = 0; A.idleLookP = 0; A.footLift = 0; A.idleClips = []; A.sitW = 0;
   if (I) {
     I.t += dt;
     const fade = I.out ? Math.max(0, (I.w || 0) - dt / 0.25) : 1; I.w = fade;
@@ -577,24 +577,23 @@ function idleUpdate(A, dt) {
       const wt = I.t - 0.6; if (wt > 0 && wt < IDLE.wave.n / 30) A.idleClips.push({ a: IDLE.wave.a, fr: wt * 30, w: Math.min(smoother(wt / 0.25), 1 - smoother((wt - IDLE.wave.n / 30 + 0.3) / 0.3)) * fade, upper: true });      // the arm and trunk only: the feet stay in the stance
       if (I.t > 3.3) A.idle = null;
     } else if (I.kind === 'sit') {
-      // down onto the ground (a hand goes down first), sitting there knees up and leaning back on a hand, and up again
-      const SD = IDLE.sitdown, SL = IDLE.sitloop, GU = IDLE.getup, W = 15, L = SL.n - W;
-      const loopAt = (p, w) => { if (p < W) { A.idleClips.push({ a: SL.a, fr: p + L, w }); A.idleClips.push({ a: SL.a, fr: p, w: w * smoother(p / W) }); } else A.idleClips.push({ a: SL.a, fr: p, w }); };
+      // down onto the ground with a hand down (mocap), then the sitting pose - a man cross-legged with his hands on his
+      // knees, a woman with her legs folded to one side and a hand on the floor - and up again
+      const SD = IDLE.sitdown, GU = IDLE.getup, SA = A.char.cfgSex === 'f' ? IDLE.sitF.a : IDLE.sitM.a;
       if (I.phase === 'down') {
-        const fr = Math.min(SD.n - 1, I.t * 30 * 1.2);
-        A.idleClips.push({ a: SD.a, fr, w: smoother(I.t / 0.3) });
+        const fr = Math.min(SD.n - 1, I.t * 36), w = smoother(I.t / 0.3);
+        A.idleClips.push({ a: SD.a, fr, w }); A.idleClips.push({ a: SA, fr: 0, w: w * smoother((fr - (SD.n - 26)) / 25) }); A.sitW = w;
         if (fr >= SD.n - 1) { I.phase = 'sit'; I.t = 0; I.p = 0; }
       } else if (I.phase === 'sit') {
-        I.p = ((I.p || 0) + dt * 30) % L;
-        A.idleClips.push({ a: SD.a, fr: SD.n - 1, w: 1 }); loopAt(I.p, smoother(I.t / 0.7));
+        A.idleClips.push({ a: SA, fr: 0, w: 1 }); A.sitW = 1;
         I.nextLook -= dt; if (I.nextLook <= 0 && I.look < 0) I.look = 0;
         if (I.look >= 0) { I.look += dt; A.idleLook = lookYaw(I.look, 2.8, 0.7); if (I.look > 2.8) { I.look = -1; I.nextLook = 4 + Math.random() * 3; } }
       } else {
-        // getting up: from the sitting loop (cross-faded in), or - if he was still going down - straight back up the same way
-        const fr = Math.min(GU.n - 1, (I.g0 || 0) + I.t * 30 * 1.15), end = fr >= GU.n - 1 ? (I.te = (I.te || 0) + dt) : 0;
+        const fr = Math.min(GU.n - 1, (I.g0 || 0) + I.t * 34.5), end = fr >= GU.n - 1 ? (I.te = (I.te || 0) + dt) : 0;
         const out = 1 - smoother(end / 0.3);
-        if (I.p !== undefined) loopAt(I.p, out);
-        A.idleClips.push({ a: GU.a, fr, w: (I.p !== undefined ? smoother(I.t / 0.4) : 1) * out });
+        if (I.p !== undefined) A.idleClips.push({ a: SA, fr: 0, w: out });
+        A.idleClips.push({ a: GU.a, fr, w: (I.p !== undefined ? smoother(I.t / 0.5) : 1) * out });
+        A.sitW = (1 - smoother((fr - (GU.n - 30)) / 25)) * out;
         if (end > 0.3) { A.idle = null; A.idleT = 0; }
       }
     }
@@ -803,7 +802,7 @@ function jointLimits(A) {
     if (s2.distanceToSquared(s) > 1e-8) rotateWorld(bb, new THREE.Quaternion().setFromUnitVectors(s, s2));
   };
   for (const s of ['L', 'R']) {
-    hinge('upperleg01.' + s, 'lowerleg01.' + s, 'foot.' + s, true, 2.45);      // knee: 0..140 degrees
+    if ((A.sitW || 0) < 0.5) hinge('upperleg01.' + s, 'lowerleg01.' + s, 'foot.' + s, true, 2.45);      // knee: 0..140 degrees (let go when sitting cross-legged)
     hinge('upperarm01.' + s, 'lowerarm01.' + s, 'wrist.' + s, false, 2.53);    // elbow: up to 145 degrees
   }
   // neck: the head stays within 70 degrees of turn and 45 degrees of nod or tilt from the chest
@@ -905,6 +904,7 @@ function footIK(A, dt) {
     }
     if (s === 'R' && (A.footLift || 0) > 0.001) { const fw = A.footLift, o = new THREE.Vector3(-0.04, 0, -0.2).applyQuaternion(groupQ(A)); target.x += o.x * fw; target.z += o.z * fw; target.y += 0.32 * fw * scaleY; }
     target.y = Math.max(target.y, groundAnkle);
+    if ((A.sitW || 0) > 0.001) target.lerp(ap, A.sitW);       // sitting: the legs keep the pose they were given
     const l1 = kp.distanceTo(hp), l2 = ap.distanceTo(kp), over = target.distanceTo(hp) - (l1 + l2) * 0.99;
     if (F.rel > 0.5 && over > 0) drop = Math.max(drop, over);
     info[s] = { hip, knee, foot, toe, target, l1, l2 };

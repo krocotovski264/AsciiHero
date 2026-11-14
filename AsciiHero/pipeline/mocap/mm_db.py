@@ -80,7 +80,8 @@ for name, fn, a, b, pk, mode in cmu_atk.SPEC:
 #   shift   139_02 "shifting weight" from foot to foot
 #   wave    141_16 "wave hello" (the game lays it on the upper body only)
 #   sitdown 111_07 "get up from floor", played backwards: lowering onto the ground with a hand down
-#   sitloop 82_05  "sitting on ground relaxing": knees up, leaning back on a hand, looking round
+#   sitM    built by hand (author.py): sitting cross-legged, hands on the knees
+#   sitF    built by hand: legs folded to one side, the other hand on the floor
 #   getup   111_07 the same get-up forwards
 #   leap    83_42  the crouch and spring of the dash
 IDLE = {}
@@ -91,7 +92,7 @@ def best_loop(Q, lo, hi, W):
         if best is None or e < best[0]: best = (e, a)
     return best[1]
 for name, fn, a4, b4, rev in (('idleM', '142/142_13.bvh', 1199, 1289, 0), ('idleF', '113/113_21.bvh', 30, 130, 0), ('shift', '139/139_02.bvh', 0, 120, 0),
-                              ('wave', '141/141_16.bvh', 1, 56, 0), ('sitdown', '111/111_07.bvh', 372, 437, 1), ('sitloop', '082/82_05.bvh', 100, 460, 0),
+                              ('wave', '141/141_16.bvh', 1, 56, 0), ('sitdown', '111/111_07.bvh', 372, 437, 1),
                               ('getup', '111/111_07.bvh', 372, 437, 0), ('leap', '083/83_42.bvh', 67, 105, 0)):
     c = R.process(fn)
     if name == 'idleF': a4 = best_loop(c['Q'], a4, b4, 80); b4 = a4 + 80
@@ -110,6 +111,13 @@ for name, fn, a4, b4, rev in (('idleM', '142/142_13.bvh', 1199, 1289, 0), ('idle
     valid.append(np.zeros(m, dtype=bool)); ranges.append([total, total + m, name])
     IDLE[name] = {'a': total, 'n': m, 'minY': round(float(RO[:, 1].min()), 3)}; total += m
     print(name, fn, a4, b4, m, 'minY %.2f' % RO[:, 1].min(), 'y0 %.2f y1 %.2f' % (RO[0, 1], RO[-1, 1]))
+import author
+for name, kind in (('sitM', 'lotus'), ('sitF', 'side')):
+    q, ro = author.pose(kind); m = 2
+    rows['Q'].append(np.repeat(q[None], m, 0)); rows['RO'].append(np.repeat(ro[None], m, 0)); rows['F'].append(np.zeros((m, 27)))
+    rows['RM'].append(np.zeros((m, 3))); rows['CON'].append(np.ones((m, 2)))
+    valid.append(np.zeros(m, dtype=bool)); ranges.append([total, total + m, name])
+    IDLE[name] = {'a': total, 'n': m, 'minY': round(float(ro[1]), 3)}; total += m
 _json.dump(IDLE, open('idle.json', 'w'))
 _json.dump(ATK, open('atk.json', 'w'))
 print('frames', total)

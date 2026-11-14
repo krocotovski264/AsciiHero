@@ -47,20 +47,42 @@ Shader "AsciiHero/Lit"
         // cloth (the robe): the hem trails behind the motion and flutters; in the dash flight it billows harder
         float _ClothDash;      // per renderer (MaterialPropertyBlock)
         float4 _AsciiHeroVel; float _AsciiTime;
+        float4 _AsciiHeroTrail[6];   // where the hero was 0, 0.06, 0.12 ... 0.3 s ago (xyz)
+        float3 HeroTrail(float d)
+        {
+            float x = saturate(d / 0.3) * 5.0; int k = min((int)x, 4); float f = x - k;
+            return lerp(_AsciiHeroTrail[k].xyz, _AsciiHeroTrail[k + 1].xyz, f);
+        }
+        // The cloak hangs from the shoulders and flies like a rag: every part of it follows the path the body took a moment
+        // earlier (the hem the longest ago), so it streams out behind, sweeps round in a turn and keeps rippling. It swings
+        // about the shoulder line - it never stretches or comes loose - the back of it furthest, the front edges less.
         float3 ClothWS(float3 ws, float3 os)
+        {
+            if (_Cloth < 0.5) return ws;
+            float w = saturate((1.38 - os.y) / 1.1); w = w * w * (3.0 - 2.0 * w);
+            float t = _AsciiTime, fd = 1.0 + 0.8 * _ClothDash;
+            float3 piv = TransformObjectToWorld(float3(0, 1.42, 0));
+            float3 trail = HeroTrail(0.3 * w) - HeroTrail(0.0); trail.y = 0;
+            float tl = length(trail), sp = min(length(_AsciiHeroVel.xz), 4.0);
+            float3 radial = TransformObjectToWorldDir(normalize(float3(os.x, 0, os.z) + 1e-4));
+            float ang = atan2(os.x, os.z);
+            if (length(TransformObjectToWorld(float3(0, 0, 0)).xz - _AsciiHeroTrail[0].xz) > 0.6) tl = 0;     // (only the hero's own cloak)
+            if (tl > 1e-3)
             {
-                if (_Cloth < 0.5) return ws;
-                // weight: nothing at the shoulders, growing down to the hem
-                float w = saturate((1.2 - os.y) / 0.95); w = w * w * (3.0 - 2.0 * w);
-                float sp = min(length(_AsciiHeroVel.xz), 3.5), t = _AsciiTime, f = 1.0 + 0.8 * _ClothDash;
-                float ang = atan2(os.x, os.z);
-                // waves run down the cloth and round it; the hem swings out a little and stays with the legs in a run
-                float wave = sin(t * 6.5 * f - os.y * 14.0 + ang * 3.0) + 0.5 * sin(t * 11.0 * f - os.y * 23.0 + ang * 5.0 + 1.7);
-                float amp = (0.018 + 0.016 * sp) * (1.0 + 3.0 * _ClothDash);
-                float3 radial = TransformObjectToWorldDir(normalize(float3(os.x, 0, os.z) + 1e-4));
-                float3 sway = float3(sin(t * 4.3 * f + ang * 2.0 + os.y * 7.0), 0.3 * sin(t * 5.1 * f + ang), cos(t * 3.7 * f + ang * 3.0 + os.y * 5.0));
-                return ws + (radial * wave * amp + sway * amp * 0.6 - _AsciiHeroVel.xyz * (0.03 + 0.05 * _ClothDash) + float3(0, 0.03 * sp / 3.5, 0)) * w;     // the hem follows the body closely (only a hint of trailing)
+                float3 td = trail / tl;
+                float backK = 0.3 + 0.7 * saturate(dot(radial, td) * 0.5 + 0.5);
+                float th = min(1.25, tl * 1.1 + 0.6 * _ClothDash) * backK * w;
+                th += 0.08 * sin(t * 7.0 * fd - os.y * 9.0 + ang * 2.0) * saturate(tl * 2.0) * w;     // it ripples as it flies
+                float3 ax = normalize(cross(td, float3(0, 1, 0)) + 1e-5);     // (turns the hanging cloth towards the trail)
+                float3 v = ws - piv; float c = cos(th), s = sin(th);
+                v = v * c + cross(ax, v) * s + ax * dot(ax, v) * (1.0 - c);
+                ws = piv + v;
             }
+            // a light flutter all the time, waves running down the cloth
+            float wave = sin(t * 6.5 * fd - os.y * 14.0 + ang * 3.0) + 0.5 * sin(t * 11.0 * fd - os.y * 23.0 + ang * 5.0 + 1.7);
+            float amp = (0.012 + 0.012 * sp) * (1.0 + 2.0 * _ClothDash);
+            return ws + radial * wave * amp * w;
+        }
         float3 DashWS(float3 ws)
         {
             if (_DashSpin.w != 0.0)

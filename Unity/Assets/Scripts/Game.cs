@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.30 · Unity";
+        public const string VERSION = "beta 0.31 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -230,7 +230,7 @@ namespace AsciiHero
             return m;
         }
 
-        MaterialPropertyBlock smokeMpb;
+        readonly List<float> trailT = new List<float>(); readonly List<Vector3> trailP = new List<Vector3>(); readonly Vector4[] trailArr = new Vector4[6];
         void Damage(int pct)
         {
             if (hp <= 0 || !ready) return;
@@ -834,6 +834,7 @@ namespace AsciiHero
         void DoDash()
         {
             if (!world || player == null || dashCd > 0 || !(limbs[3] || limbs[4])) return;
+            if (player.IdleBusy) { player.PokeIdle(); return; }      // sitting: he gets up first
             // moving: where the stick points; standing: where the hero looks
             Vector3 d = moveDir.HasValue ? new Vector3(moveDir.Value.x, 0, moveDir.Value.y) : new Vector3(Mathf.Sin(player.heading), 0, Mathf.Cos(player.heading));
             dashDir = d.normalized; dashT = 0; dashFrom = pos; dashMist = 0; player.StartLeap(); player.PokeIdle();
@@ -887,6 +888,16 @@ namespace AsciiHero
             Vector3 c = pc.rs[0].bounds.center + sh; var q = new Vector2(c.x, c.z); var q2 = loc.Collide(q, 0.16f);
             return sh + new Vector3(q2.x - q.x, 0, q2.y - q.y);
         }
+        // the shadow's own body (the smoke-material glyphs of the hero) during the dash, see AsciiGlyph
+        void SetSmoke(Vector3 back, float t)
+        {
+            if (shiftMpb == null) shiftMpb = new MaterialPropertyBlock();
+            foreach (var r in hero.glyphs)
+            {
+                if (r == null || r.sharedMaterial == null || !r.sharedMaterial.HasProperty("_GlyphSmoke") || r.sharedMaterial.GetFloat("_GlyphSmoke") < 0.5f) continue;
+                r.GetPropertyBlock(shiftMpb); shiftMpb.SetVector("_DashSmoke", new Vector4(back.x, back.y, back.z, t)); r.SetPropertyBlock(shiftMpb);
+            }
+        }
         void SetShift(Piece pc, Vector3 v, Vector4 spin, float cloth = 0)
         {
             if (shiftMpb == null) shiftMpb = new MaterialPropertyBlock();
@@ -903,7 +914,7 @@ namespace AsciiHero
             dashCd = Mathf.Max(0, dashCd - dt);
             if (dashT > dashSettle)
             {
-                if (dashShifted) { foreach (var pc in pieces) SetShift(pc, Vector3.zero, new Vector4(0, 1, 0, 0)); dashShifted = false; }
+                if (dashShifted) { foreach (var pc in pieces) SetShift(pc, Vector3.zero, new Vector4(0, 1, 0, 0)); SetSmoke(Vector3.zero, 0); dashShifted = false; }
                 return;
             }
             if (dashT < DASH_T)
@@ -915,6 +926,7 @@ namespace AsciiHero
             }
             dashT += dt;
             Vector3 back = dashFrom - pos; dashShifted = true;
+            SetSmoke(back, dashT < 0.8f ? Mathf.Max(dashT, 1e-4f) : 0);        // the shadow's body flows over as smoke
             Vector3 sideV = new Vector3(-dashDir.z, 0, dashDir.x);
             bool last = dashT >= dashSettle;
             foreach (var pc in pieces)
@@ -987,16 +999,25 @@ namespace AsciiHero
             float idleYaw = 0;
             if (player.idleYawW > 0) { Vector3 co = Mirror(new Vector3(Mathf.Sin(isoYaw), 0, Mathf.Cos(isoYaw))); idleYaw = Mathf.DeltaAngle(player.heading * Mathf.Rad2Deg, Mathf.Atan2(co.x, co.z) * Mathf.Rad2Deg) * Mathf.Deg2Rad * player.idleYawW; }   // waving: turned to the camera
             hero.go.transform.rotation = Quaternion.Euler(0, (player.heading - player.spinYaw + idleYaw) * Mathf.Rad2Deg, 0);      // the full-turn sweep spins the whole figure
-            // the shadow's body below the navel is smoke (glyph shader): the pelvis and the navel height for it
-            { var pb = hero.human != null ? hero.human.Bone("root") : null;
-              if (pb != null) Shader.SetGlobalVector("_HeroSmoke", new Vector4(pb.position.x, pb.position.y + 0.08f * hero.go.transform.lossyScale.y, pb.position.z, pos.y));
-              if (smokeMpb == null) smokeMpb = new MaterialPropertyBlock();
-              foreach (var r in hero.glyphs) if (r != null) { r.GetPropertyBlock(smokeMpb); smokeMpb.SetFloat("_SmokeLegs", 1); r.SetPropertyBlock(smokeMpb); } }
             loc.Update(tNow); Pickups(); UpdateDummies(dt, tNow); UpdateDebris(dt); UpdateDanger(tNow);
             if (respawnT > 0) { respawnT -= dt; if (respawnT <= 0) { RestoreBody(); pos = loc.spawn; player.ResetSim(); } }
             // grass: the hero and a point trailing behind him push the blades aside
             heroTrail = Vector3.Lerp(heroTrail, pos, Mathf.Min(1, dt * 2.2f));
             Shader.SetGlobalVector("_AsciiHeroVel", player != null ? (Vector4)player.Velocity : Vector4.zero);
+            // the path the hero took over the last 0.3 s, for the cloak (it streams along it, see ClothWS)
+            {
+                if (trailP.Count > 0 && (trailP[trailP.Count - 1] - hero.go.transform.position).sqrMagnitude > 9f) { trailT.Clear(); trailP.Clear(); }     // a respawn or a new place: no streaming
+                trailT.Add(tNow); trailP.Add(hero.go.transform.position);
+                while (trailT.Count > 2 && trailT[1] < tNow - 0.4f) { trailT.RemoveAt(0); trailP.RemoveAt(0); }
+                for (int k = 0; k < 6; k++)
+                {
+                    float tt = tNow - k * 0.06f; int j = trailT.Count - 1; while (j > 0 && trailT[j - 1] > tt) j--;
+                    Vector3 v = trailP[j];
+                    if (j > 0 && trailT[j] > tt) { float f = Mathf.InverseLerp(trailT[j - 1], trailT[j], tt); v = Vector3.Lerp(trailP[j - 1], trailP[j], f); }
+                    trailArr[k] = v;
+                }
+                Shader.SetGlobalVectorArray("_AsciiHeroTrail", trailArr);
+            }
             // grass is pressed down by the body itself - the feet, the pelvis over it, a weapon swept low - not by a collision circle
             {
                 var hb = hero.human; Transform fL = hb.Bone("foot.L"), fR = hb.Bone("foot.R"), rt = hb.Bone("root");
