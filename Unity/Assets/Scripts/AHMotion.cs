@@ -316,13 +316,13 @@ namespace AsciiHero
                 SteadyPelvis(dt);
             }
             AttackLayer(dt);
-            bool shieldArm = ch.cfg.weapon == "shield";
+            bool shieldArm = ch.cfg.weapon == "shield"; BoneFlags();
             if (finQ.Length != nb) finQ = new Quaternion[nb];
             for (int k = 0; k < nb; k++)
             {
                 if (map[k] < 0) continue;
                 // a cut takes the arms over completely (the shield arm keeps its pose)
-                float mk = mask[k]; if (!(shieldArm && MotionDB.bones[k].EndsWith(".L"))) mk *= 1 - ovW; else mk *= 1 - bashW;
+                float mk = mask[k]; if (!(shieldArm && boneLeft[k])) mk *= 1 - ovW; else mk *= 1 - bashW;
                 var q = outQ[k]; if (mk > 0) q = Quaternion.Slerp(q, baseQ[map[k]], mk);
                 finQ[k] = q;
             }
@@ -745,14 +745,26 @@ namespace AsciiHero
         static float CR(float a0, float a1, float a2, float a3, float u) { return 0.5f * (2 * a1 + (a2 - a0) * u + (2 * a0 - 5 * a1 + 4 * a2 - a3) * u * u + (3 * a1 - a0 - 3 * a2 + a3) * u * u * u); }
         static Vector3 CR(Vector3 a0, Vector3 a1, Vector3 a2, Vector3 a3, float u) { return new Vector3(CR(a0.x, a1.x, a2.x, a3.x, u), CR(a0.y, a1.y, a2.y, a3.y, u), CR(a0.z, a1.z, a2.z, a3.z, u)); }
         // lays a captured pose over the pose from locomotion: the whole body when standing, from the waist up when moving
+        static bool[] boneLower, boneLeft;      // per mocap bone: pelvis/legs/feet; left side (names tested once, not every frame)
+        static void BoneFlags()
+        {
+            if (boneLower != null && boneLower.Length == MotionDB.nb) return;
+            boneLower = new bool[MotionDB.nb]; boneLeft = new bool[MotionDB.nb];
+            for (int k = 0; k < MotionDB.nb; k++)
+            {
+                string n = MotionDB.bones[k];
+                boneLower[k] = n == "root" || n.Contains("leg") || n.Contains("foot"); boneLeft[k] = n.EndsWith(".L", System.StringComparison.Ordinal);
+            }
+        }
         void Lay(Quaternion[] Q, Vector3 aro, float w, bool yAbs, bool bash = false, bool upper = false)
         {
+            BoneFlags();
             float wl = upper ? 0 : w * (1 - wWalk); bool shield = ch.cfg.weapon == "shield";
             for (int k = 0; k < MotionDB.nb; k++)
             {
-                string n = MotionDB.bones[k]; float wk = w;
-                if (n == "root" || n.Contains("leg") || n.Contains("foot")) wk = wl;
-                else if (shield && n.EndsWith(".L") && !bash) wk = 0;               // the shield arm keeps the shield up (but strikes with it)
+                float wk = w;
+                if (boneLower[k]) wk = wl;
+                else if (shield && boneLeft[k] && !bash) wk = 0;               // the shield arm keeps the shield up (but strikes with it)
                 outQ[k] = Quaternion.Slerp(outQ[k], Q[k], wk);
             }
             ro.x += (aro.x - ro.x) * wl; ro.z += (aro.z - ro.z) * wl; ro.y += yAbs ? (aro.y - ro.y) * wl : aro.y * wl;
@@ -773,14 +785,15 @@ namespace AsciiHero
         const int SITM_A = 10960, SITM_N = 2;
         const int SITF_A = 10962, SITF_N = 2;
         class IdleAct { public string kind, phase = "down"; public float t, w = 1, nextLook, look = -1, p = -1, g0, te; public bool o, wantUp; }
-        IdleAct idleA; readonly List<string> idleDue = new List<string>(); float idleClock, leapT = -1, idleW, footLift, idleLook, idleLookP, sitW;
+        IdleAct idleA; readonly List<string> idleDue = new List<string>(); float idleClock, idleNext, leapT = -1, idleW, footLift, idleLook, idleLookP, sitW;
+        static readonly float[] IDLE_AT = { 5, 10, 15, 90 }, IDLE_CHANCE = { 0.75f, 0.6f, 0.2f, 1 }; static readonly string[] IDLE_KIND = { "look", "shift", "wave", "sit" };
         /// 0..1: how far the hero is turned towards the camera (the game adds the turn to his facing)
         public float idleYawW;
         static float Smoother(float x) { x = Mathf.Clamp01(x); return x * x * x * (x * (x * 6 - 15) + 10); }
         /// any input or a hit: idle actions stop (sitting: he gets up first)
         public void PokeIdle()
         {
-            idleClock = 0; idleDue.Clear();
+            idleClock = 0; idleDue.Clear(); idleNext = 0;
             if (idleA == null) return;
             if (idleA.kind == "sit")
             {   // still going down: he finishes sitting and then gets up (one movement is never cut off by the next)
@@ -807,8 +820,13 @@ namespace AsciiHero
             bool busy = vel > 0.08f || Attacking || guard > 0.05f || combatT > 0 || !limbs[3] || !limbs[4] || !loopMode;
             if (busy && !IdleBusy) PokeIdle();
             float T0 = idleClock; idleClock += dt;
-            float[] at = { 5, 10, 15, 20 }, chance = { 0.75f, 0.6f, 0.2f, 1 }; string[] kinds = { "look", "shift", "wave", "sit" };
-            for (int k = 0; k < 4; k++) if (T0 < at[k] && idleClock >= at[k] && UnityEngine.Random.value < chance[k]) idleDue.Add(kinds[k]);
+            // (he sits down only after a minute and a half; until then he looks round or shifts his weight now and then)
+            for (int k = 0; k < 4; k++) if (T0 < IDLE_AT[k] && idleClock >= IDLE_AT[k] && UnityEngine.Random.value < IDLE_CHANCE[k]) idleDue.Add(IDLE_KIND[k]);
+            if (idleClock > IDLE_AT[2] && idleClock < IDLE_AT[3] - 8 && idleA == null && idleDue.Count == 0)
+            {
+                if (idleNext <= 0) idleNext = idleClock + 12 + 8 * UnityEngine.Random.value;
+                else if (idleClock >= idleNext) { idleDue.Add(UnityEngine.Random.value < 0.7f ? "look" : "shift"); idleNext = 0; }
+            }
             if (idleA == null && idleDue.Count > 0) { idleA = new IdleAct { kind = idleDue[0], nextLook = 4 + UnityEngine.Random.value * 3 }; idleDue.RemoveAt(0); }
             idleYawW = 0; idleLook = 0; idleLookP = 0; footLift = 0; idleW = 0; sitW = 0;
             var I = idleA;

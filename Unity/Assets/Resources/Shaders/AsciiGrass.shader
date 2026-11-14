@@ -21,6 +21,7 @@ Shader "AsciiHero/Grass"
             TEXTURE2D(_AsciiAtlas); SAMPLER(sampler_AsciiAtlas);
             TEXTURE2D(_AsciiLitTex); SAMPLER(sampler_AsciiLitTex);
             TEXTURE2D(_AsciiNDTex); SAMPLER(sampler_AsciiNDTex);
+            SAMPLER(ascii_point_clamp_sampler); float _AsciiDepthLit;
             float _AsciiRows, _AsciiExposure, _AsciiLinear, _AsciiDepthRef, _AsciiTime;
             float4 _AsciiPush[4];      // points of the body that press the grass: xyz, radius (0 = none)
             float _AsciiGrassThin;     // settings: the share of blades that is not drawn (0 = all)
@@ -83,8 +84,8 @@ Shader "AsciiHero/Grass"
                 float4 bclip = TransformWorldToHClip(a);
                 float4 sp = ComputeScreenPos(bclip);
                 float2 suv = sp.xy / sp.w;
-                float4 nd = SAMPLE_TEXTURE2D_LOD(_AsciiNDTex, sampler_AsciiNDTex, suv, 0);
-                float sceneZ = nd.b > 1e-4 ? nd.b * 12.0 : 1e5;
+                float dz = _AsciiDepthLit > 0.5 ? abs(SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, ascii_point_clamp_sampler, suv, 0).a) : SAMPLE_TEXTURE2D_LOD(_AsciiNDTex, sampler_AsciiNDTex, suv, 0).b;
+                float sceneZ = dz > 1e-4 ? dz * 12.0 : 1e5;
                 float myZ = -pVS.z;
                 bool vis = myZ <= sceneZ + 0.3 && all(suv >= 0.0) && all(suv <= 1.0) && frac(s * 7.31) >= _AsciiGrassThin;
                 float lv = TransformWorldToViewDir(float3(lean.x, 0, lean.y), false).x;

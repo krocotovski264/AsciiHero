@@ -43,8 +43,9 @@ namespace AsciiHero
                 if (src == null) continue;
                 var gm = GlyphMaterial(mat.GetFloat("_AsciiRow"), mat.GetVector("_GlyphCell"), mat.GetFloat("_AsciiActor"), mat.HasProperty("_GlyphSmoke") ? mat.GetFloat("_GlyphSmoke") : 0, mat.HasProperty("_Cloth") ? mat.GetFloat("_Cloth") : 0);
                 if (gm == null) return made;
-                var mesh = Sample(src, mat.GetVector("_GlyphCell"), smr != null, limbOfBone);
+                int[] cum; var mesh = Sample(src, mat.GetVector("_GlyphCell"), smr != null, limbOfBone, out cum);
                 if (mesh == null) continue;
+                bool actorMesh = mat.GetFloat("_AsciiActor") > 0.5f;
                 var go = new GameObject("Glyphs"); go.layer = LAYER;
                 if (smr != null)
                 {
@@ -55,7 +56,7 @@ namespace AsciiHero
                     g.sharedMesh = mesh; g.bones = smr.bones; g.rootBone = smr.rootBone; g.sharedMaterial = gm;
                     g.updateWhenOffscreen = true;
                     g.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; g.receiveShadows = false;
-                    made.Add(g); pairs[r] = g;
+                    made.Add(g); pairs[r] = g; if (actorMesh) Register(g, mesh, cum);
                     // keep the pair together (visibility, destruction)
                     new GameObject("Glyphs").transform.SetParent(r.transform, false);
                 }
@@ -63,7 +64,7 @@ namespace AsciiHero
                 {
                     go.transform.SetParent(r.transform, false);
                     go.AddComponent<MeshFilter>().sharedMesh = mesh;
-                    var g = go.AddComponent<MeshRenderer>(); g.sharedMaterial = gm; pairs[r] = g;
+                    var g = go.AddComponent<MeshRenderer>(); g.sharedMaterial = gm; pairs[r] = g; if (actorMesh) Register(g, mesh, cum);
                     g.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; g.receiveShadows = false;
                 }
             }
@@ -71,6 +72,63 @@ namespace AsciiHero
         }
 
         /// grass blades: one glyph quad per point (positions in the parent's local space)
+        // ---------- characters: even thinning by distance ----------
+        class LodEntry { public Renderer r; public Mesh m; public int[] cum; public Bounds b; }
+        static readonly List<LodEntry> LODS = new List<LodEntry>();
+        /// 0 = every glyph, 1 = every second (checkerboard), 2 = every fourth
+        public static int actorLod; public static int actorGlyphs, actorGlyphsDrawn;
+        static void Register(Renderer r, Mesh m, int[] cum)
+        {
+            if (cum == null || cum[2] < 48) return;                 // small pieces keep every glyph
+            var e = new LodEntry { r = r, m = m, cum = cum, b = m.bounds }; LODS.Add(e); Apply(e);
+            if (LODS.Count > 64) LODS.RemoveAll(x => x.r == null);
+        }
+        static void Apply(LodEntry e)
+        {
+            int n = actorLod >= 2 ? e.cum[0] : actorLod == 1 ? e.cum[1] : e.cum[2];
+            var d = new UnityEngine.Rendering.SubMeshDescriptor(0, n * 6) { bounds = e.b, firstVertex = 0, vertexCount = e.m.vertexCount };
+            e.m.SetSubMesh(0, d, UnityEngine.Rendering.MeshUpdateFlags.DontRecalculateBounds);
+        }
+        /// the size the characters' glyphs are drawn at must follow: Shader global _AsciiActorLod = 1, 1.41, 2
+        public static void SetActorLod(int level)
+        {
+            level = Mathf.Clamp(level, 0, 2);
+            LODS.RemoveAll(x => x.r == null || x.m == null);
+            if (level != actorLod) { actorLod = level; foreach (var e in LODS) Apply(e); }
+            Shader.SetGlobalFloat("_AsciiActorLod", level == 2 ? 2f : level == 1 ? 1.4142f : 1f);
+            actorGlyphs = 0; actorGlyphsDrawn = 0;
+            foreach (var e in LODS) { actorGlyphs += e.cum[2]; actorGlyphsDrawn += level >= 2 ? e.cum[0] : level == 1 ? e.cum[1] : e.cum[2]; }
+        }
+
+        // ---------- fire ----------
+        /// a fire of rising characters (AsciiHero/Fire): n particles born in an ellipse rx x rz at pos (parent space)
+        public static GameObject MakeFire(Transform parent, Vector3 pos, float rx, float rz, float height, float glyph, int n, float speed = 1f)
+        {
+            var sh = Shader.Find("AsciiHero/Fire"); if (sh == null) { Debug.LogError("AsciiHero/Fire shader not found"); return null; }
+            var verts = new List<Vector3>(n * 4); var corners = new List<Vector2>(n * 4); var seeds = new List<Vector2>(n * 4); var tris = new List<int>(n * 6);
+            Vector2[] C = { new Vector2(-0.5f, -0.5f), new Vector2(0.5f, -0.5f), new Vector2(0.5f, 0.5f), new Vector2(-0.5f, 0.5f) };
+            for (int i = 0; i < n; i++)
+            {
+                float a = Halton(i, 2) * Mathf.PI * 2, rr = Mathf.Pow(Halton(i, 3), 0.7f);
+                var p = new Vector3(Mathf.Cos(a) * rr * rx, 0, Mathf.Sin(a) * rr * rz);
+                // taller in the middle of the bed, lower at its edge
+                var sd = new Vector2(Halton(i, 5), Mathf.Clamp01((1 - rr * 0.6f) * (0.55f + 0.45f * Halton(i, 7))));
+                int o = verts.Count;
+                for (int k = 0; k < 4; k++) { verts.Add(p); corners.Add(C[k]); seeds.Add(sd); }
+                tris.Add(o); tris.Add(o + 2); tris.Add(o + 1); tris.Add(o); tris.Add(o + 3); tris.Add(o + 2);
+            }
+            var m = new Mesh { name = "fire" };
+            m.SetVertices(verts); m.SetUVs(0, corners); m.SetUVs(1, seeds); m.SetTriangles(tris, 0);
+            m.bounds = new Bounds(new Vector3(0, height, 0), new Vector3(rx * 2 + height * 2 + 1, height * 5 + 1, rz * 2 + height * 2 + 1));
+            var go = new GameObject("Fire"); go.layer = LAYER; go.transform.SetParent(parent, false); go.transform.localPosition = pos;
+            go.AddComponent<MeshFilter>().sharedMesh = m;
+            var mat = new Material(sh); mat.SetVector("_FireSize", new Vector4(height, glyph, speed, 0));
+            var r = go.AddComponent<MeshRenderer>(); r.sharedMaterial = mat;
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; r.receiveShadows = false;
+            count += n;
+            return go;
+        }
+
         public static GameObject MakeGrass(List<Vector3> pts, List<float> seedList, Transform parent)
         {
             var sh = Shader.Find("AsciiHero/Grass"); if (sh == null) { Debug.LogError("AsciiHero/Grass shader not found"); return null; }
@@ -94,8 +152,9 @@ namespace AsciiHero
         }
 
         // rows of points: one per glyph cell centre of the surface coordinates
-        static Mesh Sample(Mesh src, Vector4 cell, bool skinned, int[] limbOfBone)
+        static Mesh Sample(Mesh src, Vector4 cell, bool skinned, int[] limbOfBone, out int[] cum)
         {
+            cum = null;
             var P = src.vertices; var N = src.normals; var U = new List<Vector2>(); src.GetUVs(1, U);
             if (U.Count != P.Length || N == null || N.Length != P.Length) return null;
             var BW = skinned ? src.boneWeights : null;
@@ -103,7 +162,7 @@ namespace AsciiHero
             float cw = cell.x, ch = cell.y;
             var verts = new List<Vector3>(); var nors = new List<Vector3>(); var corners = new List<Vector2>(); var seeds = new List<Vector2>();
             var bws = new List<BoneWeight>(); var tris = new List<int>();
-            var acc = new Dictionary<int, float>();
+            var acc = new Dictionary<int, float>(); var ranks = new List<byte>();
             Vector2[] CORNER = { new Vector2(-0.5f, -0.5f), new Vector2(0.5f, -0.5f), new Vector2(0.5f, 0.5f), new Vector2(-0.5f, 0.5f) };
             for (int t = 0; t < T.Length; t += 3)
             {
@@ -119,7 +178,7 @@ namespace AsciiHero
                     for (int q = 0; q < kk; q++)
                     {
                         float r1 = Halton(t * 7 + q, 2), r2 = Halton(t * 7 + q, 3); if (r1 + r2 > 1) { r1 = 1 - r1; r2 = 1 - r2; }
-                        Emit(1 - r1 - r2, r1, r2, t * 31 + q, q);
+                        int r4 = (t / 3 + q) & 3; Emit(1 - r1 - r2, r1, r2, t * 31 + q, q, r4 == 0 ? 0 : r4 == 2 ? 1 : 2);
                     }
                     continue;
                 }
@@ -133,11 +192,12 @@ namespace AsciiHero
                         float wc = ((b.x - a.x) * (v - a.y) - (u - a.x) * (b.y - a.y)) / det;
                         float wa = 1 - wb - wc;
                         if (wa < 0 || wb < 0 || wc < 0 || (wb == 0 && wc == 0)) continue;
-                        Emit(wa, wb, wc, i, j);
+                        Emit(wa, wb, wc, i, j, ((i & 1) == 0 && (j & 1) == 0) ? 0 : (((i + j) & 1) == 0 ? 1 : 2));
                     }
 
-                void Emit(float wa, float wb, float wc, int i, int j)
+                void Emit(float wa, float wb, float wc, int i, int j, int rank)
                 {
+                        ranks.Add((byte)rank);
                         Vector3 p = P[ia] * wa + P[ib] * wb + P[ic] * wc;
                         Vector3 n = (N[ia] * wa + N[ib] * wb + N[ic] * wc).normalized;
                         float seed = Mathf.Abs(Mathf.Sin(i * 12.9898f + j * 78.233f) * 43758.5453f) % 1f;
@@ -158,7 +218,27 @@ namespace AsciiHero
                         tris.Add(o); tris.Add(o + 2); tris.Add(o + 1); tris.Add(o); tris.Add(o + 3); tris.Add(o + 2);
                 }
             }
+            cum = null;
             if (verts.Count == 0) return null;
+            // The glyphs are ordered by rank: first every fourth one of the surface grid (both cell indices even), then
+            // the rest of the checkerboard, then the others. Drawing only the first part of the index buffer thins a
+            // character evenly - no random holes - when it is small on the screen (SetActorLod).
+            {
+                int n = ranks.Count; var order = new int[n]; var c3 = new int[3];
+                for (int g = 0; g < n; g++) c3[ranks[g]]++;
+                int[] at = { 0, c3[0], c3[0] + c3[1] };
+                for (int g = 0; g < n; g++) order[at[ranks[g]]++] = g;
+                var v2 = new List<Vector3>(n * 4); var n2 = new List<Vector3>(n * 4); var cr2 = new List<Vector2>(n * 4); var sd2 = new List<Vector2>(n * 4);
+                var bw2 = new List<BoneWeight>(skinned ? n * 4 : 0);
+                for (int g = 0; g < n; g++)
+                    for (int kq = 0; kq < 4; kq++)
+                    {
+                        int o = order[g] * 4 + kq;
+                        v2.Add(verts[o]); n2.Add(nors[o]); cr2.Add(corners[o]); sd2.Add(seeds[o]); if (skinned) bw2.Add(bws[o]);
+                    }
+                verts = v2; nors = n2; corners = cr2; seeds = sd2; bws = bw2;
+                cum = new[] { c3[0], c3[0] + c3[1], n };
+            }
             var m = new Mesh { name = src.name + " glyphs" };
             m.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
             m.SetVertices(verts); m.SetNormals(nors); m.SetUVs(0, corners); m.SetUVs(1, seeds); m.SetTriangles(tris, 0);

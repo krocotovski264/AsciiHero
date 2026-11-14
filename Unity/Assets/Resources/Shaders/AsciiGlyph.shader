@@ -38,6 +38,9 @@ Shader "AsciiHero/Glyph"
             TEXTURE2D(_AsciiAtlas); SAMPLER(sampler_AsciiAtlas);
             TEXTURE2D(_AsciiLitTex); SAMPLER(sampler_AsciiLitTex);
             TEXTURE2D(_AsciiNDTex); SAMPLER(sampler_AsciiNDTex);
+            SAMPLER(ascii_point_clamp_sampler);
+            float _AsciiDepthLit;   // 1: the scene depth is in the alpha of the lit colour (no ND camera)
+            float _AsciiActorLod;   // characters: 1 = every glyph, 1.41 = every second (checkerboard), 2 = every fourth; the glyphs grow to match
             float _AsciiRows, _AsciiExposure, _AsciiLinear, _AsciiDepthRef;
             float4 _DashShift;   // per renderer (world): during the dash the armour pieces lag behind the body
                 float4 _DashSpin;    // per renderer: xyz = axis, w = angle; the piece tumbles about _DashPivot while it flies
@@ -168,7 +171,7 @@ Shader "AsciiHero/Glyph"
                     }
                 }
                 float lod = max(1.0, _AsciiLod);
-                bool lodKeep = lod < 1.01 || _AsciiActor > 0.5 || frac(i.seed.x * 31.7 + 0.37) < 1.7 / (lod * lod);     // (characters keep every glyph: no bald patches)
+                bool lodKeep = lod < 1.01 || _AsciiActor > 0.5 || frac(i.seed.x * 31.7 + 0.37) < 1.7 / (lod * lod);     // (characters are thinned evenly on the CPU, see GlyphLayer.SetActorLod: no bald patches)
                 if (_GlyphSmoke > 0.5) pWS.y += (0.15 + 0.4 * wisp) * ph * ph;
                 if (_GlyphSmoke > 0.5 && _GlyphPuff <= 0.0) pWS -= _AsciiHeroVel.xyz * (0.05 + 0.2 * wisp) * ph * ph;
                 if (_GlyphPuff > 0.0) pWS.y += _GlyphPuff * _GlyphPuff * (0.15 + 0.5 * frac(i.seed.x * 5.3));
@@ -182,8 +185,8 @@ Shader "AsciiHero/Glyph"
                 float4 clip = TransformWViewToHClip(pVS);
                 float4 sp = ComputeScreenPos(clip);
                 float2 suv = sp.xy / sp.w;
-                float4 nd = SAMPLE_TEXTURE2D_LOD(_AsciiNDTex, sampler_AsciiNDTex, suv, 0);
-                float sceneZ = nd.b > 1e-4 ? nd.b * 12.0 : 1e5;
+                float dz = _AsciiDepthLit > 0.5 ? abs(SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, ascii_point_clamp_sampler, suv, 0).a) : SAMPLE_TEXTURE2D_LOD(_AsciiNDTex, sampler_AsciiNDTex, suv, 0).b;
+                float sceneZ = dz > 1e-4 ? dz * 12.0 : 1e5;
                 float myZ = -pVS.z;
                 bool inside = all(suv >= 0.0) && all(suv <= 1.0);
                 bool vis = (scat || smkA > 0.03) ? (lodKeep && !gone && inside) : lodKeep && !gone && ember < 0.999 && dot(nVS, toCam) > -0.05 - ember - _GlyphPuff * 4.0 - (_DashSpin.w != 0.0 ? 4.0 : 0.0) && myZ <= sceneZ + 0.008 + 0.0035 * myZ && inside;
@@ -211,7 +214,7 @@ Shader "AsciiHero/Glyph"
                 if (ember > 0.0) { o.col = lerp(o.col, float3(1.6, 0.62, 0.12), min(1.0, ember * 2.0)) * (1.0 - ember * ember); gi = floor(lerp(gi, 2.0, ember)); }
                 o.gi = gi;
                 o.local = i.corner + 0.5;
-                pVS.xy += i.corner * _GlyphCell.xy * GLYPH_SCALE * (_AsciiActor > 0.5 ? 1.18 * (1.0 + 0.25 * (lod - 1.0)) : lod);   // upright character in the view plane; on characters dense and overlapping so no gaps show
+                pVS.xy += i.corner * _GlyphCell.xy * GLYPH_SCALE * (_AsciiActor > 0.5 ? 1.18 * max(1.0, _AsciiActorLod) : lod);   // upright character in the view plane; on characters dense and overlapping so no gaps show
                 o.positionCS = vis ? TransformWViewToHClip(pVS) : float4(2, 2, 2, 1);
                 return o;
             }

@@ -89,6 +89,7 @@ namespace AsciiHero
                 bool big = kv.Key == "FLOOR" || kv.Key == "PLASTER" || kv.Key == "PLANK" || kv.Key == "HEARTH" || kv.Key == "STONE" || kv.Key == "BEAM";
                 m.SetFloat("_GlyphSmoke", kv.Key == "SHADOW" ? 1 : 0);
                 m.SetFloat("_Cloth", actor && (kv.Key == "ROBE" || kv.Key == "ROBED") ? 1 : kv.Key == "LEAF" ? 2 : 0);      // 2: leaves, swaying in the wind
+                m.SetFloat("_AsciiFlat", kv.Key == "GROUND" || kv.Key == "FLOOR" ? 1 : 0);        // floors and walls get no outline
                 if (kv.Key == "GROUND") m.SetVector("_GlyphCell", new Vector4(0.11f, 0.18f, 0, 0)); else
                 m.SetVector("_GlyphCell", actor ? new Vector4(0.0135f, 0.0222f, 0, 0) : big ? new Vector4(0.06f, 0.1f, 0, 0) : new Vector4(0.034f, 0.056f, 0, 0));
                 map[kv.Key] = m;

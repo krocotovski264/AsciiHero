@@ -560,7 +560,7 @@ function idleUpdate(A, dt) {
   const busy = (A.vel || 0) > 0.08 || (A.atk && A.atk.t < A.atk.dur) || (A.guard || 0) > 0.05 || (A.combatT || 0) > 0 || !A.limbs.legL || !A.limbs.legR;
   if (busy && !idleBusy(A)) pokeIdle(A);
   const T0 = A.idleT || 0; A.idleT = T0 + dt; A.idleDue = A.idleDue || [];
-  for (const [at, kind, ch] of [[5, 'look', 0.75], [10, 'shift', 0.6], [15, 'wave', 0.2], [20, 'sit', 1]]) if (T0 < at && A.idleT >= at && Math.random() < ch) A.idleDue.push(kind);
+  for (const [at, kind, ch] of [[5, 'look', 0.75], [10, 'shift', 0.6], [15, 'wave', 0.2], [90, 'sit', 1]]) if (T0 < at && A.idleT >= at && Math.random() < ch) A.idleDue.push(kind);
   if (!A.idle && A.idleDue.length) { const kind = A.idleDue.shift(); A.idle = { kind, t: 0, w: 0, phase: 'down', nextLook: 4 + Math.random() * 3, look: -1 }; }
   const I = A.idle; A.idleYawW = 0; A.idleLook = 0; A.idleLookP = 0; A.footLift = 0; A.idleClips = []; A.sitW = 0;
   if (I) {

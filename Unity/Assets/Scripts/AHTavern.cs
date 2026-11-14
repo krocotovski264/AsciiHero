@@ -197,6 +197,9 @@ namespace AsciiHero
             var stoneM = mats.WithTexture("HEARTH", stoneTex, new Vector2(2, 2));
             var floorM = mats.WithTexture("FLOOR", planksTex, new Vector2(3, 3)); floorM.SetColor("_Color", Mats.Hex(0x8a7864));
             Material m(string k) { return mats[k]; }
+            floorM.SetFloat("_AsciiFlat", 1);
+            // the walls' own plaster and beams (flagged: walls and floors get no outline)
+            var wallP = new Material(m("PLASTER")); wallP.SetFloat("_AsciiFlat", 1); var wallB = new Material(m("BEAM")); wallB.SetFloat("_AsciiFlat", 1);
 
             const float RX = 5, RZ = 4, RH = 3.2f;
             M(FlatQuad(RX * 2, RZ * 2), floorM, 0, 0, 0, 0, 0, 0, false);
@@ -215,25 +218,25 @@ namespace AsciiHero
                 cur = W.tall.transform;
                 if (horiz)
                 {
-                    B(RX * 2 + 0.5f, RH, 0.25f, m("PLASTER"), 0, 0, c);
-                    foreach (float x in new[] { -5f, -2.5f, 0f, 2.5f, 5f }) B(0.22f, RH, 0.12f, m("BEAM"), x, 0, c - sg * 0.15f);
-                    B(RX * 2, 0.2f, 0.14f, m("BEAM"), 0, 2.3f, c - sg * 0.15f); B(RX * 2, 0.18f, 0.14f, m("BEAM"), 0, 0, c - sg * 0.15f);
+                    B(RX * 2 + 0.5f, RH, 0.25f, wallP, 0, 0, c);
+                    foreach (float x in new[] { -5f, -2.5f, 0f, 2.5f, 5f }) B(0.22f, RH, 0.12f, wallB, x, 0, c - sg * 0.15f);
+                    B(RX * 2, 0.2f, 0.14f, wallB, 0, 2.3f, c - sg * 0.15f); B(RX * 2, 0.18f, 0.14f, wallB, 0, 0, c - sg * 0.15f);
                 }
                 else
                 {
-                    B(0.25f, RH, RZ * 2 + 0.5f, m("PLASTER"), c, 0, 0);
-                    foreach (float z in new[] { -4f, -1.5f, 1.5f, 4f }) B(0.12f, RH, 0.22f, m("BEAM"), c - sg * 0.15f, 0, z);
-                    B(0.14f, 0.2f, RZ * 2, m("BEAM"), c - sg * 0.15f, 2.3f, 0);
+                    B(0.25f, RH, RZ * 2 + 0.5f, wallP, c, 0, 0);
+                    foreach (float z in new[] { -4f, -1.5f, 1.5f, 4f }) B(0.12f, RH, 0.22f, wallB, c - sg * 0.15f, 0, z);
+                    B(0.14f, 0.2f, RZ * 2, wallB, c - sg * 0.15f, 2.3f, 0);
                 }
                 cur = W.low.transform;
-                if (horiz) { B(RX * 2 + 0.5f, 0.42f, 0.25f, m("PLASTER"), 0, 0, c); B(RX * 2 + 0.5f, 0.08f, 0.32f, m("BEAM"), 0, 0.42f, c); }
-                else { B(0.25f, 0.42f, RZ * 2 + 0.5f, m("PLASTER"), c, 0, 0); B(0.32f, 0.08f, RZ * 2 + 0.5f, m("BEAM"), c, 0.42f, 0); }
+                if (horiz) { B(RX * 2 + 0.5f, 0.42f, 0.25f, wallP, 0, 0, c); B(RX * 2 + 0.5f, 0.08f, 0.32f, wallB, 0, 0.42f, c); }
+                else { B(0.25f, 0.42f, RZ * 2 + 0.5f, wallP, c, 0, 0); B(0.32f, 0.08f, RZ * 2 + 0.5f, wallB, c, 0.42f, 0); }
                 cur = root.transform;
             }
             WallSet(WN, true, -RZ - 0.125f); WallSet(WS, true, RZ + 0.125f);
             WallSet(WW, false, -RX - 0.125f); WallSet(WE, false, RX + 0.125f);
             cur = WN.tall.transform;
-            foreach (float x in new[] { -2.5f, 0f, 2.5f }) M(MeshGen.Box(0.1f, 0.1f, 1.8f), m("BEAM"), x - 0.6f, 1.3f, -RZ + 0.05f, 0, 0, 0.7f);
+            foreach (float x in new[] { -2.5f, 0f, 2.5f }) M(MeshGen.Box(0.1f, 0.1f, 1.8f), wallB, x - 0.6f, 1.3f, -RZ + 0.05f, 0, 0, 0.7f);
 
             // windows (moonlight)
             foreach (float x in new[] { -1.25f, 3.75f })
@@ -311,11 +314,8 @@ namespace AsciiHero
             B(0.9f, 0.08f, 2.0f, stoneM, fx + 0.1f, 0, fz);
             BoxCol(fx, fz, 0.95f, 2.4f);
             for (int k = 0; k < 3; k++) M(MeshGen.Cylinder(0.07f, 0.07f, 0.75f, 8), m("WOOD"), fx - 0.05f, 0.16f + (k == 2 ? 0.11f : 0), fz + (k - 1) * 0.12f, Mathf.PI / 2, (k - 1) * 0.4f, 0);
-            for (int k = 0; k < 7; k++)
-            {
-                var f = M(MeshGen.Cylinder(0.09f + (k % 3) * 0.03f, 0, 0.45f + (k % 2) * 0.2f, 6), m("FIRE"), fx - 0.03f + ((k * 7) % 3 - 1) * 0.06f, 0.45f, fz + (k - 3) * 0.1f, 0, 0, 0, false);
-                flames.Add(new Flame { t = f.transform, basePos = f.transform.localPosition, k = k });
-            }
+            // the fire: characters rising from the logs and fading out (AsciiHero/Fire)
+            GlyphLayer.MakeFire(cur, MX(fx - 0.04f, 0.2f, fz), 0.11f, 0.36f, 0.95f, 0.085f, 300);
             PointLight(Mats.Hex(0xff8a30), 3.2f, 8, fx + 0.6f, 0.8f, fz, 0);
             cur = WW.tall.transform;
             foreach (float s in new[] { -1f, 1f })
@@ -348,8 +348,7 @@ namespace AsciiHero
                 Mug(x + 0.2f, 0.79f, z - 0.1f); Mug(x - 0.25f, 0.79f, z + 0.15f);
                 C(0.13f, 0.11f, 0.015f, m("PLASTER"), x + 0.05f, 0.79f, z + 0.25f, 16);
                 C(0.03f, 0.03f, 0.14f, m("LINEN"), x - 0.05f, 0.79f, z - 0.25f, 8);
-                var fl = M(MeshGen.Cylinder(0.018f, 0, 0.05f, 6), m("FIRE"), x - 0.05f, 0.96f, z - 0.25f, 0, 0, 0, false);
-                flames.Add(new Flame { t = fl.transform, basePos = fl.transform.localPosition, k = 10 + ti });
+                GlyphLayer.MakeFire(cur, MX(x - 0.05f, 0.935f, z - 0.25f), 0.006f, 0.006f, 0.11f, 0.034f, 12, 0.8f);      // the candle's flame
                 PointLight(Mats.Hex(0xffb060), 0.9f, 2.2f, x - 0.05f, 1.05f, z - 0.25f, 1);
             }
 
@@ -366,7 +365,7 @@ namespace AsciiHero
             foreach (var p in new[] { new Vector2(-0.8f, 0.0f), new Vector2(2.2f, -0.4f), new Vector2(-2.6f, 2.6f) })
             {
                 C(0.008f, 0.008f, 0.8f, m("STEEL"), p.x, 2.4f, p.y, 4, false);
-                B(0.16f, 0.22f, 0.16f, m("FIRE"), p.x, 2.18f, p.y, 0, 0, 0, false);
+                GlyphLayer.MakeFire(cur, MX(p.x, 2.19f, p.y), 0.04f, 0.04f, 0.2f, 0.05f, 28, 0.8f);                       // the lantern's flame
                 B(0.2f, 0.03f, 0.2f, m("STEEL"), p.x, 2.4f, p.y, 0, 0, 0, false); B(0.2f, 0.03f, 0.2f, m("STEEL"), p.x, 2.15f, p.y, 0, 0, 0, false);
                 PointLight(Mats.Hex(0xffa850), 1.6f, 4.5f, p.x, 2.1f, p.y, 2);
             }

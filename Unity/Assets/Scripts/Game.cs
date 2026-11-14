@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.34 · Unity";
+        public const string VERSION = "beta 0.35 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -54,6 +54,27 @@ namespace AsciiHero
         // body customisation UI
         Rect bodyList; readonly List<Rect> bodyTracks = new List<Rect>(); readonly List<int> bodyTrackIx = new List<int>(); Rect bodyTrackHit;
         float bodyScroll, bodyScrollMax, bodyBuiltAt; bool bodyDirty, setDev, presetOpen; int presetIx = 2; readonly string[] devText = new string[64]; readonly string[] devShown = new string[64];
+        readonly List<Rect> bodyFields = new List<Rect>(); TouchScreenKeyboard kb; int kbIx = -1;
+        bool InField(Vector2 p) { foreach (var r in bodyFields) if (r.Contains(p)) return true; return false; }
+        void OpenKeyboard(int ix)
+        {
+            if (!TouchScreenKeyboard.isSupported) { ShowToast("Ввод чисел работает на телефоне (экранная клавиатура)"); return; }
+            float raw = ix == 0 ? cfg.height : cfg.body[ix];
+            kb = TouchScreenKeyboard.Open(raw.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture), TouchScreenKeyboardType.NumbersAndPunctuation, false, false, false, false, Body.ALL[ix].label);
+            kbIx = ix;
+        }
+        void KeyboardUpdate()
+        {
+            if (kb == null) return;
+            if (kb.status == TouchScreenKeyboard.Status.Done)
+            {
+                float fv;
+                if (kbIx >= 0 && float.TryParse((kb.text ?? "").Replace(',', '.'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out fv))
+                    SetBodyValue(kbIx, Mathf.Clamp(fv, Body.DevMin(kbIx), Body.DevMax(kbIx)));
+                kb = null;
+            }
+            else if (kb.status == TouchScreenKeyboard.Status.Canceled || kb.status == TouchScreenKeyboard.Status.LostFocus) kb = null;
+        }
         void SetBodyValue(int ix, float val)
         {
             if (ix == 0) { SetHeight(val); return; }
@@ -84,6 +105,8 @@ namespace AsciiHero
         OrbitCam cam = CAM0;
         bool autoRotate = true, interacting; float vel, lastInteract, lastTap = -1;
         float pinchD0, pinchDist0, pinchMy0, pinchTy0; bool pinching;
+        // world view: two fingers (or the wheel) zoom in up to twice as close
+        float worldZoom = 1, worldZoomT = 1, wPinchD0, wPinchZ0; bool wPinching; readonly List<Pointer> camPtrs = new List<Pointer>();
 
         // world camera
         // MOBA camera: fixed (no rotation), high and far, looking down at about 55 degrees
@@ -237,7 +260,7 @@ namespace AsciiHero
             for (int a = 0; a < 12; a++) { float t = a / 12f * Mathf.PI * 2; c.Line(cx + Mathf.Cos(t) * R * 0.2f, cx + Mathf.Sin(t) * R * 0.2f, cx + Mathf.Cos(t) * R * 0.33f, cx + Mathf.Sin(t) * R * 0.33f, 3, line); }
             for (int a = 0; a < 6; a++) { float t = a / 6f * Mathf.PI * 2 + 0.3f; c.Line(cx, cx, cx + Mathf.Cos(t) * R * 0.2f, cx + Mathf.Sin(t) * R * 0.2f, 3, line); }
             c.Ring(cx, cx, rp - 3, 5, Canvas2D.RGB(0x8a, 0x7c, 0x60));
-            var fm = mats.WithTexture("STONE", c.Texture(false), Vector2.one);
+            var fm = mats.WithTexture("STONE", c.Texture(false), Vector2.one); fm.SetFloat("_AsciiFlat", 1);
             floor = MeshGen.Obj(DiscMesh(2.6f, 64), fm, editorRoot.transform, Vector3.zero, Quaternion.identity, false, "Floor");
             GlyphLayer.Build(floor);
         }
@@ -693,7 +716,7 @@ namespace AsciiHero
 
         // ---------- main menu and settings ----------
         bool inMenu = true; int menuPage;   // 0 main, 1 settings, 2 developers
-        int setQuality, setGrass, setRes, setFps, setMusic, setSound; bool setBloom, setShowFps;
+        int setQuality, setGrass, setRes, setFps, setMusic, setSound; bool setBloom, setShowFps, setOutline = true;
         static readonly string[] QUALITY = { "Низкое", "Среднее", "Высокое" };
         static readonly int[] GRASS = { 0, 25, 50, 75, 100 }, RES = { 50, 67, 75, 85, 100 }, FPS = { 30, 60, 90, 120 };
         static readonly string[] DEVELOPERS = { "krocotovski264", "Тёма — программист" };
@@ -702,7 +725,7 @@ namespace AsciiHero
             bool phone = Application.isMobilePlatform;
             setQuality = PlayerPrefs.GetInt("set_quality", phone ? 1 : 2); setGrass = PlayerPrefs.GetInt("set_grass", 4); setRes = PlayerPrefs.GetInt("set_res", 4);
             setFps = PlayerPrefs.GetInt("set_fps", 1); setBloom = PlayerPrefs.GetInt("set_bloom", 1) == 1; setShowFps = PlayerPrefs.GetInt("set_showfps", 0) == 1;
-            setMusic = PlayerPrefs.GetInt("set_music", 70); setSound = PlayerPrefs.GetInt("set_sound", 80); setDev = PlayerPrefs.GetInt("set_dev", 0) == 1;
+            setMusic = PlayerPrefs.GetInt("set_music", 70); setSound = PlayerPrefs.GetInt("set_sound", 80); setDev = PlayerPrefs.GetInt("set_dev", 0) == 1; setOutline = PlayerPrefs.GetInt("set_outline", 1) == 1;
         }
         void ApplySettings(bool save = true)
         {
@@ -712,11 +735,11 @@ namespace AsciiHero
             {
                 PlayerPrefs.SetInt("set_quality", setQuality); PlayerPrefs.SetInt("set_grass", setGrass); PlayerPrefs.SetInt("set_res", setRes); PlayerPrefs.SetInt("set_fps", setFps);
                 PlayerPrefs.SetInt("set_bloom", setBloom ? 1 : 0); PlayerPrefs.SetInt("set_showfps", setShowFps ? 1 : 0);
-                PlayerPrefs.SetInt("set_music", setMusic); PlayerPrefs.SetInt("set_sound", setSound); PlayerPrefs.SetInt("set_dev", setDev ? 1 : 0); PlayerPrefs.Save();
+                PlayerPrefs.SetInt("set_music", setMusic); PlayerPrefs.SetInt("set_sound", setSound); PlayerPrefs.SetInt("set_dev", setDev ? 1 : 0); PlayerPrefs.SetInt("set_outline", setOutline ? 1 : 0); PlayerPrefs.Save();
             }
             Application.targetFrameRate = FPS[setFps];
             Shader.SetGlobalFloat("_AsciiGrassThin", 1 - GRASS[setGrass] / 100f);
-            if (ascii != null) { ascii.bloom = setBloom ? 0.32f : 0f; ascii.fullLit = setQuality == 2; }
+            if (ascii != null) { ascii.bloom = setBloom ? 0.32f : 0f; ascii.fullLit = setQuality == 2; ascii.outline = setOutline; }
             shadowScale = setQuality == 0 ? 0f : setQuality == 1 ? 0.6f : 1f; SetShadowDistance(shadowBase);
             AudioListener.volume = setSound / 100f;      // (the game has no sounds or music yet: the levels are kept for them)
             // rendering resolution: a share of the display's own resolution (100 % = the most the device can show)
@@ -748,28 +771,103 @@ namespace AsciiHero
                 if (Button(new Rect(cx - 70 * k, bottom - 36 * k, 140 * k, 30 * k), "НАЗАД")) menuPage = 0;
                 return;
             }
+            y0 = top + 46 * k;
             GUI.Label(new Rect(x0, y0, pw, 22 * k), "НАСТРОЙКИ", sTitle);
-            float rh = 29 * k, y1 = y0 + 26 * k; int row = 0; bool changed = false;
+            if (Button(new Rect(x0 + pw - 100 * k, y0 - 3 * k, 100 * k, 24 * k), "НАЗАД")) menuPage = 0;
+            float rh = Mathf.Min(25 * k, (bottom - 34 * k - (y0 + 26 * k)) / 11f), y1 = y0 + 26 * k; int row = 0; bool changed = false;
             void Row(string name, string value, System.Action dec, System.Action inc)
             {
                 float yy = y1 + row * rh; row++;
-                GUI.Label(new Rect(x0, yy + 3 * k, 210 * k, rh), name, sBadge);
-                if (Button(new Rect(x0 + 220 * k, yy, 34 * k, rh - 4 * k), "<")) { dec(); changed = true; }
-                GUI.Label(new Rect(x0 + 258 * k, yy, 160 * k, rh - 4 * k), value, sBtn);
-                if (Button(new Rect(x0 + 422 * k, yy, 34 * k, rh - 4 * k), ">")) { inc(); changed = true; }
+                GUI.Label(new Rect(x0, yy + 2 * k, 210 * k, rh), name, sBadge);
+                if (Button(new Rect(x0 + 220 * k, yy, 34 * k, rh - 3 * k), "<")) { dec(); changed = true; }
+                GUI.Label(new Rect(x0 + 258 * k, yy, 160 * k, rh - 3 * k), value, sBtn);
+                if (Button(new Rect(x0 + 422 * k, yy, 34 * k, rh - 3 * k), ">")) { inc(); changed = true; }
             }
             Row("Качество изображения", QUALITY[setQuality], () => setQuality--, () => setQuality++);
             Row("Растительность", GRASS[setGrass] + " %", () => setGrass--, () => setGrass++);
             Row("Разрешение", RES[setRes] + " %" + (setRes == RES.Length - 1 ? " (макс.)" : ""), () => setRes--, () => setRes++);
             Row("Свечение", setBloom ? "вкл" : "выкл", () => setBloom = !setBloom, () => setBloom = !setBloom);
+            Row("Обводка предметов", setOutline ? "вкл" : "выкл", () => setOutline = !setOutline, () => setOutline = !setOutline);
             Row("Ограничение кадров", FPS[setFps] + " к/с", () => setFps--, () => setFps++);
-            Row("Показывать FPS", setShowFps ? "да" : "нет", () => setShowFps = !setShowFps, () => setShowFps = !setShowFps);
+            Row("Показывать FPS и время кадра", setShowFps ? "да" : "нет", () => setShowFps = !setShowFps, () => setShowFps = !setShowFps);
             Row("Громкость музыки", setMusic + " %", () => setMusic -= 10, () => setMusic += 10);
             Row("Громкость звуков", setSound + " %", () => setSound -= 10, () => setSound += 10);
             Row("Режим разработчика", setDev ? "вкл" : "выкл", () => setDev = !setDev, () => setDev = !setDev);
             if (changed) ApplySettings();
-            GUI.Label(new Rect(x0, y1 + row * rh + 2 * k, pw, 32 * k), "Звуков и музыки в игре пока нет — громкость сохранится на будущее.\nРежим разработчика: у параметров тела появляются поля для ввода чисел до ×50 за пределами ползунков", sSmall);
-            if (Button(new Rect(cx - 70 * k, bottom - 36 * k, 140 * k, 30 * k), "НАЗАД")) menuPage = 0;
+            if (Button(new Rect(x0, y1 + row * rh + 4 * k, pw, 26 * k), "ТЕСТ ПРОИЗВОДИТЕЛЬНОСТИ (около 45 с, результат — в логе)")) StartPerfTest();
+        }
+
+        // ---------- performance test ----------
+        // Runs on the device: the field with everything on, then one thing switched off at a time; for every stage the
+        // mean frame time (and, where the device reports them, the main-thread, render-thread and GPU times) goes to
+        // the log. What a stage saves is what that part of the frame costs.
+        static readonly string[] PERF = { "всё включено", "без травы", "без символов (только 3D-сцена)", "без героя", "без анимации и ткани", "без теней", "без свечения",
+            "без интерфейса", "без обводки", "с отдельной камерой глубины (как до 0.35)", "герой: все символы (как в 0.34)", "разрешение 67 %" };
+        bool perfRun, perfNoAnim, perfNoGui, perfFullActors; int perfIx; float perfT, perfBase, pWorst; int pN, pFt, savedVsync;
+        double pSum, pMain, pRender, pGpu, accU, accA, accG; readonly FrameTiming[] ftBuf = new FrameTiming[1];
+        double fMain, fGpu; int fFt;
+        static double Ms(long t0) { return (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency; }
+        void StartPerfTest()
+        {
+            if (perfRun) return;
+            inMenu = false; if (!world || loc != field) EnterWorld(true);
+            if (!world) return;
+            worldZoomT = 1; perfRun = true; perfIx = 0; PerfReset();
+            savedVsync = QualitySettings.vSyncCount; QualitySettings.vSyncCount = 0; Application.targetFrameRate = 240;
+            Debug.Log("ТЕСТ ПРОИЗВОДИТЕЛЬНОСТИ · " + VERSION + " · " + SystemInfo.deviceModel + " · " + SystemInfo.graphicsDeviceName + " · экран " + Screen.width + "×" + Screen.height +
+                      " @" + Screen.currentResolution.refreshRateRatio.value.ToString("0") + " Гц · качество " + QUALITY[setQuality] + ", трава " + GRASS[setGrass] + " %, разрешение " + RES[setRes] + " %");
+            Debug.Log("ТЕСТ · символов на сцене " + GlyphLayer.count + " · на героях " + GlyphLayer.actorGlyphs + ", рисуется " + GlyphLayer.actorGlyphsDrawn + " (уровень " + GlyphLayer.actorLod + ") · " +
+                      ascii.formats + " · глубина " + (ascii.depthFromLit ? "из альфы цвета" : "отдельной камерой"));
+        }
+        void PerfReset() { perfT = 0; pSum = pMain = pRender = pGpu = accU = accA = accG = 0; pN = pFt = 0; pWorst = 0; }
+        void PerfSet(int ix, bool on)
+        {
+            switch (ix)
+            {
+                case 1: Shader.SetGlobalFloat("_AsciiGrassThin", on ? 1f : 1 - GRASS[setGrass] / 100f); break;
+                case 2: ascii.dbgNoGlyphs = on; break;
+                case 3: if (hero != null) hero.go.SetActive(!on); break;
+                case 4: perfNoAnim = on; break;
+                case 5: if (on) { shadowScale = 0; SetShadowDistance(shadowBase); } else ApplySettings(false); break;
+                case 6: ascii.dbgNoBloom = on; break;
+                case 7: perfNoGui = on; break;
+                case 8: ascii.outline = on ? false : setOutline; break;
+                case 9: ascii.dbgForceND = on; break;
+                case 10: perfFullActors = on; break;
+                case 11: if (on) { int old = setRes; setRes = 1; ApplySettings(false); setRes = old; } else ApplySettings(false); break;
+            }
+            if (perfRun) { QualitySettings.vSyncCount = 0; Application.targetFrameRate = 240; }
+        }
+        void PerfUpdate()
+        {
+            if (!perfRun) return;
+            float udt = Time.unscaledDeltaTime; perfT += udt;
+            if (perfT > 1.2f)
+            {
+                pSum += udt * 1000.0; pN++; pWorst = Mathf.Max(pWorst, udt * 1000f);
+                if (fFtFrame) { pMain += ftBuf[0].cpuMainThreadFrameTime; pRender += ftBuf[0].cpuRenderThreadFrameTime; pGpu += ftBuf[0].gpuFrameTime; pFt++; }
+            }
+            else { accU = accA = accG = 0; }
+            if (perfT < 3.9f || pN == 0) return;
+            float ms = (float)(pSum / pN); if (perfIx == 0) perfBase = ms;
+            string line = "ТЕСТ · " + PERF[perfIx] + ": " + ms.ToString("0.0") + " мс (" + (1000f / ms).ToString("0") + " к/с), худший кадр " + pWorst.ToString("0") + " мс";
+            if (perfIx > 0) line += ", к базе " + (ms - perfBase).ToString("+0.0;-0.0") + " мс";
+            if (pFt > 0) line += " · главный поток " + (pMain / pFt).ToString("0.0") + ", поток отрисовки " + (pRender / pFt).ToString("0.0") + ", GPU " + (pGpu / pFt).ToString("0.0") + " мс";
+            line += " · скрипты: Update " + (accU / pN).ToString("0.00") + " (анимация и ткань " + (accA / pN).ToString("0.00") + "), интерфейс " + (accG / pN).ToString("0.00") + " мс";
+            Debug.Log(line);
+            PerfSet(perfIx, false); perfIx++;
+            if (perfIx < PERF.Length) { PerfSet(perfIx, true); PerfReset(); return; }
+            perfRun = false; QualitySettings.vSyncCount = savedVsync; ApplySettings(false);
+            Debug.Log("ТЕСТ ЗАВЕРШЁН · «к базе» со знаком минус — сколько миллисекунд кадра стоит выключенная часть");
+            consoleOpen = true; ShowToast("Тест завершён: открой лог, нажми «Копировать» и пришли его");
+        }
+        bool fFtFrame;
+        void FrameTimes()
+        {   // CPU / GPU frame times from the engine (when the device reports them)
+            fFtFrame = false;
+            if (!perfRun && !setShowFps) return;
+            FrameTimingManager.CaptureFrameTimings();
+            if (FrameTimingManager.GetLatestTimings(1, ftBuf) > 0 && ftBuf[0].cpuFrameTime > 0) { fFtFrame = true; fMain += ftBuf[0].cpuMainThreadFrameTime; fGpu += ftBuf[0].gpuFrameTime; fFt++; }
         }
         void OnDestroy() { if (ascii != null) ascii.Dispose(); }
         void ShowToast(string t) { toast = t; toastT = 2.6f; }
@@ -777,10 +875,12 @@ namespace AsciiHero
         // ---------- per frame ----------
         void Update()
         {
+            long tU = System.Diagnostics.Stopwatch.GetTimestamp();
             InputHub.Poll();
             LogHub.Pump();
             if (!ready) { HandlePointers(0); return; }
             float dt = Mathf.Min(0.1f, Time.deltaTime); tNow = Time.time;
+            KeyboardUpdate(); FrameTimes(); PerfUpdate();
             if (rebuildPending) { rebuildPending = false; Rebuild(); }
             HandlePointers(dt);
             if (InputHub.Key("Back")) { if (world) LeaveWorld(); else Application.Quit(); }
@@ -795,12 +895,31 @@ namespace AsciiHero
                 }
                 player.HoldInPlace(dt);
             }
-            if (player.driver == null) player.Animate(tNow, dt);   // Animator mode: after the Animator, in LateUpdate
+            if (player.driver == null && !perfNoAnim) { long tA = System.Diagnostics.Stopwatch.GetTimestamp(); player.Animate(tNow, dt); accA += Ms(tA); }   // Animator mode: after the Animator, in LateUpdate
             if (toastT > 0) toastT -= dt;
             fpsAcc += Time.unscaledDeltaTime; fpsN++;
-            if (fpsAcc > 1) { fpsText = Mathf.RoundToInt(fpsN / fpsAcc) + " fps · " + (ascii.surfaceGlyphs ? GlyphLayer.count + " симв." : ascii.cols + "×" + ascii.rows); fpsAcc = 0; fpsN = 0; }
+            if (fpsAcc > 1)
+            {
+                fpsText = Mathf.RoundToInt(fpsN / fpsAcc) + " fps · " + (ascii.surfaceGlyphs ? GlyphLayer.count + " симв." : ascii.cols + "×" + ascii.rows);
+                if (fFt > 0) fpsText += " · CPU " + (fMain / fFt).ToString("0.0") + " · GPU " + (fGpu / fFt).ToString("0.0") + " мс";
+                fpsAcc = 0; fpsN = 0; fMain = fGpu = 0; fFt = 0;
+            }
+            accU += Ms(tU);
         }
 
+        // a second finger coming down next to one that is on the free part of the view (or that has only just touched
+        // the stick area and not moved yet) makes a pinch, not a stick
+        bool PinchPartner(Pointer p)
+        {
+            foreach (var q in InputHub.active.Values)
+            {
+                if (q == p) continue;
+                if (q.owner == "cam") return true;
+                if (q.id == stickId && Time.unscaledTime - q.t0 < 0.4f && (q.pos - q.start).magnitude < 0.35f * StickCm())
+                { q.owner = "cam"; stickId = int.MinValue; stick = Vector2.zero; stickRun = 0; return true; }
+            }
+            return false;
+        }
         static bool InCircle(Rect r, Vector2 p) { return r.width > 0 && (p - r.center).magnitude <= r.width * 0.56f; }
         bool InUi(Vector2 p) { foreach (var r in uiRectsPrev) if (r.Contains(p)) return true; return false; }
 
@@ -813,8 +932,10 @@ namespace AsciiHero
                 if (world && InCircle(atkRect, p.pos)) { p.owner = "atk"; DoAttack(); }
                 else if (world && InCircle(defRect, p.pos)) p.owner = "def";
                 else if (world && InCircle(dashRect, p.pos)) { p.owner = "dash"; DoDash(); }
+                else if (world && !InUi(p.pos) && PinchPartner(p)) p.owner = "cam";
                 else if (world && stickId == int.MinValue && !InUi(p.pos) && p.pos.x < Screen.width * 0.45f && p.pos.y > Screen.height * 0.22f)
                 { p.owner = "stick"; stickId = p.id; stickCenter = ClampStickCenter(p.pos); }
+                else if (!world && !inMenu && tab == 0 && setDev && InField(p.pos)) p.owner = "ui";      // a number box: a tap opens the keyboard
                 else if (!world && !inMenu && tab == 0 && bodyList.Contains(p.pos))
                 {   // body sliders: a finger on a track drags its value, anywhere else in the list scrolls it
                     p.owner = "blist";
@@ -865,11 +986,19 @@ namespace AsciiHero
                 stick = d / max;
             }
             // camera
-            var camPtrs = new List<Pointer>(); foreach (var p in InputHub.active.Values) if (p.owner == "cam") camPtrs.Add(p);
+            camPtrs.Clear(); foreach (var p in InputHub.active.Values) if (p.owner == "cam") camPtrs.Add(p);
             float W = Screen.width, H = Screen.height;
             if (world)
             {
-                // the world camera is fixed
+                // the world camera keeps its angle; two fingers zoom it in (x1 .. x2)
+                if (camPtrs.Count >= 2)
+                {
+                    float d = Mathf.Max(20, (camPtrs[0].pos - camPtrs[1].pos).magnitude);
+                    if (!wPinching) { wPinching = true; wPinchD0 = d; wPinchZ0 = worldZoomT; }
+                    worldZoomT = Mathf.Clamp(wPinchZ0 * d / wPinchD0, 1f, 2f);
+                }
+                else wPinching = false;
+                if (InputHub.scroll != 0) worldZoomT = Mathf.Clamp(worldZoomT * (1 + InputHub.scroll * 0.1f), 1f, 2f);
             }
             else
             {
@@ -1099,7 +1228,7 @@ namespace AsciiHero
                 Shader.SetGlobalVector("_AsciiWind", new Vector4(wd.x, wd.y, windStr, windRun));
                 windV = new Vector3(wd.x, 0, wd.y) * (windStr * 2.4f);
             }
-            if (cloak != null) { cloak.Update(dt, windV); if (clothMpb == null) clothMpb = new MaterialPropertyBlock(); cloak.Apply(clothMpb, cloakRs); }
+            if (cloak != null && !perfNoAnim) { long tC = System.Diagnostics.Stopwatch.GetTimestamp(); cloak.Update(dt, windV); accA += Ms(tC); if (clothMpb == null) clothMpb = new MaterialPropertyBlock(); cloak.Apply(clothMpb, cloakRs); }
             // grass is pressed down by the body itself - the feet, the pelvis over it, a weapon swept low - not by a collision circle
             {
                 var hb = hero.human; Transform fL = hb.Bone("foot.L"), fR = hb.Bone("foot.R"), rt = hb.Bone("root");
@@ -1119,7 +1248,9 @@ namespace AsciiHero
             }
             // camera
             isoYaw += (isoYawT - isoYaw) * Mathf.Min(1, dt * 12); isoPitch += (isoPitchT - isoPitch) * Mathf.Min(1, dt * 12);
-            Vector3 off = Mirror(new Vector3(Mathf.Sin(isoYaw) * Mathf.Cos(isoPitch), Mathf.Sin(isoPitch), Mathf.Cos(isoYaw) * Mathf.Cos(isoPitch)) * ISO_DIST);
+            worldZoom += (worldZoomT - worldZoom) * Mathf.Min(1, dt * 12);
+            Shader.SetGlobalFloat("_AsciiLod", Mathf.Max(1f, ISO_LOD / worldZoom));
+            Vector3 off = Mirror(new Vector3(Mathf.Sin(isoYaw) * Mathf.Cos(isoPitch), Mathf.Sin(isoPitch), Mathf.Cos(isoYaw) * Mathf.Cos(isoPitch)) * (ISO_DIST / worldZoom));
             { var d = new Vector3(off.x, 0, off.z).normalized; heroLight.transform.position = new Vector3(pos.x + d.x * 1.3f - d.z * 0.5f, 2.3f, pos.z + d.z * 1.3f + d.x * 0.5f); }
             loc.Cutaway(off);
             camTgt = Vector3.Lerp(camTgt, new Vector3(pos.x, 0.6f, pos.z), Mathf.Min(1, dt * 5));
@@ -1152,7 +1283,19 @@ namespace AsciiHero
             float dp = Screen.dpi > 0 ? Mathf.Clamp(Screen.dpi / 160f, 1f, 4f) : Mathf.Max(1f, k);
             float wcss = vr.width / dp;
             float cell = Mathf.Max(4f / dp, world ? Mathf.Min(1.7f, wcss / 540f) : Mathf.Min(2.0f, wcss / 310f));
-            ascii.depthRef = world ? ISO_DIST : cam.dist;
+            float viewDist = world ? ISO_DIST / worldZoom : cam.dist;
+            ascii.depthRef = viewDist;
+            // characters: how many of their glyphs are drawn follows their size on the screen (pixels per glyph cell)
+            {
+                float pxCell = vr.height / (2 * viewDist * Mathf.Tan(sceneCam.fieldOfView * 0.5f * Mathf.Deg2Rad)) * 0.0135f;
+                int lv = GlyphLayer.actorLod;
+                if (perfFullActors) lv = 0;
+                else if (lv == 0) { if (pxCell < 3.3f) lv = pxCell < 1.7f ? 2 : 1; }
+                else if (lv == 1) { if (pxCell > 3.9f) lv = 0; else if (pxCell < 1.6f) lv = 2; }
+                else if (pxCell > 1.9f) lv = pxCell > 3.9f ? 0 : 1;
+                GlyphLayer.SetActorLod(lv);
+            }
+            ascii.SelfCheck();
             ascii.SetSize(Mathf.RoundToInt(vr.width), Mathf.RoundToInt(vr.height), cell * dp);
             if (!world)
             {
@@ -1263,6 +1406,7 @@ namespace AsciiHero
         void OnGUI()
         {
             if (Event.current.type != EventType.Repaint) return;
+            long tG = System.Diagnostics.Stopwatch.GetTimestamp();
             LogHub.Pump();
             k = Mathf.Max(0.5f, Mathf.Min(Screen.height / 390f, Screen.width / 844f));
             safe = Screen.safeArea; safe.y = Screen.height - safe.yMax;
@@ -1280,6 +1424,11 @@ namespace AsciiHero
                 else GUI.Label(new Rect(vr.x + 20 * k, vr.center.y, vr.width - 40 * k, 30 * k), "Кадр ASCII ещё не готов", sSmall);
             }
             float L = safe.x + 12 * k, T = safe.y + 8 * k;
+            if (perfRun)
+            {   // the test: only the picture and a line of progress
+                if (!perfNoGui) GUI.Label(new Rect(L, T, 600 * k, 22 * k), "Тест производительности: " + (perfIx + 1) + " из " + PERF.Length + " · " + PERF[perfIx], sTitle);
+                FinishGui(); accG += Ms(tG); return;
+            }
             if (world) DrawDanger(W, H);
             if (inMenu && !world) { MenuUI(W, H); ConsoleUI(W, H, false); FinishGui(); return; }
             if (!world) EditorUI(W, H, vr, L, T); else WorldUI(W, H, L, T);
@@ -1288,11 +1437,11 @@ namespace AsciiHero
                 float a = Mathf.Clamp01(toastT / 0.4f); var r = new Rect(vr.center.x - 150 * k, H * 0.18f, 300 * k, 46 * k);
                 Fill(r, new Color(0, 0, 0, 0.7f * a)); var old = GUI.color; GUI.color = new Color(1, 1, 1, a); GUI.Label(r, toast, sToast); GUI.color = old;
             }
-            if (setShowFps) GUI.Label(new Rect(vr.xMax - 170 * k, H - 18 * k - (H - safe.yMax), 160 * k, 16 * k), fpsText, sSmall);
+            if (setShowFps) GUI.Label(new Rect(vr.xMax - 330 * k, H - 18 * k - (H - safe.yMax), 320 * k, 16 * k), fpsText, sRight);
             ConsoleUI(W, H, false);
-            FinishGui();
+            FinishGui(); accG += Ms(tG);
         }
-        void FinishGui() { taps.Clear(); uiRectsPrev = new List<Rect>(uiRects); }
+        void FinishGui() { taps.Clear(); uiRectsPrev.Clear(); uiRectsPrev.AddRange(uiRects); }
 
         // ---------- loading screen and on-screen log ----------
         void LoadingScreen(float W, float H)
@@ -1371,7 +1520,7 @@ namespace AsciiHero
             y += 36 * k;
             float bottom = H - (H - safe.yMax) - 8 * k - 34 * k;
             sliderRect = Rect.zero;
-            bodyList = Rect.zero; bodyTracks.Clear(); bodyTrackIx.Clear();
+            bodyList = Rect.zero; bodyTracks.Clear(); bodyTrackIx.Clear(); bodyFields.Clear();
             if (tab == 0)
             {
                 float hw = (cw - 6 * k) / 2;
@@ -1405,17 +1554,14 @@ namespace AsciiHero
                     float shown; string txt = BodyText(ix, out shown);
                     GUI.Label(new Rect(0, ry, cw * 0.62f, 16 * k), bp.label, sSmall);
                     if (setDev)
-                    {   // developer: type any number, up to fifty times past the slider's range
-                        if (devShown[ix] != txt) { devShown[ix] = txt; devText[ix] = (ix == 0 ? cfg.height : cfg.body[ix]).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture); }
-                        var tf = new Rect(cw * 0.62f, ry - 2 * k, cw * 0.38f, 18 * k);
-                        string nt = GUI.TextField(tf, devText[ix] ?? "", sSmall);
-                        if (nt != devText[ix])
-                        {
-                            devText[ix] = nt; float fv;
-                            if (float.TryParse(nt.Replace(',', '.'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out fv))
-                                SetBodyValue(ix, Mathf.Clamp(fv, Body.DevMin(ix), Body.DevMax(ix)));
-                        }
-                        GUI.Label(new Rect(cw * 0.62f, ry + 14 * k, cw * 0.38f, 12 * k), txt, sRightSmall);
+                    {   // developer: tap the number to type any value, up to fifty times past the slider's range
+                        float raw = ix == 0 ? cfg.height : cfg.body[ix];
+                        var tf = new Rect(cw * 0.72f, ry - 1 * k, cw * 0.28f, 19 * k);
+                        Fill(tf, new Color(0.12f, 0.12f, 0.15f, 0.95f)); Frame(tf, new Color(0.93f, 0.74f, 0.33f, 0.8f), Mathf.Max(1, k));
+                        GUI.Label(new Rect(tf.x, tf.y + 2 * k, tf.width - 4 * k, tf.height), raw.ToString("0.###"), sRightSmall);
+                        if (bp.factor) GUI.Label(new Rect(cw * 0.4f, ry, cw * 0.3f, 16 * k), txt, sRightSmall);
+                        var absF = new Rect(bodyList.x + tf.x, bodyList.y + tf.y, tf.width, tf.height);
+                        if (absF.yMax > bodyList.y && absF.y < bodyList.yMax) { bodyFields.Add(absF); if (Tapped(absF)) OpenKeyboard(ix); }
                     }
                     else GUI.Label(new Rect(cw * 0.62f, ry, cw * 0.38f, 16 * k), txt, sRightSmall);
                     // slider

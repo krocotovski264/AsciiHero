@@ -17,6 +17,7 @@ Shader "AsciiHero/Lit"
         _GlyphSmoke ("Smoke body", Float) = 0
         _GlyphCell ("Glyph cell (m)", Vector) = (0.03, 0.05, 0, 0)
         _Cloth ("Cloth", Float) = 0
+        _AsciiFlat ("Wall or floor (no outline)", Float) = 0
         [Enum(UnityEngine.Rendering.CullMode)] _Cull ("Cull", Float) = 2
     }
     SubShader
@@ -38,6 +39,7 @@ Shader "AsciiHero/Lit"
             float _GlyphSmoke;
             float4 _GlyphCell;
             float _Cloth;
+            float _AsciiFlat;
         CBUFFER_END
         TEXTURE2D(_MainTex); SAMPLER(sampler_MainTex);
         float _AsciiNDPass;
@@ -183,7 +185,9 @@ Shader "AsciiHero/Lit"
                 s.alpha = 1;
 
                 half4 c = UniversalFragmentPBR(d, s);
-                return half4(c.rgb, 1);
+                // alpha: the view depth / 12 (what the characters test their visibility against, so no second "depth"
+                // camera is needed), negative on walls and floors (they get no outline)
+                return half4(c.rgb, (_AsciiFlat > 0.5 ? -1.0 : 1.0) * i.viewZ / 12.0);
             }
             ENDHLSL
         }

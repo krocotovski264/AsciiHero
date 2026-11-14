@@ -38,7 +38,10 @@ namespace AsciiHero.Editor
         {
             var existing = AssetDatabase.LoadAssetAtPath<UniversalRenderPipelineAsset>(PipelinePath);
             if (existing != null)
+            {
+                LogPipeline(existing);
                 return existing;
+            }
 
             if (!AssetDatabase.IsValidFolder("Assets/Settings"))
                 AssetDatabase.CreateFolder("Assets", "Settings");
@@ -52,7 +55,15 @@ namespace AsciiHero.Editor
             AssetDatabase.CreateAsset(pipeline, PipelinePath);
             AssetDatabase.AddObjectToAsset(renderer, pipeline);
             AssetDatabase.SaveAssets();
+            LogPipeline(pipeline);
             return pipeline;
+        }
+
+        static void LogPipeline(UniversalRenderPipelineAsset p)
+        {
+            Debug.Log("[Bootstrap] URP: hdr=" + p.supportsHDR + " msaa=" + p.msaaSampleCount + " renderScale=" + p.renderScale + " mainShadowRes=" + p.mainLightShadowmapResolution +
+                      " addLights=" + p.additionalLightsRenderingMode + " max=" + p.maxAdditionalLightsCount + " addLightShadows=" + p.supportsAdditionalLightShadows +
+                      " softShadows=" + p.supportsSoftShadows + " srpBatcher=" + p.useSRPBatcher + " depthTex=" + p.supportsCameraDepthTexture + " opaqueTex=" + p.supportsCameraOpaqueTexture);
         }
 
         static void AssignPipeline(UniversalRenderPipelineAsset pipeline)
@@ -104,6 +115,15 @@ namespace AsciiHero.Editor
                 PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
             if (PlayerSettings.Android.minSdkVersion < AndroidSdkVersions.AndroidApiLevel24)
                 PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel24;
+
+            // performance: the skinned character meshes (the glyph layer has four vertices per character) are skinned on
+            // the GPU, rendering runs on its own thread, and the player reports CPU / GPU frame times (performance test)
+            Debug.Log("[Bootstrap] before: gpuSkinning=" + PlayerSettings.gpuSkinning + " mobileMTRendering=" + PlayerSettings.GetMobileMTRendering(android) +
+                      " graphicsJobs=" + PlayerSettings.graphicsJobs + " frameTimingStats=" + PlayerSettings.enableFrameTimingStats +
+                      " vSyncCount=" + QualitySettings.vSyncCount + " quality=" + QualitySettings.names[QualitySettings.GetQualityLevel()]);
+            if (!PlayerSettings.gpuSkinning) PlayerSettings.gpuSkinning = true;
+            if (!PlayerSettings.GetMobileMTRendering(android)) PlayerSettings.SetMobileMTRendering(android, true);
+            if (!PlayerSettings.enableFrameTimingStats) PlayerSettings.enableFrameTimingStats = true;
 
             var assets = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/ProjectSettings.asset");
             if (assets == null || assets.Length == 0)

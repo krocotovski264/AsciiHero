@@ -24,6 +24,15 @@ namespace AsciiHero
         /// diagnostics: draw the plain 3D scene straight to the screen (no ASCII)
         public bool plain;
         bool builtSurface, builtPlain;
+        /// outline along the edges of objects and creatures (needs the depth in the lit colour's alpha)
+        public bool outline = true;
+        /// the scene depth is taken from the alpha of the lit colour, so the separate depth ("ND") camera is not
+        /// rendered in the glyph look. Checked once on the device (SelfCheck); if the alpha does not hold depth there,
+        /// the ND camera is used as before.
+        public bool depthFromLit = true; int checkFrames = -1, checksLeft = 3;
+        /// diagnostics (performance test)
+        public bool dbgNoGlyphs, dbgNoBloom, dbgForceND;
+        public string formats = "";
         public RenderTexture final;
         RenderTexture rtCol, rtND, rtAscii, rtB1, rtB2, rtFull;
         readonly Material asciiMat, blurMat, finalMat; readonly Texture2D atlas;
@@ -123,19 +132,24 @@ namespace AsciiHero
                 cam.rect = new Rect(0, 0, (float)w / Screen.width, 1);
                 return;
             }
-            if (builtPlain) { builtPlain = false; cam.rect = new Rect(0, 0, 1, 1); cam.depth = -3; ndCam.enabled = true; final = null; }
+            if (builtPlain) { builtPlain = false; cam.rect = new Rect(0, 0, 1, 1); cam.depth = -3; final = null; }
             if (w == W && h == H && c == cols && r == rows && final != null && builtSurface == surfaceGlyphs && builtFull == fullLit) { SyncND(); return; }
             W = w; H = h; cols = c; rows = r; builtSurface = surfaceGlyphs; builtFull = fullLit;
             cam.targetTexture = null; ndCam.targetTexture = null; glyphCam.targetTexture = null;
             Free(ref rtCol); Free(ref rtND); Free(ref rtAscii); Free(ref rtB1); Free(ref rtB2); Free(ref final); Free(ref rtFull);
             var half = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGBHalf) ? RenderTextureFormat.ARGBHalf : RenderTextureFormat.ARGB32;
+            var lite = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.RGB111110Float) && SystemInfo.SupportsBlendingOnRenderTextureFormat(RenderTextureFormat.RGB111110Float)
+                ? RenderTextureFormat.RGB111110Float : half;
             if (surfaceGlyphs)
             {
                 int hw = fullLit ? W : (W + 1) / 2, hh = fullLit ? H : (H + 1) / 2;
                 rtCol = RT(hw, hh, half, FilterMode.Bilinear, 24, RenderTextureReadWrite.Linear);
                 rtND = RT(hw, hh, half, FilterMode.Point, 24, RenderTextureReadWrite.Linear);
-                // a camera target must have a depth buffer in URP's render graph, even though glyphs don't test depth
-                rtFull = RT(W, H, half, FilterMode.Bilinear, 24, RenderTextureReadWrite.Linear);
+                // a camera target must have a depth buffer in URP's render graph, even though glyphs don't test depth.
+                // The glyph layer is the full-resolution target every character is blended into: a packed 32-bit float
+                // format halves the memory traffic of the 64-bit one where the device can blend into it
+                rtFull = RT(W, H, lite, FilterMode.Bilinear, 16, RenderTextureReadWrite.Linear);
+                formats = "глифы " + lite + ", свет " + half; checkFrames = 12;
                 Shader.SetGlobalTexture("_AsciiLitTex", rtCol); Shader.SetGlobalTexture("_AsciiNDTex", rtND);
             }
             else
@@ -144,11 +158,12 @@ namespace AsciiHero
                 rtND = RT(cols, rows, half, FilterMode.Point, 24, RenderTextureReadWrite.Linear);
             }
             rtAscii = RT(W, H, RenderTextureFormat.ARGB32, FilterMode.Bilinear, 0, RenderTextureReadWrite.Linear);
-            rtB1 = RT((W + 3) / 4, (H + 3) / 4, half, FilterMode.Bilinear, 0, RenderTextureReadWrite.Linear);
-            rtB2 = RT((W + 3) / 4, (H + 3) / 4, half, FilterMode.Bilinear, 0, RenderTextureReadWrite.Linear);
+            rtB1 = RT((W + 3) / 4, (H + 3) / 4, lite, FilterMode.Bilinear, 0, RenderTextureReadWrite.Linear);
+            rtB2 = RT((W + 3) / 4, (H + 3) / 4, lite, FilterMode.Bilinear, 0, RenderTextureReadWrite.Linear);
             final = RT(W, H, RenderTextureFormat.ARGB32, FilterMode.Point, 0, RenderTextureReadWrite.Default);
             cam.targetTexture = rtCol; ndCam.targetTexture = rtND;
             glyphCam.targetTexture = rtFull; glyphCam.enabled = surfaceGlyphs;
+            finalMat.SetVector("_LitPx", new Vector4(1f / rtCol.width, 1f / rtCol.height, 0, 0));
             asciiMat.SetVector("_Grid", new Vector4(cols, rows, 0, 0));
             asciiMat.SetVector("_CellPx", new Vector4((float)W / cols, (float)H / rows, 0, 0));
             asciiMat.SetVector("_OutPx", new Vector4(W, H, 0, 0));
@@ -160,12 +175,48 @@ namespace AsciiHero
         // the ND camera follows the colour camera exactly
         void SyncND()
         {
+            bool lit = depthFromLit && !dbgForceND && builtSurface;
+            ndCam.enabled = !lit; glyphCam.enabled = builtSurface && !dbgNoGlyphs;
+            Shader.SetGlobalFloat("_AsciiDepthLit", lit ? 1 : 0);
+            finalMat.SetFloat("_Outline", lit && outline ? 1 : 0);
             ndCam.fieldOfView = cam.fieldOfView; ndCam.nearClipPlane = cam.nearClipPlane; ndCam.farClipPlane = cam.farClipPlane;
             ndCam.aspect = cam.aspect; ndCam.cullingMask = cam.cullingMask;
             ndCam.transform.localPosition = Vector3.zero; ndCam.transform.localRotation = Quaternion.identity;
             glyphCam.fieldOfView = cam.fieldOfView; glyphCam.nearClipPlane = cam.nearClipPlane; glyphCam.farClipPlane = cam.farClipPlane;
             glyphCam.aspect = cam.aspect;
             glyphCam.transform.localPosition = Vector3.zero; glyphCam.transform.localRotation = Quaternion.identity;
+        }
+
+        /// Once after the targets are built: does the alpha of the lit colour really hold the depth on this device?
+        /// (It does when URP draws straight into the target; if some pass in between rewrote the alpha, every sample
+        /// would be the same.) Call from LateUpdate.
+        public void SelfCheck()
+        {
+            if (!depthFromLit || !builtSurface || rtCol == null || checkFrames < 0 || checksLeft <= 0) return;
+            if (checkFrames-- > 0) return;
+            checksLeft--;
+            RenderTexture small = null; Texture2D tex = null; var prev = RenderTexture.active;
+            try
+            {
+                small = RenderTexture.GetTemporary(32, 32, 0, RenderTextureFormat.ARGBHalf, RenderTextureReadWrite.Linear);
+                Graphics.Blit(rtCol, small);
+                tex = new Texture2D(32, 32, TextureFormat.RGBAHalf, false, true);
+                RenderTexture.active = small; tex.ReadPixels(new Rect(0, 0, 32, 32), 0, 0, false); tex.Apply(false);
+                var px = tex.GetPixels(); float lo = 1e9f, hi = -1e9f; int non0 = 0;
+                foreach (var c in px) { float a = Mathf.Abs(c.a); if (a > 1e-4f) { non0++; lo = Mathf.Min(lo, a); hi = Mathf.Max(hi, a); } }
+                if (non0 < 8) { if (checksLeft > 0) checkFrames = 30; else Fail("в кадре не нашлось поверхностей"); }
+                else if (hi - lo < 1e-3f) Fail("альфа одинакова по всему кадру (" + lo.ToString("0.###") + ")");
+                else { checksLeft = 0; Debug.Log("Глубина сцены берётся из альфы цвета (отдельная камера глубины выключена): проверка пройдена, " + non0 + " точек, " + (lo * 12).ToString("0.0") + "–" + (hi * 12).ToString("0.0") + " м"); }
+            }
+            catch (System.Exception e) { Fail(e.Message); }
+            RenderTexture.active = prev;
+            if (small != null) RenderTexture.ReleaseTemporary(small);
+            if (tex != null) Object.Destroy(tex);
+        }
+        void Fail(string why)
+        {
+            depthFromLit = false; checksLeft = 0;
+            Debug.LogWarning("Глубина из альфы цвета не подтвердилась (" + why + "): включена отдельная камера глубины, обводка выключена");
         }
 
         /// glyphs + bloom; runs after the cameras have rendered this frame
@@ -180,12 +231,15 @@ namespace AsciiHero
                 asciiMat.SetFloat("_Exposure", exposure); asciiMat.SetFloat("_ActorBoost", actorBoost);
                 Graphics.Blit(null, rtAscii, asciiMat);
             }
-            float bw = rtB1.width, bh = rtB1.height;
-            blurMat.SetVector("_Dir", new Vector4(1.6f / bw, 0)); Graphics.Blit(src, rtB1, blurMat);
-            blurMat.SetVector("_Dir", new Vector4(0, 1.6f / bh)); Graphics.Blit(rtB1, rtB2, blurMat);
-            blurMat.SetVector("_Dir", new Vector4(3.2f / bw, 0)); Graphics.Blit(rtB2, rtB1, blurMat);
-            blurMat.SetVector("_Dir", new Vector4(0, 3.2f / bh)); Graphics.Blit(rtB1, rtB2, blurMat);
-            finalMat.SetTexture("_BloomTex", rtB2); finalMat.SetFloat("_Bloom", bloom);
+            float bw = rtB1.width, bh = rtB1.height; bool glow = bloom > 0.001f && !dbgNoBloom;
+            if (glow)
+            {
+                blurMat.SetVector("_Dir", new Vector4(1.6f / bw, 0)); Graphics.Blit(src, rtB1, blurMat);
+                blurMat.SetVector("_Dir", new Vector4(0, 1.6f / bh)); Graphics.Blit(rtB1, rtB2, blurMat);
+                blurMat.SetVector("_Dir", new Vector4(3.2f / bw, 0)); Graphics.Blit(rtB2, rtB1, blurMat);
+                blurMat.SetVector("_Dir", new Vector4(0, 3.2f / bh)); Graphics.Blit(rtB1, rtB2, blurMat);
+            }
+            finalMat.SetTexture("_BloomTex", rtB2); finalMat.SetFloat("_Bloom", glow ? bloom : 0);
             Graphics.Blit(src, final, finalMat);
         }
     }
