@@ -74,7 +74,7 @@ namespace AsciiHero
         struct WallSeg { public Vector2 a, b; public float h; }
         readonly List<WallSeg> wallSegs = new List<WallSeg>();
         float seeFade;
-        static Vector3[] RF_V; static int[] RF_T;
+        static Dictionary<string, KeyValuePair<Vector3[], int[]>> CM;      // scanned rocks and the pickaxe (Resources/cavemeshes)
         // ---- light that lives ----
         class Glow { public Light l; public float baseI, ph; public List<Renderer> caps = new List<Renderer>(); }
         readonly List<Glow> glows = new List<Glow>(); Light ember; MaterialPropertyBlock mpb; Color glowEm;
@@ -175,18 +175,18 @@ namespace AsciiHero
             }
             for (int i = 0; i < 14; i++)
             {
-                var p = Place(0.6f, 9.3f, -7.4f, 7.4f, 0.2f); float h = Rr(0.15f, 0.45f), r = Rr(0.08f, 0.18f);
-                MeshGen.Obj(MeshGen.Cylinder(r, 0.01f, h, 4), mats["ROCK"], T, new Vector3(p.x, h * 0.4f, p.y), Quaternion.Euler(Rr(-25, 25), Rr(0, 360), Rr(-25, 25)), true, "SharpRock");
+                var p = Place(0.6f, 9.3f, -7.4f, 7.4f, 0.2f); float r = Rr(0.08f, 0.18f), sc = r * 2.6f;
+                MeshGen.Obj(CaveMesh("stone", new Vector3(sc, sc * Rr(0.9f, 1.4f), sc), Rnd() < 0.5f), mats["ROCK"], T, new Vector3(p.x, -0.02f, p.y), Quaternion.Euler(Rr(-12, 12), Rr(0, 360), Rr(-12, 12)), true, "SharpRock");
                 colliders.Add(Collider2.Circle(p.x, p.y, r * 0.8f));
             }
             // ---- boulders, everywhere but the water ----
             for (int i = 0; i < 12; i++)
             {
                 var p = Place(-9.2f, 9.2f, -7.3f, 7.3f, 0.6f); float s = Rr(0.3f, 0.7f);
-                var g = MeshGen.Obj(MeshGen.Sphere(s, 9, 6), mats[Rnd() < 0.5f ? "ROCK" : "WETROCK"], T, new Vector3(p.x, s * 0.35f, p.y), Quaternion.Euler(0, Rr(0, 360), 0), true, "Boulder");
-                g.transform.localScale = new Vector3(Rr(1, 1.4f), Rr(0.55f, 0.85f), Rr(1, 1.3f));
+                float d = s * 2.3f;
+                MeshGen.Obj(CaveMesh(Rnd() < 0.5f ? "boulder_a" : "boulder_b", new Vector3(d * Rr(0.9f, 1.1f), d * Rr(0.85f, 1.15f), d * Rr(0.9f, 1.1f)), Rnd() < 0.5f), mats[Rnd() < 0.5f ? "ROCK" : "WETROCK"], T, new Vector3(p.x, -0.04f, p.y), Quaternion.Euler(0, Rr(0, 360), 0), true, "Boulder");
                 colliders.Add(Collider2.Circle(p.x, p.y, s * 1.05f));
-                if (Rnd() < 0.6f) Moss(T, mats, p.x, p.y, s * 0.9f, s * 0.6f);          // moss on its top
+                if (Rnd() < 0.6f) Moss(T, mats, p.x, p.y, s * 0.8f, s * 0.75f);          // moss on its top
             }
             // moss along the foot of the walls in the wet hall and the grotto
             for (int i = 0; i < 26; i++)
@@ -283,26 +283,34 @@ namespace AsciiHero
             }
             return new Vector2(Rr(x0, x1), Rr(z0, z1));
         }
-        /// one piece of the rock face, the size baked into the vertices (the characters are laid out on the mesh as it
-        /// is): len wide, h high, its relief d deep; local +z is the face
-        static Mesh RockPiece(float len, float h, float d, bool flip)
+        /// a scanned mesh, its size baked into the vertices (the characters are laid out on the mesh as it is, so a
+        /// scaled transform would stretch them apart); flipX mirrors it
+        static Mesh CaveMesh(string name, Vector3 scale, bool flipX = false)
         {
-            if (RF_V == null)
+            if (CM == null)
             {
-                var b = Resources.Load<TextAsset>("rockface").bytes;
-                int nv = System.BitConverter.ToInt32(b, 4), nt = System.BitConverter.ToInt32(b, 8), o = 12;
-                RF_V = new Vector3[nv]; RF_T = new int[nt * 3];
-                for (int i = 0; i < nv; i++, o += 12) RF_V[i] = new Vector3(System.BitConverter.ToSingle(b, o), System.BitConverter.ToSingle(b, o + 4), System.BitConverter.ToSingle(b, o + 8));
-                for (int i = 0; i < nt * 3; i++, o += 2) RF_T[i] = System.BitConverter.ToUInt16(b, o);
+                CM = new Dictionary<string, KeyValuePair<Vector3[], int[]>>();
+                var b = Resources.Load<TextAsset>("cavemeshes").bytes; int o = 8, count = System.BitConverter.ToInt32(b, 4);
+                for (int k = 0; k < count; k++)
+                {
+                    int ln = b[o]; string nm = System.Text.Encoding.ASCII.GetString(b, o + 1, ln); o += 1 + ln;
+                    int nv = System.BitConverter.ToInt32(b, o), nt = System.BitConverter.ToInt32(b, o + 4); o += 8;
+                    var vv = new Vector3[nv]; var tt = new int[nt * 3];
+                    for (int i = 0; i < nv; i++, o += 12) vv[i] = new Vector3(System.BitConverter.ToSingle(b, o), System.BitConverter.ToSingle(b, o + 4), System.BitConverter.ToSingle(b, o + 8));
+                    for (int i = 0; i < nt * 3; i++, o += 2) tt[i] = System.BitConverter.ToUInt16(b, o);
+                    CM[nm] = new KeyValuePair<Vector3[], int[]>(vv, tt);
+                }
             }
-            var v = new Vector3[RF_V.Length];
-            for (int i = 0; i < v.Length; i++) { var p = RF_V[i]; v[i] = new Vector3((flip ? -p.x : p.x) * len, p.y * h, p.z * d); }
-            var t = (int[])RF_T.Clone();
-            if (flip) for (int i = 0; i < t.Length; i += 3) { int x = t[i + 1]; t[i + 1] = t[i + 2]; t[i + 2] = x; }
-            var m = new Mesh { name = "rockface" }; m.vertices = v; m.uv = new Vector2[v.Length]; m.triangles = t;
+            var src = CM[name]; var v = new Vector3[src.Key.Length];
+            for (int i = 0; i < v.Length; i++) { var p = src.Key[i]; v[i] = new Vector3((flipX ? -p.x : p.x) * scale.x, p.y * scale.y, p.z * scale.z); }
+            var t = (int[])src.Value.Clone();
+            if (flipX) for (int i = 0; i < t.Length; i += 3) { int x = t[i + 1]; t[i + 1] = t[i + 2]; t[i + 2] = x; }
+            var m = new Mesh { name = name }; m.vertices = v; m.uv = new Vector2[v.Length]; m.triangles = t;
             m.RecalculateNormals(); m.RecalculateBounds(); MeshGen.AddGlyphUV(m, false);
             return m;
         }
+        /// one piece of rock face (two scanned cliffs, straightened): len wide, h high, its relief d deep; local +z is the face
+        Mesh RockPiece(float len, float h, float d, bool flip) { return CaveMesh(Rnd() < 0.5f ? "wall_a" : "wall_b", new Vector3(len, h, d), flip); }
         /// a wall from a to b, its face turned to 'face': overlapping rock pieces (mirrored at random) + a row of colliders
         void RockWall(Transform T, Mats mats, Material mat, Vector2 a, Vector2 b, Vector2 face, float h0, float h1, bool collide = true)
         {
@@ -376,9 +384,9 @@ namespace AsciiHero
         {
             var t = new GameObject("Pickaxe").transform; t.SetParent(T, false); t.localPosition = new Vector3(x, 0.03f, z);
             t.localRotation = Quaternion.Euler(0, Rr(0, 360), 0) * Quaternion.Euler(88, 0, 0);
-            MeshGen.Obj(MeshGen.Cylinder(0.02f, 0.018f, 0.85f, 6), mats["WOOD"], t, new Vector3(0, 0.42f, 0), Quaternion.identity, true, "Handle");
-            MeshGen.Obj(MeshGen.Box(0.2f, 0.035f, 0.035f), mats["STEEL"], t, new Vector3(0.09f, 0.84f, 0), Quaternion.Euler(0, 0, -14), true, "Pick");
-            MeshGen.Obj(MeshGen.Box(0.2f, 0.035f, 0.035f), mats["STEEL"], t, new Vector3(-0.09f, 0.84f, 0), Quaternion.Euler(0, 0, 14), true, "Pick");
+            var k = Vector3.one * 0.8f;        // (a scanned pickaxe, 1.1 m: a bit smaller here)
+            MeshGen.Obj(CaveMesh("pick_handle", k), mats["WOOD"], t, Vector3.zero, Quaternion.identity, true, "Handle");
+            MeshGen.Obj(CaveMesh("pick_head", k), mats["STEEL"], t, Vector3.zero, Quaternion.identity, true, "Pick");
         }
         // a beam of light from 'from' down to the floor at 'to': a spot light and the dust glinting in it
         void Beam(Transform T, Vector3 to, Vector3 from, float radius, int n, Color c, float intensity, float angle)
