@@ -31,6 +31,7 @@ Shader "AsciiHero/Water"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             CBUFFER_START(UnityPerMaterial)
                 float4 _WaterCell; float4 _WaterMode;
+                float4 _WaterTintA, _WaterTintB;     // another water (w > 0): its deep and crest colours - a swamp's murk, acid ooze
             CBUFFER_END
             TEXTURE2D(_AsciiAtlas); SAMPLER(sampler_AsciiAtlas);
             TEXTURE2D(_AsciiLitTex); SAMPLER(sampler_AsciiLitTex);
@@ -149,6 +150,7 @@ Shader "AsciiHero/Water"
                 float row, gi; float3 col;
                 float3 deep = float3(0.09, 0.17, 0.34), crest = float3(0.33, 0.52, 0.78);
                 if (_WaterMode.x > 0.5) { deep = float3(0.05, 0.09, 0.11) * (1.0 - 0.5 * _WaterMode.w); crest = float3(0.2, 0.3, 0.34); }
+                if (_WaterTintA.w > 0.5) { deep = _WaterTintA.rgb; crest = _WaterTintB.rgb; }
                 float lvl = saturate(0.42 + w.x * 4.2 + ring * 1.3 + foam * 0.8);
                 float skyL = dot(sky, float3(0.3, 0.5, 0.2));
                 float3 wcol = lerp(deep, crest, lvl) * (0.55 + 0.6 * lvl) + lit * 1.6;

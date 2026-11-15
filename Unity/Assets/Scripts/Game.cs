@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.56 · Unity";
+        public const string VERSION = "beta 0.57 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -43,7 +43,7 @@ namespace AsciiHero
         Camera display, sceneCam; AsciiRenderer ascii;
         Mats mats, actorMats;
         Character hero; MotionActor player;
-        bool world; Tavern tavern; Field field; Cave cave; Forest forest; Location loc; readonly List<Location> outdoor = new List<Location>(); float doorCd, leafClear; Light moonLight; Character bartenderChar; MotionActor bartender;
+        bool world; Tavern tavern; Field field; Cave cave; Forest forest; Location loc; readonly List<Location> outdoor = new List<Location>(); readonly List<Mockup> mockups = new List<Mockup>(); float doorCd, leafClear; Light moonLight; Character bartenderChar; MotionActor bartender;
         // integrity instead of a health bar: five limbs (head, armL, armR, legL, legR), each worth 20 %
         readonly Vector4[] pushPts = new Vector4[4]; static readonly Vector4 FAR = new Vector4(9999, 0, 9999, 0);
         int hp = 100; readonly bool[] limbs = { true, true, true, true, true }; float respawnT; Vector3 heroTrail;
@@ -650,6 +650,27 @@ namespace AsciiHero
                 cave.addRipple = (x, z, a) => AddRipple(x + CAVE_O.x, z + CAVE_O.z, a);
             }
             outdoor.Clear(); outdoor.Add(field); outdoor.Add(forest); outdoor.Add(cave);
+            if (mockups.Count == 0)
+            {
+                // the other biomes, south of the meadow and the forest (see AHBiomes): kind, place, open sides N S W E, neighbours
+                void Mk(string kind, float x, float z, bool n, bool s2, bool w, bool e, string nN, string nS, string nW, string nE)
+                {
+                    var o = new Vector3(x, 0, z);
+                    var m = Mockup.Build(mats, kind, kind.GetHashCode() ^ 0x5eed, o, n, s2, w, e, new[] { nN, nS, nW, nE });
+                    GlyphLayer.Build(m.root); m.PlaceAt(o); mockups.Add(m);
+                }
+                Mk("swamp", -20, 20, true, true, true, false, "forest", "autumn", "toxic", null);
+                Mk("toxic", -40, 20, false, false, false, true, null, null, null, "swamp");
+                Mk("bright", 0, 20, true, true, false, false, "field", "grim", null, null);
+                Mk("autumn", -20, 40, true, false, true, false, "swamp", null, "snow", null);
+                Mk("snow", -40, 40, false, false, false, true, null, null, null, "autumn");
+                Mk("grim", 0, 40, true, false, false, true, "bright", null, null, "wastes");
+                Mk("wastes", 20, 40, false, true, true, false, null, "crystal", "grim", null);
+                Mk("crystal", 20, 60, true, false, false, false, "wastes", null, null, null);
+                foreach (var m in mockups) m.SetActive(false);
+                Debug.Log("Макеты биомов построены: " + mockups.Count + ", символов на сцене: " + GlyphLayer.count);
+            }
+            foreach (var m in mockups) outdoor.Add(m);
             if (!outdoorGlows) { outdoorGlows = true; foreach (var l in outdoor) CollectGlows(l.root); }
             Debug.Log("Мир построен (поляна, лес, пещера), символов на сцене: " + GlyphLayer.count);
         }
@@ -661,6 +682,7 @@ namespace AsciiHero
             if (l == field) return Rect.MinMaxRect(-10, -10, 11.5f, 10);
             if (l == forest) return Rect.MinMaxRect(FOREST_O.x - 10, FOREST_O.z - 10, FOREST_O.x + 10, FOREST_O.z + 10);
             if (l == cave) return Rect.MinMaxRect(CAVE_O.x - 10, CAVE_O.z - 8, CAVE_O.x + 10, CAVE_O.z + 8);
+            if (l is Mockup) return Rect.MinMaxRect(l.origin.x - 10, l.origin.z - 10, l.origin.x + 10, l.origin.z + 10);
             return l.WorldRect;
         }
         static float RectDist(Rect r, Vector2 p) { float dx = Mathf.Max(r.xMin - p.x, 0, p.x - r.xMax), dz = Mathf.Max(r.yMin - p.y, 0, p.y - r.yMax); return Mathf.Sqrt(dx * dx + dz * dz); }
@@ -721,7 +743,7 @@ namespace AsciiHero
                     if (n != loc && Core(n).Contains(p2))
                     {
                         loc = n; force = true;
-                        ShowToast(n == field ? "Поляна" : n == forest ? "Лес" : "Пещера");
+                        ShowToast(n == field ? "Поляна" : n == forest ? "Лес" : n is Mockup ? ((Mockup)n).title : "Пещера");
                         break;
                     }
             leafClear = Mathf.MoveTowards(leafClear, loc == forest ? 1f : 0f, Time.deltaTime * 1.5f);      // under the trees: the crowns clear off the screen but its rim
@@ -2277,9 +2299,18 @@ namespace AsciiHero
                     var d = JsonUtility.FromJson<SaveData>(System.IO.File.ReadAllText(SavePath(i)));
                     if (d == null) continue;
                     saveHas[i] = true;
-                    saveInfo[i] = d.date + " · " + (d.loc == "tavern" ? "трактир" : d.loc == "cave" ? "пещера" : d.loc == "forest" ? "лес" : "поляна") + " · " + (d.sex == "f" ? "женщина" : "мужчина") + ", " + d.height.ToString("0") + " см · целостность " + d.hp + " %";
+                    saveInfo[i] = d.date + " · " + LocName(d.loc) + " · " + (d.sex == "f" ? "женщина" : "мужчина") + ", " + d.height.ToString("0") + " см · целостность " + d.hp + " %";
                 }
                 catch (System.Exception e) { saveInfo[i] = "не читается (" + e.GetType().Name + ")"; }
+            }
+        }
+        static string LocName(string id)
+        {
+            switch (id)
+            {
+                case "tavern": return "трактир"; case "cave": return "пещера"; case "forest": return "лес"; case "swamp": return "болото"; case "toxic": return "ядовитое болото";
+                case "bright": return "светлый город"; case "grim": return "трущобы"; case "wastes": return "пустоши"; case "crystal": return "кристальные копи";
+                case "autumn": return "осенний лес"; case "snow": return "высокогорье"; default: return "поляна";
             }
         }
         void SaveGame(int i)
@@ -2287,7 +2318,7 @@ namespace AsciiHero
             bool tav = loc != null && loc == tavern, cv = loc != null && loc == cave, fo = loc != null && loc == forest;
             var d = new SaveData
             {
-                version = VERSION, date = System.DateTime.Now.ToString("dd.MM.yyyy HH:mm"), loc = tav ? "tavern" : cv ? "cave" : fo ? "forest" : "field",
+                version = VERSION, date = System.DateTime.Now.ToString("dd.MM.yyyy HH:mm"), loc = tav ? "tavern" : cv ? "cave" : fo ? "forest" : loc is Mockup ? ((Mockup)loc).kind : "field",
                 x = loc != null ? pos.x : 0, z = loc != null ? pos.z : 1.5f, heading = player != null ? player.heading : Mathf.PI, hp = hp,
                 limbs = (bool[])limbs.Clone(), sex = cfg.sex.ToString(), build = cfg.build, height = cfg.height, armor = cfg.armor, weapon = cfg.weapon,
                 body = cfg.body != null ? (float[])cfg.body.Clone() : null, items = inventory.ToArray()

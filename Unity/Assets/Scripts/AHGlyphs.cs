@@ -166,7 +166,9 @@ namespace AsciiHero
         /// what each one shows is worked out in the water shader
         static Material reflMat;
         public static GameObject MakeWater(Transform parent, List<Vector3> pts, List<Vector2> seedList) { return MakeWater(parent, pts, seedList, Vector4.zero); }
-        public static GameObject MakeWater(Transform parent, List<Vector3> pts, List<Vector2> seedList, Vector4 mode)
+        public static GameObject MakeWater(Transform parent, List<Vector3> pts, List<Vector2> seedList, Vector4 mode) { return MakeWater(parent, pts, seedList, mode, Color.clear, Color.clear); }
+        /// (deep, crest: another water's colours; clear = the default blue)
+        public static GameObject MakeWater(Transform parent, List<Vector3> pts, List<Vector2> seedList, Vector4 mode, Color deep, Color crest)
         {
             var sh = Shader.Find("AsciiHero/Water"); if (sh == null) { Debug.LogError("AsciiHero/Water shader not found"); return null; }
             int n = pts.Count;
@@ -184,6 +186,7 @@ namespace AsciiHero
             var go = new GameObject("Glyphs"); go.layer = LAYER; go.transform.SetParent(parent, false);      // ("Glyphs" under the water: GlyphLayer.Build leaves it alone)
             go.AddComponent<MeshFilter>().sharedMesh = m;
             var wm = new Material(sh); wm.SetVector("_WaterMode", mode);
+            if (deep.a > 0) { wm.SetVector("_WaterTintA", new Vector4(deep.r, deep.g, deep.b, 1)); wm.SetVector("_WaterTintB", new Vector4(crest.r, crest.g, crest.b, 1)); }
             var r = go.AddComponent<MeshRenderer>(); r.sharedMaterial = wm;
             r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; r.receiveShadows = false;
             count += n;

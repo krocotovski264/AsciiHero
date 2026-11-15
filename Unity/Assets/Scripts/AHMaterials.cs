@@ -11,14 +11,16 @@ namespace AsciiHero
             PLANK = 19, BEAM = 20, PLASTER = 21, HEARTH = 22, FIRE = 23, MOON = 24, GLASS = 25, GLASS2 = 26, GLASS3 = 27, FLOOR = 28,
             SHADOW = 29, GROUND = 30, LEAF = 31, ROCK = 32, WATER = 33,
             CAVEFLOOR = 34, WETROCK = 35, MUD = 36, MOSS = 37, BONE = 38, MUSH = 39, GLOWSHROOM = 40,
-            BARK = 41, BIRCH = 42, WHEAT = 43, FLOWERB = 44, FLOWERP = 45, HAY = 46, ROOF = 47, WINDOW = 48, FLOWERW = 49, ROAD = 50;
+            BARK = 41, BIRCH = 42, WHEAT = 43, FLOWERB = 44, FLOWERP = 45, HAY = 46, ROOF = 47, WINDOW = 48, FLOWERW = 49, ROAD = 50,
+            AUTUMN = 51, AUTUMN2 = 52, SNOW = 53, MARBLE = 54, TOXIC = 55, ICE = 56, CRYSTAL = 57, CRYSTALB = 58, SAND = 59, COBBLE = 60;
         // material id -> glyph ramp (same table as the web build)
         public static readonly int[] RAMP = {
             0, 1, 2, 2, 3, 4, 5, 6, 7, 8, 9, 9, 10, 2, 2, 2, 11, 3, 1,
             7, 7, 2, 11, 9, 9, 6, 6, 6, 11,
             13, 11, 1, 11, 11,
             11, 11, 10, 1, 2, 4, 9,
-            7, 7, 1, 9, 9, 11, 2, 2, 9, 11 };
+            7, 7, 1, 9, 9, 11, 2, 2, 9, 11,
+            1, 1, 11, 11, 9, 6, 9, 9, 11, 11 };
     }
 
     public class MatDef
@@ -84,6 +86,17 @@ namespace AsciiHero
             { "ROOF", new MatDef(MatId.ROOF, 0x4a3a40, 1, 0, 0, true) },
             { "WINDOW", new MatDef(MatId.WINDOW, 0xffb860, 1, 0, 0xffa040) },          // warm light in the windows at night
             { "ROAD", new MatDef(MatId.ROAD, 0x3a2e22, 1, 0, 0, true) },
+            // the other biomes
+            { "AUTUMN", new MatDef(MatId.AUTUMN, 0xc0581e, 1, 0, 0x140600, true, true) },        // autumn leaves, rust and red
+            { "AUTUMN2", new MatDef(MatId.AUTUMN2, 0xd8a028, 1, 0, 0x140c00, true, true) },      // and gold
+            { "SNOW", new MatDef(MatId.SNOW, 0xdfe6ee, 1, 0, 0x06080c, true) },
+            { "MARBLE", new MatDef(MatId.MARBLE, 0xd6d0c2, 1, 0, 0, true) },                    // the bright city's white stone
+            { "TOXIC", new MatDef(MatId.TOXIC, 0x62e03a, 1, 0, 0x2a8a14) },                    // acid ooze: it glows
+            { "ICE", new MatDef(MatId.ICE, 0x9cc4dc, 0.15f, 0.2f, 0x0c1620) },
+            { "CRYSTAL", new MatDef(MatId.CRYSTAL, 0xb27aff, 0.2f, 0.1f, 0x7a30e0) },          // the mines' crystals, violet
+            { "CRYSTALB", new MatDef(MatId.CRYSTALB, 0x6ad0ff, 0.2f, 0.1f, 0x2a88d8) },         // and blue
+            { "SAND", new MatDef(MatId.SAND, 0x9c8058, 1, 0, 0, true) },
+            { "COBBLE", new MatDef(MatId.COBBLE, 0x58544e, 1, 0, 0, true) },
         };
 
         public static Color Hex(uint c) { return new Color(((c >> 16) & 255) / 255f, ((c >> 8) & 255) / 255f, (c & 255) / 255f, 1); }
@@ -111,14 +124,23 @@ namespace AsciiHero
                 m.SetFloat("_AsciiActor", actor ? 1 : 0);
                 bool big = kv.Key == "FLOOR" || kv.Key == "PLASTER" || kv.Key == "PLANK" || kv.Key == "HEARTH" || kv.Key == "STONE" || kv.Key == "BEAM";
                 m.SetFloat("_GlyphSmoke", kv.Key == "SHADOW" ? 1 : 0);
-                m.SetFloat("_Cloth", actor && (kv.Key == "ROBE" || kv.Key == "ROBED") ? 1 : kv.Key == "LEAF" || kv.Key == "WHEAT" || kv.Key == "FLOWERB" || kv.Key == "FLOWERP" || kv.Key == "FLOWERW" ? 2 : 0);      // 2: leaves, swaying in the wind
-                m.SetFloat("_AsciiFlat", kv.Key == "GROUND" || kv.Key == "FLOOR" || kv.Key == "WATER" || kv.Key == "CAVEFLOOR" || kv.Key == "MUD" || kv.Key == "ROAD" ? 1 : 0);        // floors and walls get no outline
-                if (kv.Key == "GROUND" || kv.Key == "CAVEFLOOR" || kv.Key == "MUD" || kv.Key == "ROAD") m.SetVector("_GlyphCell", new Vector4(0.11f, 0.18f, 0, 0)); else
+                m.SetFloat("_Cloth", actor && (kv.Key == "ROBE" || kv.Key == "ROBED") ? 1 : kv.Key == "LEAF" || kv.Key == "AUTUMN" || kv.Key == "AUTUMN2" || kv.Key == "WHEAT" || kv.Key == "FLOWERB" || kv.Key == "FLOWERP" || kv.Key == "FLOWERW" ? 2 : 0);      // 2: leaves, swaying in the wind
+                m.SetFloat("_AsciiFlat", kv.Key == "GROUND" || kv.Key == "FLOOR" || kv.Key == "WATER" || kv.Key == "CAVEFLOOR" || kv.Key == "MUD" || kv.Key == "ROAD" || kv.Key == "SAND" || kv.Key == "COBBLE" ? 1 : 0);        // floors and walls get no outline
+                if (kv.Key == "GROUND" || kv.Key == "CAVEFLOOR" || kv.Key == "MUD" || kv.Key == "ROAD" || kv.Key == "SAND" || kv.Key == "COBBLE") m.SetVector("_GlyphCell", new Vector4(0.11f, 0.18f, 0, 0)); else
                 if (kv.Key == "WETROCK") m.SetVector("_GlyphCell", new Vector4(0.07f, 0.115f, 0, 0)); else
                 if (kv.Key == "BONE") m.SetVector("_GlyphCell", new Vector4(0.022f, 0.036f, 0, 0)); else       // thin real bones: finer characters
                 m.SetVector("_GlyphCell", actor ? new Vector4(0.0135f, 0.0222f, 0, 0) : big ? new Vector4(0.06f, 0.1f, 0, 0) : new Vector4(0.034f, 0.056f, 0, 0));
                 map[kv.Key] = m;
             }
+        }
+        /// a copy recoloured (the ground of another biome, a wall of another stone); cached by key and colour
+        readonly Dictionary<string, Material> tints = new Dictionary<string, Material>();
+        public Material Tint(string k, uint color, uint emission = 0)
+        {
+            string key = k + color.ToString("x6") + emission.ToString("x6"); Material m;
+            if (tints.TryGetValue(key, out m)) return m;
+            m = new Material(map[k]) { name = k + "_" + color.ToString("x6") }; m.SetColor("_Color", Hex(color)); m.SetColor("_EmissionColor", Hex(emission));
+            tints[key] = m; return m;
         }
         public static float AsciiIdValue(int id, bool actor) { return (id + 1 + (actor ? 128 : 0)) / 255f; }
         /// a copy with its own texture (tavern props)

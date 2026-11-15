@@ -53,10 +53,13 @@ namespace AsciiHero
                         for (int a = 0; a < SUB; a++)
                             for (int b = 0; b < SUB; b++)
                             {
-                                float qx = x0 + a * Q, qz = z0 + b * Q; int o = vs.Count;
+                                float qx = x0 + a * Q, qz = z0 + b * Q;
+                                if (qz >= HZ - 0.001f && qx < HX - 0.001f) continue;               // (south of z = 10 the bright city's paving)
+                                int o = vs.Count;
                                 vs.Add(new Vector3(qx, 0, qz)); vs.Add(new Vector3(qx, 0, qz + Q)); vs.Add(new Vector3(qx + Q, 0, qz + Q)); vs.Add(new Vector3(qx + Q, 0, qz));
                                 ts.Add(o); ts.Add(o + 1); ts.Add(o + 2); ts.Add(o); ts.Add(o + 2); ts.Add(o + 3);
                             }
+                        if (vs.Count == 0) continue;
                         var gm = new Mesh(); gm.SetVertices(vs); gm.uv = new Vector2[vs.Count]; gm.SetTriangles(ts, 0);
                         gm.RecalculateNormals(); gm.RecalculateBounds(); MeshGen.AddGlyphUV(gm, false);
                         MeshGen.Obj(gm, mats["GROUND"], T, Vector3.zero, Quaternion.identity, false, "Ground");
@@ -157,7 +160,7 @@ namespace AsciiHero
                 var pts = new List<Vector3>(); var seeds = new List<float>(); var fpts = new List<Vector3>(); var fseeds = new List<float>();
                 for (int i = 0; i < 2 * HX * 2 * HZ * 120; i++)
                 {
-                    float x = Rr(-HX, HX + 3.5f), z = Rr(-HZ - 3f, HZ + 2.5f);
+                    float x = Rr(-HX, HX + 3.5f), z = Rr(-HZ - 3f, HZ);
                     if (RoadD(x, z) < 1.1f || WHEAT.Contains(new Vector2(x, z)) || x > INN.x - 3.2f && Mathf.Abs(z) < 3.6f) continue;
                     bool blocked = false; foreach (var c in colliders) if (c.circle && (new Vector2(x - c.x, z - c.z)).magnitude < c.r * 0.8f) { blocked = true; break; }
                     if (blocked) continue;
@@ -187,7 +190,7 @@ namespace AsciiHero
                 GlyphLayer.MakeMotes(T, Vector3.zero, Quaternion.identity, Vector3.one, pts, sd, 1, new Color(0.85f, 1f, 0.45f) * 1.3f, new Vector4(0.045f, 0, 0, 0.55f));
             }
             // the walkable ground: the field, plus the strip shared with the forest (west) and the inn's porch (east)
-            bounds = Rect.MinMaxRect(-HX - 3.0f, -HZ + 0.4f, DOOR_X + 0.15f, HZ - 0.4f);
+            bounds = Rect.MinMaxRect(-HX - 3.0f, -HZ + 0.4f, DOOR_X + 0.15f, HZ + 2.6f);      // (open south: the bright city)
         }
         /// a scarecrow: a post and a cross-bar, a linen shirt, a sack head and a straw hat
         static void Scarecrow(Transform T, Mats mats, Vector3 p)

@@ -84,7 +84,8 @@ namespace AsciiHero
             {
                 string key = parts[i].mat; string rk; if (recolour != null && recolour.TryGetValue(key, out rk)) key = rk;
                 int kind = LeafKind(name);
-                if (key == "LEAF" && kind >= 0)
+                if (kind >= 0 && (key == "AUTUMN" || key == "AUTUMN2")) kind = key == "AUTUMN" ? 5 : 6;      // (autumn crowns: rust and gold)
+                if ((key == "LEAF" || key == "AUTUMN" || key == "AUTUMN2") && kind >= 0)
                 {
                     // the leaves are characters, not a model: a cloud of them over the crown's surface; a tree's crown still
                     // throws its shadow (the model drawn only into the shadow map)
@@ -93,7 +94,7 @@ namespace AsciiHero
                     lc.AddComponent<MeshFilter>().sharedMesh = LeafMesh(name, i, scale, kind);
                     var lr = lc.AddComponent<MeshRenderer>(); lr.sharedMaterial = LeafMat(kind, recolour);
                     lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; lr.receiveShadows = false;
-                    if (shadows && kind <= 2)
+                    if (shadows && (kind <= 2 || kind >= 5))
                     {
                         var sh = MeshGen.Obj(MeshOf(name, i, scale), mats[key], crown.transform, Vector3.zero, Quaternion.identity, true, "CrownShadow");
                         sh.GetComponent<MeshRenderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.ShadowsOnly;
@@ -109,21 +110,23 @@ namespace AsciiHero
         /// 0 broadleaf tree (oak, willow), 1 birch, 2 pine, 3 bush, 4 fern; -1: the model's green stays a model (moss, lily)
         static int LeafKind(string n)
         {
-            if (n.StartsWith("oak") || n == "willow") return 0;
-            if (n.StartsWith("birch")) return 1;
-            if (n.StartsWith("pine")) return 2;
-            if (n.StartsWith("bush")) return 3;
+            if (n.StartsWith("oak") || n == "willow" || n == "willow2" || n.StartsWith("soak") || n == "apple" || n.StartsWith("aoak") || n == "awillow") return 0;
+            if (n.StartsWith("birch") || n == "abirch") return 1;
+            if (n.StartsWith("pine") || n.StartsWith("spine") || n == "apine") return 2;
+            if (n.StartsWith("bush") || n == "sbush") return 3;
             if (n.StartsWith("fern")) return 4;
             return -1;
         }
-        static readonly int[] LEAF_CAP = { 620, 560, 640, 110, 34 };
-        static readonly float[] LEAF_SIZE = { 1.05f, 0.95f, 1.0f, 0.9f, 0.75f };
+        static readonly int[] LEAF_CAP = { 620, 560, 640, 110, 34, 560, 420 };
+        static readonly float[] LEAF_SIZE = { 1.05f, 0.95f, 1.0f, 0.9f, 0.75f, 1.05f, 1.0f };
         static readonly Color[,] LEAF_COL = {
             { new Color(0.09f, 0.27f, 0.11f), new Color(0.38f, 0.60f, 0.22f) },     // oak
             { new Color(0.16f, 0.32f, 0.10f), new Color(0.62f, 0.72f, 0.28f) },     // birch: lighter, yellower
             { new Color(0.05f, 0.20f, 0.13f), new Color(0.20f, 0.44f, 0.28f) },     // pine: dark, bluish
             { new Color(0.08f, 0.26f, 0.12f), new Color(0.30f, 0.56f, 0.24f) },     // bush
-            { new Color(0.10f, 0.32f, 0.12f), new Color(0.40f, 0.68f, 0.28f) } };   // fern
+            { new Color(0.10f, 0.32f, 0.12f), new Color(0.40f, 0.68f, 0.28f) },     // fern
+            { new Color(0.36f, 0.10f, 0.04f), new Color(0.86f, 0.40f, 0.12f) },     // autumn: rust to orange
+            { new Color(0.42f, 0.26f, 0.04f), new Color(0.95f, 0.76f, 0.22f) } };   // autumn: gold
         static readonly Dictionary<string, Mesh> leafCache = new Dictionary<string, Mesh>();
         static readonly Dictionary<int, Material> leafMats = new Dictionary<int, Material>();
         static Material LeafMat(int kind, Dictionary<string, string> recolour)
@@ -131,7 +134,7 @@ namespace AsciiHero
             Material m; if (leafMats.TryGetValue(kind, out m) && m != null) return m;
             var sh = Shader.Find("AsciiHero/Leaves"); if (sh == null) { Debug.LogError("AsciiHero/Leaves shader not found"); return null; }
             m = new Material(sh); m.SetColor("_GrassA", LEAF_COL[kind, 0]); m.SetColor("_GrassB", LEAF_COL[kind, 1]); m.SetFloat("_GrassH", LEAF_SIZE[kind]);
-            m.SetFloat("_LeafSee", kind <= 2 ? 1 : 0);          // (tree crowns clear away under the trees; bushes and ferns stay)
+            m.SetFloat("_LeafSee", kind <= 2 || kind >= 5 ? 1 : 0);          // (tree crowns clear away under the trees; bushes and ferns stay)
             leafMats[kind] = m; return m;
         }
         /// points scattered over the crown's surface (by area, the faces turned down mostly left out: the camera looks from

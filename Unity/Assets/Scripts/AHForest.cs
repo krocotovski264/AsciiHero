@@ -66,7 +66,7 @@ namespace AsciiHero
                             for (int b = 0; b < SUB; b++)
                             {
                                 float qx = x0 + a * Q, qz = z0 + b * Q;
-                                if (qx >= HX - 0.001f) continue;                                        // (the field's ground goes on from x = 10)
+                                if (qx >= HX - 0.001f || qz >= HZ - 0.001f) continue;                 // (the field's ground goes on from x = 10, the swamp's from z = 10)
                                 float qx1 = Mathf.Min(qx + Q, HX);
                                 if (Mathf.Max(Mathf.Max(LakeK(qx, qz), LakeK(qx1, qz)), Mathf.Max(LakeK(qx, qz + Q), LakeK(qx1, qz + Q))) < 0.98f) continue;
                                 int o = vs.Count;
@@ -142,6 +142,7 @@ namespace AsciiHero
             for (float z = -HZ + 0.6f; z <= HZ; z += Rr(1.6f, 2.2f)) Tree(new Vector2(-HX + Rr(-0.4f, 0.5f), z), Rr(0.9f, 1.15f));
             for (float x = -HX + 1.5f; x <= HX - 2.5f; x += Rr(1.8f, 2.6f))
             {
+                if (Mathf.Abs(x) < 3.2f) continue;          // (the way south, into the swamp)
                 if (Rnd() < 0.55f) NatureLib.Place(Rnd() < 0.5f ? "bush1" : "bush2", mats, T, new Vector3(x, 0, HZ - Rr(0, 0.5f)), Rr(0, 360), Rr(0.9f, 1.3f));
                 else { Tree(new Vector2(x, HZ + Rr(-0.3f, 0.3f)), Rr(0.7f, 0.9f)); colliders.Add(Collider2.Circle(x, HZ, 0.6f)); }
             }
@@ -213,7 +214,7 @@ namespace AsciiHero
                 var pts = new List<Vector3>(); var seeds = new List<float>(); var mpts = new List<Vector3>(); var mseeds = new List<float>();
                 for (int i = 0; i < 2 * HX * 2 * HZ * 38; i++)
                 {
-                    float x = Rr(-HX - 1.5f, HX), z = Rr(-HZ, HZ + 1.5f);
+                    float x = Rr(-HX - 1.5f, HX), z = Rr(-HZ, HZ);
                     if (LakeK(x, z) < 1.06f || PathD(x, z) < 0.75f) continue;
                     bool blocked = false; foreach (var c in colliders) if (c.circle && (new Vector2(x - c.x, z - c.z)).magnitude < c.r * 0.8f) { blocked = true; break; }
                     if (blocked) continue;
@@ -252,7 +253,7 @@ namespace AsciiHero
                 // two shafts of moonlight through gaps in the crowns
                 MoonShaft(T, new Vector3(-1.5f, 0, -3.5f), 0.9f); MoonShaft(T, new Vector3(1.8f, 0, 5.2f), 0.75f);
             }
-            bounds = Rect.MinMaxRect(-HX + 0.4f, -HZ - 2.6f, HX + 3.0f, HZ - 0.4f);
+            bounds = Rect.MinMaxRect(-HX + 0.4f, -HZ - 2.6f, HX + 3.0f, HZ + 2.6f);         // (open south: the swamp)
         }
         /// a flat band on the ground along a polyline (the path)
         static void Strip(Transform T, Material m, Vector2[] line, float hw, float y, string name)
@@ -277,7 +278,7 @@ namespace AsciiHero
         }
         public static void PathStrip(Transform T, Material m, Vector2[] line, float hw, float y, string name) { Strip(T, m, line, hw, y, name); }
         /// a low layer of mist: a flat additive disc in the lit colour (AsciiHero/Beam, seen from above)
-        static void Mist(Transform T, Vector3 c, float rx, float rz, Color col)
+        public static void Mist(Transform T, Vector3 c, float rx, float rz, Color col)
         {
             var sh = Shader.Find("AsciiHero/Beam"); if (sh == null) return;
             const int SEG = 32; var vs = new List<Vector3> { Vector3.zero }; var ns = new List<Vector3> { Vector3.up }; var uv = new List<Vector2> { new Vector2(0, 0.5f) }; var ts = new List<int>();
