@@ -145,22 +145,9 @@ namespace AsciiHero
             }
             foreach (var p in pools) { var pp = p; Water(T, mats, (x, z) => PoolK(pp, x, z), p.c, Mathf.Max(p.rx, p.rz) + 0.3f, new Vector4(1, 0, 0, p.depth > 0.1f ? 1 : 0)); }
 
-            // ---- walls: the outline, and the two dividing walls with passages ----
+            // ---- walls: carved out of one volume of rock (see BuildRock) ----
             var rock = new Material(mats["WETROCK"]) { name = "CaveWall" }; rock.SetFloat("_SeeThrough", 1); rock.SetFloat("_Cull", 0);
-            RockWall(T, mats, rock, new Vector2(-HX - 0.6f, -HZ - 0.15f), new Vector2(-6.1f, -HZ - 0.15f), Vector2.up, 2.6f, 3.3f);       // far wall (a crevice at x -5.7)
-            RockWall(T, mats, rock, new Vector2(-5.3f, -HZ - 0.15f), new Vector2(HX + 0.6f, -HZ - 0.15f), Vector2.up, 2.6f, 3.3f);
-            RockWall(T, mats, rock, new Vector2(-HX - 0.6f, HZ + 0.35f), new Vector2(HX + 0.6f, HZ + 0.35f), Vector2.up, 1.7f, 2.3f);          // near wall (faces the camera)
-            RockWall(T, mats, rock, new Vector2(-HX - 0.15f, -HZ - 0.3f), new Vector2(-HX - 0.15f, -3.3f), Vector2.right, 2.4f, 3.1f);      // west wall (a crevice at z -2.9)
-            RockWall(T, mats, rock, new Vector2(-HX - 0.15f, -2.5f), new Vector2(-HX - 0.15f, HZ + 0.3f), Vector2.right, 2.4f, 3.1f);
-            RockWall(T, mats, rock, new Vector2(HX + 0.15f, -HZ - 0.3f), new Vector2(HX + 0.15f, 3.9f), Vector2.left, 2.4f, 3.1f);
-            RockWall(T, mats, rock, new Vector2(HX + 0.15f, 5.2f), new Vector2(HX + 0.15f, HZ + 0.3f), Vector2.left, 2.4f, 3.1f);         // (the crevice at z 4.5: the entrance light)
-            foreach (var r in new[] { new Vector2(-HZ, -5.6f), new Vector2(-2.4f, 2.4f), new Vector2(5.6f, HZ) })
-            {   // the wall across the middle (x 0), seen from both sides
-                RockWall(T, mats, rock, new Vector2(0.25f, r.x), new Vector2(0.25f, r.y), Vector2.right, 2.0f, 2.6f);
-                RockWall(T, mats, rock, new Vector2(-0.25f, r.x), new Vector2(-0.25f, r.y), Vector2.left, 2.0f, 2.6f, false);
-            }
-            foreach (var r in new[] { new Vector2(-HX, -4.6f), new Vector2(-1.4f, 3.4f), new Vector2(6.6f, HX) })
-                RockWall(T, mats, rock, new Vector2(r.x, 0.1f), new Vector2(r.y, 0.1f), Vector2.up, 2.0f, 2.6f);
+            BuildRock(T, mats, rock);
 
             // ---- the grotto: stalagmites, stalactites, sharp rocks, moss ----
             for (int i = 0; i < 16; i++)
@@ -324,130 +311,191 @@ namespace AsciiHero
             return m;
         }
         /// one piece of rock face (two scanned cliffs, straightened): len wide, h high, its relief d deep; local +z is the face
-        Mesh RockPiece(float len, float h, float d, bool flip) { return CaveMesh(Rnd() < 0.5f ? "wall_a" : "wall_b", new Vector3(len, h, d), flip); }
         /// a wall from a to b, its face turned to 'face': overlapping rock pieces (mirrored at random) + a row of colliders
-        // ---- walls: one continuous rock face per wall, generated anew every time (no repeated pieces). The relief is
-        // layered noise as in procedural cliffs: large bulges from domain-warped fBm (the warp bends everything into
-        // irregular, flowing shapes), sharp creases from ridged noise, horizontal strata that jut out as ledges and
-        // wander up and down, a fine grain on top; the face leans back as it rises, its crest is ragged and a rough
-        // cap runs back from it so the top reads as thick rock ----
-        float Fbm(float x, float y, int oct)
+        // ---- the rock: a volume, not pieces. As in voxel cave generators, the walls are the surface of a field over
+        // the whole cave: f(p) > 0 in the air, < 0 in the rock. The field starts from the plan (the outline of the
+        // halls and the two dividing walls with their passages; each wall rises to its own ragged crest and is wider
+        // at its foot, where fallen rock gathers), then 3D noise reshapes it: domain-warped fBm for big bulges and
+        // hollows (overhangs come by themselves), weighted ridged multifractal for sharp creases, wandering strata
+        // that jut out as ledges, a fine grain. The crevices the side beams shine through are cut out of it. Its
+        // surface is extracted with naive surface nets (one vertex per boundary cell, a quad per crossed edge), which
+        // gives a smooth, closed, seamless rock - and new every time the cave is built. ----
+        struct RockSeg { public Vector2 a, b; public float t, h; }
+        struct Slot { public Vector3 a, b; public float r; }
+        readonly List<RockSeg> rockSegs = new List<RockSeg>(); readonly List<Slot> slots = new List<Slot>();
+        float nOx, nOy, nOz;
+        static float H3(int x, int y, int z)
         {
-            float a = 0.5f, f = 1, sum = 0, norm = 0;
-            for (int o = 0; o < oct; o++) { sum += a * Mathf.PerlinNoise(x * f + 31.7f * o, y * f - 17.3f * o); norm += a; a *= 0.5f; f *= 2.03f; }
-            return sum / norm;
+            uint h = (uint)(x * 374761393 + y * 668265263 + z * 1274126177); h = (h ^ (h >> 13)) * 1274126177u; h ^= h >> 16;
+            return (h & 0xffffff) / 16777215f;
         }
-        float Ridged(float x, float y) { float n = 1 - Mathf.Abs(2 * Fbm(x, y, 3) - 1); return n * n; }
-        void RockWall(Transform T, Mats mats, Material mat, Vector2 a, Vector2 b, Vector2 face, float h0, float h1, bool collide = true)
+        static float N3(float x, float y, float z)          // smooth value noise 0..1
         {
-            var dir = b - a; float L = dir.magnitude; dir /= L;
-            const float EXT = 0.18f; a -= dir * EXT; float LL = L + 2 * EXT;
-            float ox = Rr(0, 500), oy = Rr(0, 500);                      // this wall's own noise
-            float strataF = Rr(1.6f, 2.6f), strataK = Rr(0.06f, 0.13f), bulgeK = Rr(0.35f, 0.55f), leanK = Rr(0.04f, 0.14f);
-            System.Func<float, float> H = u => h0 + (h1 - h0) * Fbm(u * 0.22f + ox, oy, 3) + 0.35f * (Ridged(u * 0.9f + ox, 3.3f + oy) - 0.35f);
-            System.Func<float, float, float> D = (u, y) =>
+            int ix = Mathf.FloorToInt(x), iy = Mathf.FloorToInt(y), iz = Mathf.FloorToInt(z);
+            float fx = x - ix, fy = y - iy, fz = z - iz;
+            fx = fx * fx * fx * (fx * (fx * 6 - 15) + 10); fy = fy * fy * fy * (fy * (fy * 6 - 15) + 10); fz = fz * fz * fz * (fz * (fz * 6 - 15) + 10);
+            float a = Mathf.Lerp(H3(ix, iy, iz), H3(ix + 1, iy, iz), fx), b = Mathf.Lerp(H3(ix, iy + 1, iz), H3(ix + 1, iy + 1, iz), fx);
+            float c = Mathf.Lerp(H3(ix, iy, iz + 1), H3(ix + 1, iy, iz + 1), fx), d = Mathf.Lerp(H3(ix, iy + 1, iz + 1), H3(ix + 1, iy + 1, iz + 1), fx);
+            return Mathf.Lerp(Mathf.Lerp(a, b, fy), Mathf.Lerp(c, d, fy), fz);
+        }
+        static float Fbm3(float x, float y, float z, int oct)
+        {
+            float s = 0, a = 0.5f, n = 0;
+            for (int o = 0; o < oct; o++) { s += a * N3(x, y, z); n += a; a *= 0.5f; x = x * 2.03f + 17.1f; y = y * 2.03f - 9.3f; z = z * 2.03f + 5.7f; }
+            return s / n;
+        }
+        static float RidgedW(float x, float y, float z)       // weighted ridged multifractal (each octave weighted by the last)
+        {
+            float s = 0, a = 1, w = 1, n = 0;
+            for (int o = 0; o < 3; o++)
             {
-                float wx = u * 0.42f + 2.2f * Fbm(u * 0.11f + ox, y * 0.11f + oy, 2), wy = y * 0.42f + 1.6f * Fbm(u * 0.11f + ox + 7.1f, y * 0.11f + oy + 3.7f, 2);
-                float big = (Fbm(wx * 0.7f + ox, wy * 0.7f + oy, 4) - 0.5f) * 2f * bulgeK;
-                float rid = Ridged(wx * 1.7f + ox, wy * 1.7f + oy) * 0.16f;
-                float s = y * strataF + 0.9f * Fbm(u * 0.23f + ox, 5.5f + oy, 2), ledge = s - Mathf.Floor(s);
-                float strata = Mathf.SmoothStep(0, 1, Mathf.Clamp01(ledge / 0.18f)) * strataK * (0.4f + 1.2f * Fbm(u * 0.17f + ox, 9.1f + oy, 2));
-                float fine = (Fbm(u * 3.3f + ox, y * 3.3f + oy, 2) - 0.5f) * 0.07f;
-                return big + rid + strata + fine - leanK * y;
-            };
-            const float DU = 0.13f, DY = 0.13f, BASE = -0.12f;
-            int nu = Mathf.CeilToInt(LL / DU); float hTop = 0; var hs = new float[nu + 1];
-            for (int i = 0; i <= nu; i++) { hs[i] = Mathf.Max(0.8f, H(i * DU)); hTop = Mathf.Max(hTop, hs[i]); }
-            int nf = Mathf.CeilToInt((hTop - BASE) / DY);              // rows of the face (squeezed to each column's height)
-            const int NC = 4;                                          // rows of the cap behind the crest
-            int nv = nf + 1 + NC;
-            var vs = new List<Vector3>(); var ts = new List<int>();
-            var f3 = new Vector3(face.x, 0, face.y);
-            for (int i = 0; i <= nu; i++)
-            {
-                float u = i * DU; var lp = a + dir * u; var basep = new Vector3(lp.x, 0, lp.y); float hh = hs[i];
-                for (int j = 0; j <= nf; j++)
-                {
-                    float y = Mathf.Lerp(BASE, hh, j / (float)nf);
-                    vs.Add(basep + f3 * (D(u, y) - 0.2f) + Vector3.up * y);
-                }
-                float dTop = D(u, hh) - 0.2f;
-                for (int k = 1; k <= NC; k++)
-                {
-                    float back = 0.22f * k + 0.1f * k * k, y = hh + 0.05f * k - 0.03f * k * k + 0.12f * (Fbm(u * 1.3f + ox, k * 0.7f + oy, 2) - 0.5f);
-                    vs.Add(basep + f3 * (dTop - back) + Vector3.up * y);
-                }
+                float v = 1 - Mathf.Abs(2 * N3(x, y, z) - 1); v = v * v * w; w = Mathf.Clamp01(v * 3.2f);
+                s += v * a; n += a; a *= 0.5f; x = x * 2.1f + 3.3f; y = y * 2.1f + 1.1f; z = z * 2.1f - 7.7f;
             }
-            for (int i = 0; i < nu; i++)
-                for (int j = 0; j < nv - 1; j++)
-                {
-                    int o = i * nv + j;
-                    ts.Add(o); ts.Add(o + 1); ts.Add(o + nv); ts.Add(o + 1); ts.Add(o + nv + 1); ts.Add(o + nv);
-                }
-            // wound so the face looks along 'face'
-            {
-                var n0 = Vector3.Cross(vs[1] - vs[0], vs[nv] - vs[0]);
-                if (Vector3.Dot(n0, f3) < 0) for (int t = 0; t < ts.Count; t += 3) { int x = ts[t + 1]; ts[t + 1] = ts[t + 2]; ts[t + 2] = x; }
-            }
-            var m = new Mesh { name = "cavewall", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 }; m.SetVertices(vs); m.uv = new Vector2[vs.Count]; m.SetTriangles(ts, 0);
-            m.RecalculateNormals(); m.RecalculateBounds(); MeshGen.AddGlyphUV(m, false);
-            var g = MeshGen.Obj(m, mat, T, Vector3.zero, Quaternion.identity, true, "Wall");
-            wallPieces.Add(new KeyValuePair<Mesh, Matrix4x4>(m, T.worldToLocalMatrix * g.transform.localToWorldMatrix));
-            for (float u = 0.6f; u < L; u += Rr(1.2f, 2.6f))
-                if (Rnd() < 0.5f) { var p = a + dir * (u + EXT) + face * 0.25f; Moss(T, mats, p.x, p.y, Rr(0.3f, 0.55f), 0.01f); }
-            if (!collide) return;
-            float hMax = 0; foreach (var hh in hs) hMax = Mathf.Max(hMax, hh);
-            var a0 = a + dir * EXT;
-            for (float s2 = 0; s2 <= L + 0.01f; s2 += 0.5f) { var p = a0 + dir * s2 - face * 0.2f; colliders.Add(Collider2.Circle(p.x, p.y, 0.5f)); }
-            wallSegs.Add(new WallSeg { a = a0, b = a0 + dir * L, h = hMax });
+            return s / n;
         }
-        /// a rough rock sheet behind a wall's pieces: wherever two scanned pieces leave a gap, there is rock in it
-        void Backing(Transform T, Material mat, Vector2 a, Vector2 b, Vector2 face, float h)
+        static float SegDist(float x, float z, Vector2 a, Vector2 b)
         {
-            var dir = b - a; float L = dir.magnitude; dir /= L;
-            int nu = Mathf.CeilToInt(L / 0.22f), nv = Mathf.CeilToInt(h / 0.22f);
-            var vs = new List<Vector3>(); var ts = new List<int>();
-            for (int i = 0; i <= nu; i++)
-                for (int j = 0; j <= nv; j++)
-                {
-                    float u = L * i / nu, y = h * j / nv - 0.05f;
-                    float bump = 0.07f * Mathf.Sin(u * 2.1f + y * 1.3f) + 0.05f * Mathf.Sin(u * 5.3f - y * 4.1f) + 0.03f * Mathf.Sin(u * 11f + y * 9f);
-                    var p = a + dir * u - face * (0.34f + bump + 0.1f * y / h);
-                    vs.Add(new Vector3(p.x, y, p.y));
-                }
-            for (int i = 0; i < nu; i++)
-                for (int j = 0; j < nv; j++)
-                {
-                    int o = i * (nv + 1) + j;
-                    // wound so the sheet faces 'face'
-                    bool flip = Vector3.Cross(new Vector3(dir.x, 0, dir.y), Vector3.up).x * face.x + Vector3.Cross(new Vector3(dir.x, 0, dir.y), Vector3.up).z * face.y > 0;
-                    if (flip) { ts.Add(o); ts.Add(o + 1); ts.Add(o + nv + 1); ts.Add(o + 1); ts.Add(o + nv + 2); ts.Add(o + nv + 1); }
-                    else { ts.Add(o); ts.Add(o + nv + 1); ts.Add(o + 1); ts.Add(o + 1); ts.Add(o + nv + 1); ts.Add(o + nv + 2); }
-                }
-            var m = new Mesh { name = "wallback" }; m.SetVertices(vs); m.uv = new Vector2[vs.Count]; m.SetTriangles(ts, 0);
-            m.RecalculateNormals(); m.RecalculateBounds(); MeshGen.AddGlyphUV(m, false);
-            var g = MeshGen.Obj(m, mat, T, Vector3.zero, Quaternion.identity, true, "WallBack");
-            wallPieces.Add(new KeyValuePair<Mesh, Matrix4x4>(m, T.worldToLocalMatrix * g.transform.localToWorldMatrix));
+            Vector2 ab = b - a, q = new Vector2(x, z) - a; float t = Mathf.Clamp01(Vector2.Dot(q, ab) / ab.sqrMagnitude); return (q - ab * t).magnitude;
         }
-        /// how far from 'o' along 'd' the rock of the walls is (9 = none within reach)
+        /// the rock field: > 0 in the air, < 0 in the rock (about metres)
+        float Air(Vector3 p)
+        {
+            float x = p.x, y = p.y, z = p.z;
+            float foot = Mathf.Clamp01(1 - y / 1.1f); foot *= foot;
+            float crestN = Fbm3(x * 0.23f + nOx, 0, z * 0.23f + nOz, 3) - 0.5f;
+            // the outline: rock outside the halls, leaning back as it rises; the near side (towards the camera) lower
+            float room = Mathf.Min(HX - Mathf.Abs(x), HZ - Mathf.Abs(z)) - 0.3f * foot + 0.1f * y;
+            float hOut = Mathf.Lerp(3.0f, 1.8f, Mathf.SmoothStep(0, 1, (z - (HZ - 2.5f)) / 2.5f)) + 1.1f * crestN;
+            float f = Mathf.Max(room, y - hOut);
+            foreach (var sg in rockSegs)
+            {
+                float d = SegDist(x, z, sg.a, sg.b) - sg.t - 0.3f * foot;
+                if (d > 1.6f) continue;
+                f = Mathf.Min(f, Mathf.Max(d, y - (sg.h + 0.9f * crestN)));
+            }
+            foreach (var sl in slots)
+            {
+                Vector3 ab = sl.b - sl.a; float t = Mathf.Clamp01(Vector3.Dot(p - sl.a, ab) / ab.sqrMagnitude);
+                f = Mathf.Max(f, sl.r - (p - (sl.a + ab * t)).magnitude);
+            }
+            if (Mathf.Abs(f) > 1.1f) return f;                   // far from any surface: no need for the detail
+            // domain warp, then the big shapes, the creases, the strata, the grain
+            float wx = x * 0.45f + nOx + 1.4f * Fbm3(x * 0.2f + nOx, y * 0.2f, z * 0.2f + nOz, 2);
+            float wy = y * 0.45f + nOy + 1.4f * Fbm3(x * 0.2f + nOz, y * 0.2f + 4.1f, z * 0.2f + nOx, 2);
+            float wz = z * 0.45f + nOz + 1.4f * Fbm3(x * 0.2f - 3.7f, y * 0.2f + nOy, z * 0.2f + 8.3f, 2);
+            float big = (Fbm3(wx, wy, wz, 3) - 0.5f) * 1.25f;
+            float crease = RidgedW(wx * 2.2f, wy * 2.2f, wz * 2.2f) * 0.26f;
+            float sv = y * 2.2f + 1.2f * Fbm3(x * 0.18f + nOx, 0.5f, z * 0.18f + nOz, 2), ledge = sv - Mathf.Floor(sv);
+            float strata = (1 - Mathf.SmoothStep(0, 1, ledge / 0.3f)) * 0.13f * Mathf.Clamp01(1.5f * Fbm3(x * 0.15f + 9, 0, z * 0.15f + 9, 2));
+            float grain = (N3(x * 5.1f + nOx, y * 5.1f, z * 5.1f + nOz) - 0.5f) * 0.05f;
+            return f + big - crease + 0.1f - strata + grain;
+        }
+        /// how far from 'o' along 'd' the rock is (9 = none within reach)
         float RayToWall(Vector3 o, Vector3 d, float maxD = 3f)
         {
-            float best = 9;
-            foreach (var kv in wallPieces)
+            float t = 0;
+            for (int i = 0; i < 300 && t < maxD; i++) { float f = Air(o + d * t); if (f < 0.004f) return t; t += Mathf.Max(0.008f, f * 0.5f); }
+            return 9;
+        }
+        void BuildRock(Transform T, Mats mats, Material mat)
+        {
+            nOx = Rr(0, 300); nOy = Rr(0, 300); nOz = Rr(0, 300);
+            // the plan: the two dividing walls with their passages
+            foreach (var r in new[] { new Vector2(-HZ - 1, -5.6f), new Vector2(-2.4f, 2.4f), new Vector2(5.6f, HZ + 1) })
+                rockSegs.Add(new RockSeg { a = new Vector2(0, r.x), b = new Vector2(0, r.y), t = 0.42f, h = Rr(2.1f, 2.6f) });
+            foreach (var r in new[] { new Vector2(-HX - 1, -4.6f), new Vector2(-1.4f, 3.4f), new Vector2(6.6f, HX + 1) })
+                rockSegs.Add(new RockSeg { a = new Vector2(r.x, 0.1f), b = new Vector2(r.y, 0.1f), t = 0.42f, h = Rr(2.1f, 2.6f) });
+            // the crevices the side light comes through (Beam below starts in them)
+            slots.Add(new Slot { a = new Vector3(12.5f, 2.1f, 4.65f), b = new Vector3(8.6f, 1.0f, 4.35f), r = 0.42f });
+            slots.Add(new Slot { a = new Vector3(-12.6f, 2.3f, -2.95f), b = new Vector3(-8.7f, 1.1f, -2.75f), r = 0.38f });
+            slots.Add(new Slot { a = new Vector3(-5.75f, 2.5f, -11.5f), b = new Vector3(-5.55f, 1.2f, -7.3f), r = 0.38f });
+
+            // the field on a grid
+            const float S = 0.17f; Vector3 o = new Vector3(-HX - 1.2f, -0.25f, -HZ - 1.2f);
+            int nx = Mathf.CeilToInt((2 * HX + 2.4f) / S) + 1, ny = Mathf.CeilToInt(4.1f / S) + 1, nz = Mathf.CeilToInt((2 * HZ + 2.4f) / S) + 1;
+            var F = new float[nx * ny * nz];
+            System.Func<int, int, int, int> I = (x, y, z) => (z * ny + y) * nx + x;
+            for (int z = 0; z < nz; z++) for (int y = 0; y < ny; y++) for (int x = 0; x < nx; x++)
+                    F[I(x, y, z)] = Air(o + new Vector3(x * S, y * S, z * S));
+            // surface nets: a vertex in every cell the surface passes through, at the mean of its edge crossings
+            var cellV = new Dictionary<int, int>(); var vs = new List<Vector3>(); var ns = new List<Vector3>();
+            int[,] E = { { 0, 1 }, { 2, 3 }, { 4, 5 }, { 6, 7 }, { 0, 2 }, { 1, 3 }, { 4, 6 }, { 5, 7 }, { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 } };
+            var cv = new float[8]; var cp = new Vector3[8];
+            for (int z = 0; z < nz - 1; z++) for (int y = 0; y < ny - 1; y++) for (int x = 0; x < nx - 1; x++)
+                    {
+                        int neg = 0;
+                        for (int k = 0; k < 8; k++)
+                        {
+                            int dx = k & 1, dy = (k >> 1) & 1, dz = (k >> 2) & 1;
+                            cv[k] = F[I(x + dx, y + dy, z + dz)]; cp[k] = new Vector3(dx, dy, dz); if (cv[k] < 0) neg++;
+                        }
+                        if (neg == 0 || neg == 8) continue;
+                        Vector3 sum = Vector3.zero; int cnt = 0;
+                        for (int e = 0; e < 12; e++)
+                        {
+                            float a = cv[E[e, 0]], b = cv[E[e, 1]]; if ((a < 0) == (b < 0)) continue;
+                            sum += Vector3.Lerp(cp[E[e, 0]], cp[E[e, 1]], a / (a - b)); cnt++;
+                        }
+                        var pw = o + (new Vector3(x, y, z) + sum / cnt) * S;
+                        cellV[I(x, y, z)] = vs.Count; vs.Add(pw);
+                    }
+            // the normals point into the air (the field's gradient)
+            const float G = 0.06f;
+            foreach (var pw in vs)
+                ns.Add(new Vector3(Air(pw + Vector3.right * G) - Air(pw - Vector3.right * G), Air(pw + Vector3.up * G) - Air(pw - Vector3.up * G), Air(pw + Vector3.forward * G) - Air(pw - Vector3.forward * G)).normalized);
+            // a quad for every grid edge the surface crosses, joining the four cells around it
+            var ts = new List<int>();
+            void Quad(int c0, int c1, int c2, int c3)
             {
-                var M = kv.Value; var bnd = kv.Key.bounds; var wc = M.MultiplyPoint3x4(bnd.center); float rr = bnd.extents.magnitude * 1.2f + maxD;
-                if ((wc - o).sqrMagnitude > rr * rr) continue;
-                var V = kv.Key.vertices; var Tr = kv.Key.triangles;
-                for (int t = 0; t < Tr.Length; t += 3)
+                int a, b, c, d; if (!cellV.TryGetValue(c0, out a) || !cellV.TryGetValue(c1, out b) || !cellV.TryGetValue(c2, out c) || !cellV.TryGetValue(c3, out d)) return;
+                foreach (var tri in new[] { new[] { a, b, c }, new[] { a, c, d } })
                 {
-                    Vector3 p0 = M.MultiplyPoint3x4(V[Tr[t]]), e1 = M.MultiplyPoint3x4(V[Tr[t + 1]]) - p0, e2 = M.MultiplyPoint3x4(V[Tr[t + 2]]) - p0;
-                    var pv = Vector3.Cross(d, e2); float det = Vector3.Dot(e1, pv); if (Mathf.Abs(det) < 1e-7f) continue;
-                    float inv = 1 / det; var tv = o - p0; float u = Vector3.Dot(tv, pv) * inv; if (u < 0 || u > 1) continue;
-                    var qv = Vector3.Cross(tv, e1); float v = Vector3.Dot(d, qv) * inv; if (v < 0 || u + v > 1) continue;
-                    float dist = Vector3.Dot(e2, qv) * inv; if (dist > 0 && dist < best && dist < maxD) best = dist;
+                    var nrm = Vector3.Cross(vs[tri[1]] - vs[tri[0]], vs[tri[2]] - vs[tri[0]]);
+                    if (Vector3.Dot(nrm, ns[tri[0]] + ns[tri[1]] + ns[tri[2]]) < 0) { ts.Add(tri[0]); ts.Add(tri[2]); ts.Add(tri[1]); }
+                    else { ts.Add(tri[0]); ts.Add(tri[1]); ts.Add(tri[2]); }
                 }
             }
-            return best;
+            for (int z = 1; z < nz - 1; z++) for (int y = 1; y < ny - 1; y++) for (int x = 1; x < nx - 1; x++)
+                    {
+                        float f0 = F[I(x, y, z)];
+                        if ((f0 < 0) != (F[I(x + 1, y, z)] < 0)) Quad(I(x, y - 1, z - 1), I(x, y, z - 1), I(x, y, z), I(x, y - 1, z));
+                        if ((f0 < 0) != (F[I(x, y + 1, z)] < 0)) Quad(I(x - 1, y, z - 1), I(x, y, z - 1), I(x, y, z), I(x - 1, y, z));
+                        if ((f0 < 0) != (F[I(x, y, z + 1)] < 0)) Quad(I(x - 1, y - 1, z), I(x, y - 1, z), I(x, y, z), I(x - 1, y, z));
+                    }
+            var m = new Mesh { name = "caverock", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+            m.SetVertices(vs); m.SetNormals(ns); m.uv = new Vector2[vs.Count]; m.SetTriangles(ts, 0); m.RecalculateBounds();
+            MeshGen.AddGlyphUV(m, false);
+            MeshGen.Obj(m, mat, T, Vector3.zero, Quaternion.identity, true, "Rock");
+            Debug.Log("Пещера: скала " + vs.Count + " вершин, " + ts.Count / 3 + " треугольников");
+
+            // collisions: circles along the outline and the dividing walls, each as big as the rock reaches into the hall
+            System.Func<Vector2, Vector2, float> reach = (q, inward) =>
+            {
+                for (float d = 0; d < 1.4f; d += 0.05f) if (Air(new Vector3(q.x + inward.x * d, 0.35f, q.y + inward.y * d)) > 0.02f) return d;
+                return 1.4f;
+            };
+            void Edge(Vector2 a, Vector2 b, Vector2 inward, float h)
+            {
+                var ab = b - a; float L = ab.magnitude; var dir = ab / L;
+                for (float t2 = 0; t2 <= L + 0.01f; t2 += 0.45f)
+                {
+                    var q = a + dir * t2; float r = reach(q, inward);
+                    colliders.Add(Collider2.Circle(q.x, q.y, Mathf.Max(0.35f, r + 0.12f)));
+                    if (Rnd() < 0.18f) { var mp = q + inward * (r + 0.15f); if (WaterK(mp.x, mp.y) > 1.2f) Moss(T, mats, mp.x, mp.y, Rr(0.3f, 0.55f), 0.01f); }
+                }
+                wallSegs.Add(new WallSeg { a = a, b = b, h = h });
+            }
+            Edge(new Vector2(-HX, -HZ), new Vector2(HX, -HZ), Vector2.up, 2.8f);
+            Edge(new Vector2(-HX, HZ), new Vector2(HX, HZ), Vector2.down, 1.9f);
+            Edge(new Vector2(-HX, -HZ), new Vector2(-HX, HZ), Vector2.right, 2.8f);
+            Edge(new Vector2(HX, -HZ), new Vector2(HX, HZ), Vector2.left, 2.8f);
+            foreach (var sg in rockSegs)
+            {
+                var a = sg.a; var b = sg.b; a.x = Mathf.Clamp(a.x, -HX, HX); b.x = Mathf.Clamp(b.x, -HX, HX); a.y = Mathf.Clamp(a.y, -HZ, HZ); b.y = Mathf.Clamp(b.y, -HZ, HZ);
+                var dir = (b - a).normalized; var side = new Vector2(-dir.y, dir.x);
+                Edge(a, b, side, sg.h);
+            }
         }
         /// a skeleton walled into the rock: its back sunk into the wall at (x, z) on the wall line; 'face' points into the room
         void WallSkeleton(Transform T, Mats mats, string pose, Vector2 at, Vector2 face, float s, float tilt)
