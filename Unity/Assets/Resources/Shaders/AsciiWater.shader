@@ -73,29 +73,32 @@ Shader "AsciiHero/Water"
                 float shore = i.seed.x;                          // 0 in the middle .. 1 at the shore
                 float3 w = Waves(p.xz, t) * (1.0 - 0.6 * shore);
                 // rings from the hero's steps
-                float ring = 0; float2 rsl = 0;
+                float ring = 0, best = 0; float2 rsl = 0, bdv = float2(1, 0);
                 [unroll] for (int k = 0; k < 8; k++)
                 {
                     float4 r = _WaterRip[k]; float age = t - r.z;
                     if (r.w <= 0.0 || age < 0.0 || age > 3.5) continue;
-                    float2 dv = p.xz - r.xy; float d = length(dv), rad = 0.12 + 0.62 * age * (1.0 - 0.08 * age);
-                    float x = (d - rad) / (0.07 + 0.03 * age), e = exp(-x * x) * r.w * exp(-1.25 * age);
+                    float2 dv = p.xz - r.xy; float d = length(dv), rad = 0.1 + 0.55 * age * (1.0 - 0.07 * age);
+                    float x = (d - rad) / (0.045 + 0.02 * age), e = exp(-x * x) * r.w * exp(-0.85 * age);
                     ring += e; rsl += -x * e * dv / max(d, 1e-3) * 3.0;
+                    if (e > best) { best = e; bdv = dv; }
                 }
                 // foam lines at the shore running inwards
                 float foam = shore > 0.7 ? saturate(sin((shore * 2.6 + t * 0.35) * 6.2832 + rs * 1.5) * 1.6 - 0.6) * smoothstep(0.7, 1.0, shore) : 0;
                 // the reflection of the sky
                 float3 V = normalize(p - _WorldSpaceCameraPos);
-                float3 N = normalize(float3(-(w.y * 0.22 + rsl.x * 0.25), 1.0, -(w.z * 0.22 + rsl.y * 0.25)));
+                // the mirror is tilted only a little by the waves, so the moon and the stars stay sharp (the waves show in the
+                // characters of the water itself)
+                float3 N = normalize(float3(-(w.y * 0.045 + rsl.x * 0.035), 1.0, -(w.z * 0.045 + rsl.y * 0.035)));
                 float3 R = reflect(V, N);
                 float fres = 0.35 + 0.65 * pow(1.0 - saturate(dot(-V, N)), 3.0);
                 float3 M = normalize(_MoonDir.xyz);
                 float md = acos(clamp(dot(R, M), -1.0, 1.0));
-                float moon = 1.0 - smoothstep(0.05, 0.075, md), halo = (1.0 - smoothstep(0.075, 0.24, md)) * (1.0 - moon);
+                float moon = md < 0.062 ? 1.0 : 0.0, halo = (1.0 - smoothstep(0.07, 0.22, md)) * (1.0 - moon);
                 // stars: the reflected direction picks a cell of a star map; a star shows in few of them, and it twinkles
                 float2 sd = R.xz / max(R.y, 0.15) * 52.0;
                 float2 sc = floor(sd), sf = frac(sd);
-                float sh = WHash(sc + 17.0), tw = 0.55 + 0.45 * sin(t * (2.0 + 3.0 * WHash(sc + 3.0)) + sh * 40.0);
+                float sh = WHash(sc + 17.0), tw = 0.78 + 0.22 * sin(t * (2.0 + 3.0 * WHash(sc + 3.0)) + sh * 40.0);
                 float star = sh > 0.955 && R.y > 0.05 && length(sf - 0.5) < 0.42 ? tw * (0.5 + 0.5 * WHash(sc + 9.0)) : 0;
                 // what stands in the water (the hero) hides the cells behind it
                 float3 pVS = TransformWorldToView(p);
@@ -113,10 +116,19 @@ Shader "AsciiHero/Water"
                     row = 9.0; gi = md < 0.03 ? 7.0 : 5.0;
                     col = float3(1.0, 0.96, 0.82) * (1.1 + 0.5 * fres);
                 }
-                else if (halo > 0.25 && WHash(p.xz * 13.0 + floor(t * 3.0)) < halo * 1.2)
+                else if (halo > 0.25 && WHash(floor(p.xz * 10.0) + 0.5) < halo * 1.1)
                 {
                     row = 9.0; gi = halo > 0.6 ? 3.0 : (halo > 0.4 ? 2.0 : 1.0);
                     col = float3(0.85, 0.86, 0.95) * (0.35 + 0.6 * halo) * fres;
+                }
+                else if (best > 0.26)
+                {
+                    // a ring: drawn with line characters following its curve, as a circle would be drawn in ASCII
+                    float2 tg = float2(-bdv.y, bdv.x);                       // tangent on the ground
+                    float2 sc2 = float2(-tg.x, -tg.y * 0.82);                  // on the screen (x right, y up; the camera looks along -z)
+                    float an = atan2(sc2.y, sc2.x); an = an < 0.0 ? an + 3.14159 : an;     // 0 .. pi
+                    row = 12.0; gi = an < 0.39 || an > 2.75 ? 1.0 : an < 1.18 ? 2.0 : an < 1.96 ? 0.0 : 3.0;     // - / | \
+                    col = float3(0.78, 0.88, 1.0) * (0.55 + 0.75 * saturate(best));
                 }
                 else if (star > 0.15 && ring < 0.25)
                 {

@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.38 · Unity";
+        public const string VERSION = "beta 0.39 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -122,7 +122,8 @@ namespace AsciiHero
         readonly string[] saveInfo = new string[SAVE_SLOTS]; readonly bool[] saveHas = new bool[SAVE_SLOTS]; bool saveInfoDirty = true; const int SAVE_SLOTS = 3;
         // the lake: rings from the hero's steps (x, z, birth time, strength)
         readonly Vector4[] ripples = new Vector4[8]; int rippleIx; float rippleT;
-        GUIStyle sDoll;
+        GUIStyle sDoll, sBag;
+        float invT, invBlend, invCamDist = 5, heroSink;      // the backpack's portrait camera; how deep the hero stands in the lake
 
         // UI
         float k = 1; Rect safe; int tab; string toast; float toastT;
@@ -924,7 +925,9 @@ namespace AsciiHero
                 }
                 player.HoldInPlace(dt);
             }
-            if (player.driver == null && !perfNoAnim) { long tA = System.Diagnostics.Stopwatch.GetTimestamp(); player.Animate(tNow, dt); accA += Ms(tA); }   // Animator mode: after the Animator, in LateUpdate
+            bool frozen = world && invOpen && invT > 0.6f;      // in the backpack the hero stands still, like a model on a stand
+            if (world && invOpen) { invT += dt; player.PokeIdle(); }
+            if (player.driver == null && !perfNoAnim && !frozen) { long tA = System.Diagnostics.Stopwatch.GetTimestamp(); player.Animate(tNow, dt); accA += Ms(tA); }   // Animator mode: after the Animator, in LateUpdate
             if (toastT > 0) toastT -= dt;
             fpsAcc += Time.unscaledDeltaTime; fpsN++;
             if (fpsAcc > 1)
@@ -1248,7 +1251,12 @@ namespace AsciiHero
             pos = new Vector3(np.x, 0, np.y);
             UpdateDash(dt);
             if (player.trail.Count > 0) { foreach (var q in player.trail) SpawnPuff(q, 0.03f, Vector3.zero, 0.3f); player.trail.Clear(); }
-            hero.go.transform.position = pos;
+            // in the lake the hero sinks a little (up to 18 cm in the middle; the feet and shins are under the surface)
+            {
+                float want = loc == field ? 0.18f * Mathf.SmoothStep(0, 1, Mathf.InverseLerp(1.0f, 0.55f, Field.LakeK(pos.x, pos.z))) : 0;
+                heroSink += (want - heroSink) * Mathf.Min(1, dt * 6);
+            }
+            hero.go.transform.position = pos + Vector3.down * heroSink;
             float idleYaw = 0;
             if (player.idleYawW > 0) { Vector3 co = Mirror(new Vector3(Mathf.Sin(isoYaw), 0, Mathf.Cos(isoYaw))); idleYaw = Mathf.DeltaAngle(player.heading * Mathf.Rad2Deg, Mathf.Atan2(co.x, co.z) * Mathf.Rad2Deg) * Mathf.Deg2Rad * player.idleYawW; }   // waving: turned to the camera
             hero.go.transform.rotation = Quaternion.Euler(0, (player.heading - player.spinYaw + idleYaw) * Mathf.Rad2Deg, 0);      // the full-turn sweep spins the whole figure
@@ -1259,8 +1267,8 @@ namespace AsciiHero
                 float sp = player.Velocity.magnitude; rippleT -= dt;
                 if (Field.LakeK(pos.x, pos.z) < 0.97f && rippleT <= 0)
                 {
-                    ripples[rippleIx] = new Vector4(pos.x, pos.z, tNow, sp > 0.3f ? 0.75f + 0.12f * Mathf.Min(sp, 4f) : 0.4f); rippleIx = (rippleIx + 1) % ripples.Length;
-                    rippleT = sp > 0.3f ? Mathf.Lerp(0.45f, 0.24f, Mathf.Clamp01(sp / 4f)) : 1.3f + Random.value;
+                    ripples[rippleIx] = new Vector4(pos.x, pos.z, tNow, sp > 0.3f ? 1.15f + 0.15f * Mathf.Min(sp, 4f) : 0.7f); rippleIx = (rippleIx + 1) % ripples.Length;
+                    rippleT = sp > 0.3f ? Mathf.Lerp(0.42f, 0.24f, Mathf.Clamp01(sp / 4f)) : 1.1f + Random.value;
                 }
                 Shader.SetGlobalVectorArray("_WaterRip", ripples);
             }
@@ -1287,7 +1295,7 @@ namespace AsciiHero
                 Shader.SetGlobalVector("_AsciiWind", new Vector4(wd.x, wd.y, windStr, windRun));
                 windV = new Vector3(wd.x, 0, wd.y) * (windStr * 2.4f);
             }
-            if (cloak != null && !perfNoAnim) { long tC = System.Diagnostics.Stopwatch.GetTimestamp(); cloak.Update(dt, windV); accA += Ms(tC); if (clothMpb == null) clothMpb = new MaterialPropertyBlock(); cloak.Apply(clothMpb, cloakRs); }
+            if (cloak != null && !perfNoAnim && !(invOpen && invT > 0.6f)) { long tC = System.Diagnostics.Stopwatch.GetTimestamp(); cloak.Update(dt, windV); accA += Ms(tC); if (clothMpb == null) clothMpb = new MaterialPropertyBlock(); cloak.Apply(clothMpb, cloakRs); }
             // grass is pressed down by the body itself - the feet, the pelvis over it, a weapon swept low - not by a collision circle
             {
                 var hb = hero.human; Transform fL = hb.Bone("foot.L"), fR = hb.Bone("foot.R"), rt = hb.Bone("root");
@@ -1315,6 +1323,25 @@ namespace AsciiHero
             camTgt = Vector3.Lerp(camTgt, new Vector3(pos.x, 0.6f, pos.z), Mathf.Min(1, dt * 5));
             sceneCam.transform.position = camTgt + off; sceneCam.transform.LookAt(camTgt);
             sceneCam.fieldOfView = 30 * (1 - 0.014f * heart);
+            // the backpack: the camera swings round in front of the hero and frames him in the left window
+            invBlend += ((invOpen ? 1f : 0f) - invBlend) * Mathf.Min(1, dt * 7);
+            if (invBlend > 0.002f)
+            {
+                Rect lp = BackpackLayout(Screen.width, Screen.height, out _, out _);
+                float W = Mathf.Max(1, Screen.width), H = Mathf.Max(1, Screen.height), asp = W / H, th = Mathf.Tan(15f * Mathf.Deg2Rad);
+                float hm = cfg.height / 100f, D = hm / (0.8f * Mathf.Max(0.3f, lp.height / H) * 2 * th);
+                invCamDist = D;
+                float hdg = player.heading - player.spinYaw;
+                Vector3 fwd = new Vector3(Mathf.Sin(hdg), 0, Mathf.Cos(hdg)), hp = hero.go.transform.position;
+                Vector3 cpos = hp + fwd * D + Vector3.up * (hm * 0.62f), look = -fwd, right = Vector3.Cross(Vector3.up, look).normalized;
+                float fx = lp.center.x / W, fy = lp.center.y / H, V = 2 * D * th;
+                Vector3 tgt = hp + Vector3.up * (hm * 0.5f + (fy - 0.5f) * V) + right * ((0.5f - fx) * V * asp);
+                var rot = Quaternion.LookRotation(tgt - cpos);
+                sceneCam.transform.position = Vector3.Lerp(sceneCam.transform.position, cpos, invBlend);
+                sceneCam.transform.rotation = Quaternion.Slerp(sceneCam.transform.rotation, rot, invBlend);
+                loc.Cutaway(sceneCam.transform.position - hp);
+                heroLight.transform.position = Vector3.Lerp(heroLight.transform.position, hp + fwd * 1.4f + right * 0.5f + Vector3.up * 2.0f, invBlend);
+            }
         }
 
         /// a direction on the screen (x right, y down) as a direction on the ground (web direction, mirrored on X)
@@ -1355,7 +1382,7 @@ namespace AsciiHero
         void OpenBackpack()
         {
             if (!world || perfRun) return;
-            invOpen = true; menuFromWorld = false;
+            invOpen = true; menuFromWorld = false; invT = 0;
             stickId = int.MinValue; stick = Vector2.zero; stickRun = 0; stickRunArmed = false;
             foreach (var q in InputHub.active.Values) q.owner = "ui";
         }
@@ -1385,7 +1412,7 @@ namespace AsciiHero
             float dp = Screen.dpi > 0 ? Mathf.Clamp(Screen.dpi / 160f, 1f, 4f) : Mathf.Max(1f, k);
             float wcss = vr.width / dp;
             float cell = Mathf.Max(4f / dp, world ? Mathf.Min(1.7f, wcss / 540f) : Mathf.Min(2.0f, wcss / 310f));
-            float viewDist = world ? ISO_DIST / worldZoom : cam.dist;
+            float viewDist = world ? Mathf.Lerp(ISO_DIST / worldZoom, invCamDist, invBlend) : cam.dist;
             ascii.depthRef = viewDist;
             // characters: how many of their glyphs are drawn follows their size on the screen (pixels per glyph cell)
             {
@@ -1713,45 +1740,39 @@ namespace AsciiHero
         }
 
         // ---------- backpack ----------
-        static readonly string[] DOLL = {
-            "    .---.    ",
-            "    |o o|    ",
-            "    '-^-'    ",
-            "  .--|=|--.  ",
-            " / /|###|\\ \\ ",
-            "/ / |###| \\ \\",
-            "|_| |###| |_|",
-            "    |_|_|    ",
-            "    /   \\    ",
-            "   / / \\ \\   ",
-            "  / /   \\ \\  ",
-            " /_/     \\_\\ " };
-        // which part each character belongs to (the doll faces us: his right arm is on our left)
-        static readonly string[] DOLL_M = {
-            "    hhhhh    ",
-            "    hhhhh    ",
-            "    hhhhh    ",
-            "  rrrtttlll  ",
-            " rrrtttttlll ",
-            "rrr ttttt lll",
-            "rrr ttttt lll",
-            "    ttttt    ",
-            "    R   L    ",
-            "   RRR LLL   ",
-            "  RRR   LLL  ",
-            " RRR     LLL " };
-        static string ArmorColour(string a)
+        // After the classic paper doll of RPGs: the hero himself in the left window (the camera turns to him, he stands
+        // still); what is missing of him is outlined in red dots on the model; the weapon slots beside his hands. On the
+        // right the backpack, drawn in characters, with its grid of cells.
+        Rect BackpackLayout(float W, float H, out Rect btn, out Rect rp)
         {
-            switch (a) { case "cloth": return "#d6c59c"; case "leather": return "#b8834c"; case "chain": return "#a9b1bd"; case "plate": return "#c6cfdb"; case "robe": return "#7080e0"; default: return "#9a8fb0"; }
+            float bw = 150 * k, bx = safe.x + 14 * k, R = safe.xMax - 12 * k, T = safe.y + 46 * k;
+            btn = new Rect(bx, 0, bw, H);
+            float px0 = bx + bw + 16 * k, pw = R - px0, ph = safe.yMax - 10 * k - T, lw = pw * 0.5f;
+            rp = new Rect(px0 + lw + 10 * k, T, pw - lw - 10 * k, ph);
+            return new Rect(px0, T, lw, ph);
         }
-        string ArmorName() { foreach (var a in Character.ARMORS) if (a[0] == cfg.armor) return a[1]; return "—"; }
-        string WeaponName() { foreach (var w in Character.WEAPONS) if (w[0] == cfg.weapon) return w[1]; return "—"; }
+        string ArmorName() { foreach (var x in Character.ARMORS) if (x[0] == cfg.armor) return x[1]; return "—"; }
+        string WeaponName() { foreach (var x in Character.WEAPONS) if (x[0] == cfg.weapon) return x[1]; return "—"; }
+        static readonly string[] SHIELD_ICON = { " /-\\ ", " |+| ", " \\_/ ", "     " };
+        string[] SlotArt(string id)
+        {
+            string[] art = null;
+            if (id == "shieldonly") art = SHIELD_ICON;
+            else if (id != null) { string ic; if (ICON.TryGetValue(id, out ic)) art = ic.Split('\n'); }
+            var o = new string[6]; o[0] = ".-------."; o[5] = "'-------'";
+            for (int i = 0; i < 4; i++) { string l = art != null && i < art.Length ? art[i] : ""; l = (l + "     ").Substring(0, 5); o[i + 1] = "| " + l + " |"; }
+            return o;
+        }
         void BackpackUI(float W, float H)
         {
-            Fill(new Rect(0, 0, W, H), new Color(0.01f, 0.01f, 0.02f, 0.82f));
-            var gold = new Color(0.93f, 0.74f, 0.33f); var line = new Color(0.32f, 0.3f, 0.26f, 1);
+            Rect btnCol, rp; var lp = BackpackLayout(W, H, out btnCol, out rp);
+            var gold = new Color(0.93f, 0.74f, 0.33f); var line = new Color(0.45f, 0.4f, 0.3f, 1); var dim = new Color(0.01f, 0.01f, 0.02f, 0.84f);
+            // everything but the hero's window is dimmed
+            Fill(new Rect(0, 0, lp.x, H), dim); Fill(new Rect(lp.xMax, 0, W - lp.xMax, H), dim);
+            Fill(new Rect(lp.x, 0, lp.width, lp.y), dim); Fill(new Rect(lp.x, lp.yMax, lp.width, H - lp.yMax), dim);
+            Frame(lp, line, Mathf.Max(1, k)); uiRects.Add(lp);
             // the game's own buttons: on the left, in the middle
-            float bw = 150 * k, bh = 38 * k, gap = 10 * k, bx = safe.x + 14 * k, by = H / 2 - (4 * bh + 3 * gap) / 2;
+            float bw = btnCol.width, bh = 38 * k, gap = 10 * k, bx = btnCol.x, by = H / 2 - (4 * bh + 3 * gap) / 2;
             if (Button(new Rect(bx, by, bw, bh), "СОХРАНИТЬ")) { saveMode = 1; menuPage = 3; menuFromWorld = true; saveInfoDirty = true; }
             if (Button(new Rect(bx, by + (bh + gap), bw, bh), "ЗАГРУЗИТЬ")) { saveMode = 2; menuPage = 3; menuFromWorld = true; saveInfoDirty = true; }
             if (Button(new Rect(bx, by + 2 * (bh + gap), bw, bh), "НАСТРОЙКИ")) { menuPage = 1; menuFromWorld = true; }
@@ -1759,74 +1780,112 @@ namespace AsciiHero
             float R = safe.xMax - 12 * k, T = safe.y + 10 * k;
             if (Button(new Rect(R - 110 * k, T, 110 * k, 28 * k), "ЗАКРЫТЬ")) { invOpen = false; return; }
             if (setDev && Button(new Rect(R - 226 * k, T, 110 * k, 28 * k), "УРОН −10%")) Damage(10);
-            float px0 = bx + bw + 16 * k, pw = R - px0, top = T + 36 * k, ph = safe.yMax - 10 * k - top;
-            float lw = pw * 0.54f;
-            var lp = new Rect(px0, top, lw, ph); var rp = new Rect(px0 + lw + 10 * k, top, pw - lw - 10 * k, ph);
-            foreach (var pr in new[] { lp, rp }) { Fill(pr, new Color(0.07f, 0.07f, 0.09f, 0.96f)); Frame(pr, line, Mathf.Max(1, k)); uiRects.Add(pr); }
-
-            // --- left: the hero, what he wears, what is left of him
             GUI.Label(new Rect(lp.x + 10 * k, lp.y + 6 * k, lp.width - 20 * k, 22 * k), "СНАРЯЖЕНИЕ", sTitle);
-            int fs = Mathf.Max(7, Mathf.RoundToInt(Mathf.Min(13 * k, (lp.height - 44 * k) / (DOLL.Length * 1.2f))));
+            if (invBlend < 0.85f) return;        // (the camera is still turning)
+
+            int fs = Mathf.Max(7, Mathf.RoundToInt(11 * k));
             if (sDoll == null || sDoll.fontSize != fs)
             {
                 sDoll = new GUIStyle(sMono) { richText = true, alignment = TextAnchor.UpperLeft, fontSize = fs, wordWrap = false };
                 sDoll.normal.textColor = Color.white;
             }
-            var sb = new System.Text.StringBuilder(); string ac = ArmorColour(cfg.armor);
-            for (int li = 0; li < DOLL.Length; li++)
+            float cw = fs * 0.62f, lh = fs * 1.18f;
+            Vector2 Scr(Vector3 w) { var v = sceneCam.WorldToViewportPoint(w); return new Vector2(v.x * W, (1 - v.y) * H); }
+            // what is missing of the hero: its outline in red dots where it should be
+            var red = new Color(0.9f, 0.25f, 0.22f, 0.95f);
+            void Dot(Vector3 w) { var q = Scr(w); var old = GUI.color; GUI.color = red; GUI.Label(new Rect(q.x - cw * 0.5f, q.y - lh * 0.55f, cw * 2, lh), ":", sDoll); GUI.color = old; }
+            var hb = hero.human; Transform root = hero.go.transform; float hm = cfg.height / 100f;
+            Vector3 upW = Vector3.up, side = root.right;
+            for (int l = 0; l < 5; l++)
             {
-                string row = DOLL[li], msk = DOLL_M[li]; string cur = null;
-                for (int ci = 0; ci < row.Length; ci++)
-                {
-                    char m = ci < msk.Length ? msk[ci] : ' ', c = row[ci];
-                    int limb = m == 'h' ? 0 : m == 'l' ? 1 : m == 'r' ? 2 : m == 'L' ? 3 : m == 'R' ? 4 : -1;
-                    bool have = limb < 0 || limbs[limb];
-                    string colr = c == ' ' ? null : have ? ac : "#6a2424";
-                    if (!have && c != ' ') c = '.';
-                    if (colr != cur) { if (cur != null) sb.Append("</color>"); if (colr != null) sb.Append("<color=").Append(colr).Append('>'); cur = colr; }
-                    sb.Append(c);
+                if (limbs[l]) continue;
+                var b = hb.Bone(Character.LIMB_BONE[l]); if (b == null) continue;
+                Vector3 o = b.position;
+                if (l == 0)
+                {   // the head: a ring of dots above the neck
+                    Vector3 c = o + upW * (0.11f * hm / 1.8f); float r = 0.11f * hm / 1.8f;
+                    for (int a = 0; a < 14; a++) { float t = a / 14f * Mathf.PI * 2; Dot(c + side * (Mathf.Cos(t) * r) + upW * (Mathf.Sin(t) * r * 1.2f)); }
                 }
-                if (cur != null) sb.Append("</color>");
-                if (li < DOLL.Length - 1) sb.Append('\n');
+                else
+                {   // an arm or a leg: two dotted lines down from the shoulder or the hip, a little apart
+                    bool arm = l <= 2; float len = (arm ? 0.6f : 0.86f) * hm / 1.8f, wdt = (arm ? 0.05f : 0.075f) * hm / 1.8f;
+                    float outw = arm ? (l == 1 ? -1 : 1) * 0.06f * hm / 1.8f : 0;      // (the hero's left is the root's -x? keep both arms clear of the body)
+                    Vector3 dirD = (Vector3.down * 0.97f + side * outw).normalized;
+                    for (int a = 0; a <= 9; a++)
+                    {
+                        float t = a / 9f; Vector3 p0 = o + dirD * (len * t);
+                        Dot(p0 + side * wdt); Dot(p0 - side * wdt);
+                    }
+                    Dot(o + dirD * len);
+                }
             }
-            float dw = lp.width * 0.4f;
-            GUI.Label(new Rect(lp.x + 12 * k, lp.y + 34 * k, dw, lp.height - 40 * k), sb.ToString(), sDoll);
-            // the pieces, one per row: where, what, in what state
-            float sx = lp.x + dw + 14 * k, sw = lp.xMax - sx - 10 * k, sy = lp.y + 34 * k, rh = Mathf.Min(24 * k, (lp.height - 74 * k) / 7f);
-            string armor = ArmorName();
-            void Slot(string where, string what, string state, bool ok)
+            // the weapon slots, beside his hands (his right hand is on our left: he faces us)
+            string main = cfg.weapon == "none" ? null : cfg.weapon == "shield" ? "sword" : cfg.weapon;
+            string off = cfg.weapon == "shield" ? "shieldonly" : cfg.weapon == "axe" ? "axe" : null;
+            Transform wr = hb.Bone("wrist.R"), wl = hb.Bone("wrist.L");
+            float slotW = cw * 9 + 4 * k, slotH = lh * 6;
+            Vector2 heroC = Scr(root.position + upW * hm * 0.5f);
+            float hy = wr != null ? Scr(wr.position).y : heroC.y;
+            float halfBody = Mathf.Abs(Scr(root.position + side * 0.32f * hm / 1.8f).x - heroC.x);
+            void SlotBox(float x, string id, string caption, bool have, string name)
             {
-                GUI.Label(new Rect(sx, sy, sw * 0.38f, rh), where, sBadge);
-                GUI.Label(new Rect(sx + sw * 0.38f, sy, sw * 0.62f, rh), what + (state != null ? "  <color=" + (ok ? "#8fd18f" : "#e06060") + ">" + state + "</color>" : ""), sBadge);
-                Fill(new Rect(sx, sy + rh - 1, sw, Mathf.Max(1, k * 0.5f)), new Color(0.25f, 0.24f, 0.22f, 0.6f));
-                sy += rh;
+                float y = Mathf.Clamp(hy - slotH / 2, lp.y + 30 * k, lp.yMax - slotH - 30 * k);
+                x = Mathf.Clamp(x, lp.x + 6 * k, lp.xMax - slotW - 6 * k);
+                var art = SlotArt(have ? id : null); var sb2 = new System.Text.StringBuilder();
+                for (int i = 0; i < art.Length; i++)
+                {
+                    string a = art[i];
+                    if (i == 0 || i == art.Length - 1) sb2.Append("<color=#8a7a5a>").Append(a).Append("</color>");
+                    else sb2.Append("<color=#8a7a5a>| </color><color=#e8c070>").Append(a.Substring(2, 5)).Append("</color><color=#8a7a5a> |</color>");
+                    if (i < art.Length - 1) sb2.Append('\n');
+                }
+                GUI.Label(new Rect(x, y, slotW + 20 * k, slotH + 4 * k), sb2.ToString(), sDoll);
+                GUI.Label(new Rect(x - 20 * k, y + slotH + 2 * k, slotW + 40 * k, 16 * k), caption, sSmall);
+                GUI.Label(new Rect(x - 20 * k, y + slotH + 16 * k, slotW + 40 * k, 16 * k), have ? name : "пусто", sSmall);
             }
-            Slot("Голова", armor, limbs[0] ? "цела" : "оторвана", limbs[0]);
-            Slot("Торс", armor, "цел", true);
-            Slot("Правая рука", armor, limbs[2] ? "цела" : "оторвана", limbs[2]);
-            Slot("Левая рука", armor, limbs[1] ? "цела" : "оторвана", limbs[1]);
-            Slot("Правая нога", armor, limbs[4] ? "цела" : "оторвана", limbs[4]);
-            Slot("Левая нога", armor, limbs[3] ? "цела" : "оторвана", limbs[3]);
-            Slot("Оружие", WeaponName(), null, true);
-            // integrity
-            sy += 8 * k;
-            GUI.Label(new Rect(sx, sy, sw, 18 * k), "Целостность доспеха: " + hp + " %", sBadge);
-            var bar = new Rect(sx, sy + 20 * k, sw, 8 * k);
+            string wname = WeaponName();
+            SlotBox(heroC.x - halfBody - slotW - 18 * k, main, "ПРАВАЯ РУКА", main != null, cfg.weapon == "shield" ? "Меч" : wname);
+            SlotBox(heroC.x + halfBody + 18 * k, off, "ЛЕВАЯ РУКА", off != null, cfg.weapon == "shield" ? "Щит" : cfg.weapon == "axe" ? "Томагавк" : "");
+            // integrity and armour, under the model
+            GUI.Label(new Rect(lp.x + 10 * k, lp.yMax - 40 * k, lp.width - 20 * k, 16 * k), ArmorName() + " · целостность " + hp + " %", sSmall);
+            var bar = new Rect(lp.x + lp.width * 0.2f, lp.yMax - 20 * k, lp.width * 0.6f, 6 * k);
             Fill(bar, new Color(0.15f, 0.14f, 0.13f, 1)); Fill(new Rect(bar.x, bar.y, bar.width * hp / 100f, bar.height), hp > 50 ? gold : new Color(0.85f, 0.25f, 0.2f));
 
-            // --- right: the backpack itself, a grid of cells
-            const int GC = 6, GR = 4;
+            // --- right: the backpack, in characters
+            Fill(rp, new Color(0.05f, 0.05f, 0.06f, 0.6f)); uiRects.Add(rp);
             GUI.Label(new Rect(rp.x + 10 * k, rp.y + 6 * k, rp.width - 20 * k, 22 * k), "РЮКЗАК", sTitle);
-            GUI.Label(new Rect(rp.x + 10 * k, rp.y + 8 * k, rp.width - 20 * k, 18 * k), inventory.Count + " / " + (GC * GR), sRight);
-            float cell = Mathf.Min((rp.width - 20 * k) / GC, (rp.height - 64 * k) / GR), gx = rp.x + (rp.width - cell * GC) / 2, gy = rp.y + 34 * k;
-            for (int r = 0; r < GR; r++)
-                for (int c = 0; c < GC; c++)
+            GUI.Label(new Rect(rp.x + 10 * k, rp.y + 8 * k, rp.width - 20 * k, 18 * k), inventory.Count + " / 24", sRight);
+            string Bag()
+            {
+                const string L = "<color=#a8763e>", G = "<color=#6e5e48>", Y = "<color=#e8b443>", E = "</color>";
+                var b = new System.Text.StringBuilder();
+                b.Append(L).Append("          .-------.          ").Append(E).Append('\n');
+                b.Append(L).Append("         /  .---.  \\         ").Append(E).Append('\n');
+                b.Append(L).Append(" .-------'--'---'--'-------. ").Append(E).Append('\n');
+                b.Append(L).Append(" |  .-------------------.  | ").Append(E).Append('\n');
+                b.Append(L).Append(" |  |").Append(E).Append(Y).Append("       (=O=)       ").Append(E).Append(L).Append("|  | ").Append(E).Append('\n');
+                b.Append(L).Append(" |  '-------------------'  | ").Append(E).Append('\n');
+                for (int r = 0; r < 4; r++)
                 {
-                    var cr = new Rect(gx + c * cell + 2 * k, gy + r * cell + 2 * k, cell - 4 * k, cell - 4 * k);
-                    Fill(cr, new Color(0.11f, 0.11f, 0.13f, 1)); Frame(cr, line, Mathf.Max(1, k));
-                    int ii = r * GC + c; if (ii < inventory.Count) GUI.Label(cr, inventory[ii], sSmall);
+                    b.Append(L).Append(" | ").Append(E).Append(G).Append("+---+---+---+---+---+---+").Append(E).Append(L).Append(" | ").Append(E).Append('\n');
+                    b.Append(L).Append(" | ").Append(E).Append(G).Append('|');
+                    for (int c = 0; c < 6; c++)
+                    {
+                        int ii = r * 6 + c; string it = ii < inventory.Count && inventory[ii].Length > 0 ? inventory[ii].Substring(0, 1) : " ";
+                        b.Append(' ').Append(E).Append(Y).Append(it).Append(E).Append(G).Append(" |");
+                    }
+                    b.Append(E).Append(L).Append(" | ").Append(E).Append('\n');
                 }
-            if (inventory.Count == 0) GUI.Label(new Rect(rp.x + 10 * k, gy + GR * cell + 6 * k, rp.width - 20 * k, 18 * k), "Пусто: найденные вещи будут лежать здесь", sSmall);
+                b.Append(L).Append(" | ").Append(E).Append(G).Append("+---+---+---+---+---+---+").Append(E).Append(L).Append(" | ").Append(E).Append('\n');
+                b.Append(L).Append(" |                         | ").Append(E).Append('\n');
+                b.Append(L).Append(" '-------------------------' ").Append(E);
+                return b.ToString();
+            }
+            int lines = 17, cols = 29;
+            int bfs = Mathf.Max(7, Mathf.FloorToInt(Mathf.Min((rp.width - 16 * k) / (cols * 0.62f), (rp.height - 56 * k) / (lines * 1.18f))));
+            if (sBag == null || sBag.fontSize != bfs) { sBag = new GUIStyle(sMono) { richText = true, alignment = TextAnchor.UpperCenter, fontSize = bfs, wordWrap = false }; sBag.normal.textColor = Color.white; }
+            GUI.Label(new Rect(rp.x, rp.y + 32 * k, rp.width, rp.height - 40 * k), Bag(), sBag);
+            if (inventory.Count == 0) GUI.Label(new Rect(rp.x + 10 * k, rp.yMax - 22 * k, rp.width - 20 * k, 16 * k), "Пусто: найденные вещи будут лежать здесь", sSmall);
         }
 
         // ---------- saves ----------

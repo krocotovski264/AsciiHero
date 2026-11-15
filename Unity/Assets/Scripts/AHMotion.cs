@@ -197,6 +197,9 @@ namespace AsciiHero
             if (driver != null) return AnimatorLocomotion(dt, dir, mag, spd, vgx, vgz, hGoal, myPos);
             loopMode = !useMM && !lockPos.HasValue;
             if (loopMode) return LoopLocomotion(dt, myPos);
+            // (the walk and run weights also decide how much the fighting layers hold the legs: keep them up to date here
+            // too, or a hero who started a fight standing still kept his legs frozen in the stance while he moved)
+            { float v = Mathf.Sqrt(S.vx * S.vx + S.vz * S.vz); wRun = Smooth01(1.6f, 2.5f, v); wWalk = Smooth01(0.04f, 0.5f, v); phase = (phase + dt / Mathf.Max(0.3f, LWalk != null ? LWalk.T : 1f) * Mathf.Clamp(v / 1.4f, 0.55f, 1.5f)) % 1f; }
 
             // ---- query: current pose features + predicted trajectory relative to the character ----
             int NF = MotionDB.nf; var mean = MotionDB.mean; var scale = MotionDB.scale;
