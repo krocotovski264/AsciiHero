@@ -23,6 +23,7 @@ Shader "Hidden/AsciiHero/Pocket"
             float4 _PRect;      // the drawn rectangle on the screen (px, y down): x, y, w, h
             float4 _PC1, _PC2;  // the two clouds: centre x, y, radius (px)
             float4 _PCell;      // the character cell (px) w, h; outline width (px); unused
+            float4 _PRim[44], _PFly[16];
             float H1(float n) { return frac(sin(n * 127.1) * 43758.5453); }
             float H2(float2 p) { p = frac(p * float2(123.34, 456.21)); p += dot(p, p + 45.32); return frac(p.x * p.y); }
             float N2(float2 p)
@@ -35,8 +36,8 @@ Shader "Hidden/AsciiHero/Pocket"
             float Cloud(float2 p, float4 C, float s, float t)
             {
                 float2 d = p - C.xy; float a = atan2(d.y, d.x);
-                float w = N2(float2(a * 2.4 + t * 0.45, t * 0.3 + C.x * 0.01)) * 0.6 + N2(float2(a * 5.7 - t * 0.7, C.y * 0.01)) * 0.4;
-                return length(d) - C.z * s * (0.93 + 0.12 * w);
+                float w = N2(float2(a * 2.4 + t * 0.45, t * 0.3 + C.x * 0.01)) * 0.5 + N2(float2(a * 5.7 - t * 0.7, C.y * 0.01)) * 0.3 + N2(float2(a * 17.0 + t * 1.3, 4.1)) * 0.2;
+                return length(d) - C.z * s * (0.9 + 0.12 * w);
             }
             float4 frag (v2f_img i) : SV_Target
             {
@@ -47,33 +48,22 @@ Shader "Hidden/AsciiHero/Pocket"
                 float rr = min(_PC1.z, _PC2.z);
                 // the two clouds, run together
                 float F = Smin(Cloud(px, _PC1, s, t), Cloud(px, _PC2, s, t * 1.1 + 3.0), rr * 0.35);
-                // billows on the rim: small round puffs sitting on the edge, swelling and settling
-                [loop] for (int k = 0; k < 14; k++)
+                // the rim is made of puffs: many small round billows sitting on the edge (placed on the CPU, _PRim), each
+                // its own bump, breathing - the edge reads as smoke, not as a line
+                [loop] for (int k = 0; k < 44; k++)
                 {
-                    float h1 = H1(k + 0.7), h2 = H1(k * 5.3 + 2.1);
-                    float4 C = h2 < 0.42 ? _PC1 : _PC2;
-                    float a = h1 * 6.2832 + t * 0.08 * (h2 - 0.5);
-                    float ph = frac(t / (1.6 + h2) + h1);
-                    float2 P = C.xy + float2(cos(a), sin(a)) * C.z * s * (0.98 + 0.06 * ph);
-                    float rad = rr * s * (0.12 + 0.1 * sin(ph * 3.14159));
-                    F = Smin(F, length(px - P) - rad, rr * 0.08);
+                    float4 B = _PRim[k]; if (B.z <= 0.0) continue;
+                    F = Smin(F, length(px - B.xy) - B.z, B.z * 0.35);
                 }
-                // puffs breaking off and flying out, shrinking away (separate shapes, as the dash's smoke)
-                float Fly = 1e5;
-                float flyK = 0;          // how close to a breaking-off puff (for its trail of characters)
-                [loop] for (int q = 0; q < 22; q++)
+                // puffs breaking off and drifting out, shrinking away (_PFly: x, y, radius, age 0..1)
+                float Fly = 1e5, flyK = 0;
+                [loop] for (int q = 0; q < 16; q++)
                 {
-                    float h1 = H1(q * 2.9 + 11.3), h2 = H1(q * 7.1 + 4.4), L = 0.55 + 0.6 * h2;
-                    float ph = frac(t / L + h1);
-                    float4 C = h1 < 0.4 ? _PC1 : _PC2;
-                    float a = h2 * 6.2832 + 0.3 * ph;
-                    float2 dir = float2(cos(a), sin(a));
-                    float2 P = C.xy + dir * C.z * s * (0.95 + (0.3 + 0.55 * h1) * ph);
-                    float rad = rr * s * (0.09 + 0.08 * h2) * (1.0 - ph) * (t > 0.25 ? 1.0 : t / 0.25);
-                    float dd = length(px - P) - rad;
+                    float4 B = _PFly[q]; if (B.z <= 0.0) continue;
+                    float dd = length(px - B.xy) - B.z;
                     Fly = min(Fly, dd);
-                    // as it goes it blows away into violet characters: a cloud of them around it, growing as it shrinks
-                    flyK = max(flyK, saturate(1.0 - dd / (rr * (0.05 + 0.2 * ph)))  * ph * (1.0 - ph) * 4.0);
+                    // as it goes it blows away into violet characters, a cloud of them round it growing as it shrinks
+                    flyK = max(flyK, saturate(1.0 - dd / (rr * (0.04 + 0.16 * B.w))) * B.w * (1.0 - B.w) * 4.0);
                 }
                 float G = min(F, Fly);
                 // closing: it comes apart - holes open in it by noise

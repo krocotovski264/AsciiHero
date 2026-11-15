@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.55 · Unity";
+        public const string VERSION = "beta 0.56 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -2134,6 +2134,35 @@ namespace AsciiHero
             float gw = cell * 5, gh = cell * 5; return new Rect(b.x - gw / 2, b.y - gh / 2 - 12 * k, gw, gh);
         }
         float pocketScroll; Material keyMat;
+        readonly Vector4[] pRim = new Vector4[44], pFly = new Vector4[16];
+        static float Hh(float n) { float x = Mathf.Sin(n * 127.1f) * 43758.5453f; return x - Mathf.Floor(x); }
+        /// the puffs of the pocket's smoke, on the CPU: the billows that make up the rims (more on the larger cloud, by its
+        /// length of edge) and the puffs that break off - slowly, not far - and shrink away
+        void PocketPuffs(Vector3 c1, Vector3 c2)
+        {
+            float t = pocketT, cl = pocketClose < 0 ? 0 : pocketClose;
+            float g = Mathf.SmoothStep(0, 1, t / 0.35f) * (1 + 0.06f * Mathf.Sin(Mathf.Clamp01(t / 0.7f) * Mathf.PI)), s = Mathf.Max(g, 0.02f) * (1 + 0.3f * cl);
+            float rr = Mathf.Min(c1.z, c2.z), share1 = c1.z / (c1.z + c2.z);
+            for (int k = 0; k < pRim.Length; k++)
+            {
+                bool left = k < Mathf.RoundToInt(pRim.Length * share1); var C = left ? c1 : c2;
+                int n = left ? Mathf.RoundToInt(pRim.Length * share1) : pRim.Length - Mathf.RoundToInt(pRim.Length * share1), ix = left ? k : k - (pRim.Length - n);
+                float h1 = Hh(k + 0.7f), h2 = Hh(k * 5.3f + 2.1f);
+                float a = (ix + 0.35f * h1) / n * Mathf.PI * 2 + t * 0.05f * (h2 - 0.5f);
+                float ph = Mathf.Repeat(t / (1.8f + 1.4f * h2) + h1, 1f), sw = Mathf.Sin(ph * Mathf.PI);
+                float rad = rr * s * (0.07f + 0.07f * sw + 0.04f * h2);
+                pRim[k] = new Vector4(C.x + Mathf.Cos(a) * C.z * s * (0.93f + 0.05f * sw), C.y + Mathf.Sin(a) * C.z * s * (0.93f + 0.05f * sw), rad, 0);
+            }
+            for (int q = 0; q < pFly.Length; q++)
+            {
+                float h1 = Hh(q * 2.9f + 11.3f), h2 = Hh(q * 7.1f + 4.4f), L = 1.6f + 1.2f * h2;
+                float ph = Mathf.Repeat(t / L + h1, 1f); var C = h1 < share1 ? c1 : c2;
+                float a = h2 * Mathf.PI * 2 + 0.2f * ph;
+                float dist = C.z * s * (0.95f + (0.1f + 0.18f * h1) * ph);          // (slow and not far)
+                float rad = rr * s * (0.08f + 0.07f * h2) * (1 - ph) * Mathf.Clamp01(t / 0.25f);
+                pFly[q] = new Vector4(C.x + Mathf.Cos(a) * dist, C.y + Mathf.Sin(a) * dist, rad, ph);
+            }
+        }
         void PocketUI(float W, float H)
         {
             Vector3 c1, c2; PocketClouds(W, H, out c1, out c2);
@@ -2147,6 +2176,7 @@ namespace AsciiHero
                 pocketMat.SetFloat("_PT", pocketT); pocketMat.SetFloat("_PClose", pocketClose < 0 ? 0 : pocketClose);
                 pocketMat.SetVector("_PRect", new Vector4(R.x, R.y, R.width, R.height));
                 pocketMat.SetVector("_PC1", c1); pocketMat.SetVector("_PC2", c2);
+                PocketPuffs(c1, c2); pocketMat.SetVectorArray("_PRim", pRim); pocketMat.SetVectorArray("_PFly", pFly);
                 pocketMat.SetVector("_PCell", new Vector4(cellW, cellH, Mathf.Max(0.6f, 0.45f * k), 0));      // (a thin outline)
                 Graphics.DrawTexture(R, texWhite, pocketMat);
             }

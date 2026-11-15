@@ -363,6 +363,9 @@ namespace AsciiHero
                 finalMat.SetVector("_TransO", new Vector4(transO.x, transO.y, asp, md)); finalMat.SetVector("_TransGrid", new Vector4(cols, rows, 0, 0));
             }
             else finalMat.SetFloat("_TransT", 9f);
+            // (this renderer's own lit picture for the outline: the global one may be another renderer's - the backpack's
+            // projection drew its hero's silhouette as a huge outline over the world)
+            if (rtCol != null) finalMat.SetTexture("_AsciiLitTex", rtCol);
             Graphics.Blit(src, final, finalMat);
         }
     }
