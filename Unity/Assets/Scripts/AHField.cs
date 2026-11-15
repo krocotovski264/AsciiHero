@@ -21,6 +21,10 @@ namespace AsciiHero
         // the lake in the bottom right corner of the view (the camera looks along -z, so screen right is -x, down is +z)
         public static readonly Vector3 LAKE = new Vector3(-6.2f, 0, 4.4f); public const float LAKE_RX = 3.1f, LAKE_RZ = 2.4f, WATER_Y = 0.06f;
         /// 0 in the middle of the lake, 1 on its shore, more outside
+        public override bool HasWater => true;
+        public override bool InWater(float x, float z) { return LakeK(x, z) < 0.97f; }
+        public override float WaterSink(float x, float z) { return 0.18f * Mathf.SmoothStep(0, 1, Mathf.InverseLerp(1.0f, 0.55f, LakeK(x, z))); }
+        public override float SpeedK(float x, float z) { return LakeK(x, z) < 0.8f ? 0.75f : 1f; }
         public static float LakeK(float x, float z)
         {
             float a = Mathf.Atan2((z - LAKE.z) / LAKE_RZ, (x - LAKE.x) / LAKE_RX);

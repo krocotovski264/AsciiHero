@@ -144,7 +144,8 @@ namespace AsciiHero
 
         /// The lake's characters: one camera-facing quad per point (seed x: 0 in the middle .. 1 at the shore, y: random);
         /// what each one shows is worked out in the water shader
-        public static GameObject MakeWater(Transform parent, List<Vector3> pts, List<Vector2> seedList)
+        public static GameObject MakeWater(Transform parent, List<Vector3> pts, List<Vector2> seedList) { return MakeWater(parent, pts, seedList, Vector4.zero); }
+        public static GameObject MakeWater(Transform parent, List<Vector3> pts, List<Vector2> seedList, Vector4 mode)
         {
             var sh = Shader.Find("AsciiHero/Water"); if (sh == null) { Debug.LogError("AsciiHero/Water shader not found"); return null; }
             int n = pts.Count;
@@ -161,7 +162,35 @@ namespace AsciiHero
             m.RecalculateBounds(); var b = m.bounds; b.Expand(0.6f); m.bounds = b;
             var go = new GameObject("Glyphs"); go.layer = LAYER; go.transform.SetParent(parent, false);      // ("Glyphs" under the water: GlyphLayer.Build leaves it alone)
             go.AddComponent<MeshFilter>().sharedMesh = m;
-            var r = go.AddComponent<MeshRenderer>(); r.sharedMaterial = new Material(sh);
+            var wm = new Material(sh); wm.SetVector("_WaterMode", mode);
+            var r = go.AddComponent<MeshRenderer>(); r.sharedMaterial = wm;
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; r.receiveShadows = false;
+            count += n;
+            return go;
+        }
+
+        /// Moving characters that are not surfaces (see AsciiMotes): mode 0 dust in a beam, 1 fireflies, 2 falling drops.
+        /// pts are in the parent's local space; seed x: per-mode value (distance from the beam axis, drop phase), y: random
+        public static GameObject MakeMotes(Transform parent, Vector3 pos, Quaternion rot, Vector3 scale, List<Vector3> pts, List<Vector2> seedList, int mode, Color col, Vector4 prm)
+        {
+            var sh = Shader.Find("AsciiHero/Motes"); if (sh == null) { Debug.LogError("AsciiHero/Motes shader not found"); return null; }
+            int n = pts.Count;
+            var verts = new List<Vector3>(n * 4); var corners = new List<Vector2>(n * 4); var seeds = new List<Vector2>(n * 4); var tris = new List<int>(n * 6);
+            Vector2[] C = { new Vector2(-0.5f, -0.5f), new Vector2(0.5f, -0.5f), new Vector2(0.5f, 0.5f), new Vector2(-0.5f, 0.5f) };
+            for (int i = 0; i < n; i++)
+            {
+                int o = verts.Count;
+                for (int k = 0; k < 4; k++) { verts.Add(pts[i]); corners.Add(C[k]); seeds.Add(seedList[i]); }
+                tris.Add(o); tris.Add(o + 2); tris.Add(o + 1); tris.Add(o); tris.Add(o + 3); tris.Add(o + 2);
+            }
+            var m = new Mesh { name = "motes", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+            m.SetVertices(verts); m.SetUVs(0, corners); m.SetUVs(1, seeds); m.SetTriangles(tris, 0);
+            m.RecalculateBounds(); var b = m.bounds; b.Expand(new Vector3(2, prm.y + 1, 2)); m.bounds = b;
+            var go = new GameObject("Motes"); go.layer = LAYER; go.transform.SetParent(parent, false);
+            go.transform.localPosition = pos; go.transform.localRotation = rot; go.transform.localScale = scale;
+            go.AddComponent<MeshFilter>().sharedMesh = m;
+            var mat = new Material(sh); mat.SetFloat("_MoteMode", mode); mat.SetColor("_MoteColor", col); mat.SetVector("_MoteParams", prm);
+            var r = go.AddComponent<MeshRenderer>(); r.sharedMaterial = mat;
             r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; r.receiveShadows = false;
             count += n;
             return go;

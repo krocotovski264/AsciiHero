@@ -12,6 +12,7 @@ Shader "AsciiHero/Water"
     Properties
     {
         _WaterCell ("glyph width, height, -, -", Vector) = (0.1, 0.16, 0, 0)
+        _WaterMode ("x: underground (no sky, no wind), yz: flow (m/s), w: depth (darker)", Vector) = (0, 0, 0, 0)
     }
     SubShader
     {
@@ -29,7 +30,7 @@ Shader "AsciiHero/Water"
             #pragma fragment frag
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             CBUFFER_START(UnityPerMaterial)
-                float4 _WaterCell;
+                float4 _WaterCell; float4 _WaterMode;
             CBUFFER_END
             TEXTURE2D(_AsciiAtlas); SAMPLER(sampler_AsciiAtlas);
             TEXTURE2D(_AsciiLitTex); SAMPLER(sampler_AsciiLitTex);
@@ -53,7 +54,13 @@ Shader "AsciiHero/Water"
             // the water height at p (m, small) and its slope (d/dx, d/dz)
             float3 Waves(float2 p, float t)
             {
-                float2 wd = _AsciiWind.xy, wp = float2(-wd.y, wd.x); float str = _AsciiWind.z, run = _AsciiWind.w;
+                float2 wd = _AsciiWind.xy, wp; float str = _AsciiWind.z, run = _AsciiWind.w;
+                if (_WaterMode.x > 0.5)
+                {   // underground: no wind; a stream runs along its flow, still water only trembles
+                    float fl = length(_WaterMode.yz); wd = fl > 1e-3 ? _WaterMode.yz / fl : float2(1, 0);
+                    str = 0.05 + 0.5 * saturate(fl); run = t * (0.3 + 2.5 * fl);
+                }
+                wp = float2(-wd.y, wd.x);
                 float2 q = float2(dot(p, wd), dot(p, wp));
                 // gust patches carried downwind: where the air hits, the chop is stronger
                 float g = smoothstep(0.25, 0.85, WNoise(float2(q.x - run, q.y) * float2(0.35, 0.25) + 5.3));
@@ -98,6 +105,7 @@ Shader "AsciiHero/Water"
                 // the stars and the Milky Way are painted in it)
                 float2 skyUV = float2(atan2(R.x, R.z) / 6.2832 + 0.5, saturate(asin(saturate(R.y)) / 1.5708));
                 float3 sky = SAMPLE_TEXTURE2D_LOD(_AsciiSkyMap, sampler_AsciiSkyMap, skyUV, 0.6).rgb;
+                if (_WaterMode.x > 0.5) sky = float3(0.004, 0.005, 0.008);       // a cave: the vault above is dark
                 // what else the reflected ray meets first: the hero (spheres along his bones) and the trees (trunk and two
                 // spheres of crown each). Seen from the water, a crown is seen from below: leaves with gaps of sky in them.
                 float hitT = 1e5; int hitK = 0; float3 hitP = 0;
@@ -139,6 +147,7 @@ Shader "AsciiHero/Water"
                 // which character, in which row of the atlas
                 float row, gi; float3 col;
                 float3 deep = float3(0.09, 0.17, 0.34), crest = float3(0.33, 0.52, 0.78);
+                if (_WaterMode.x > 0.5) { deep = float3(0.05, 0.09, 0.11) * (1.0 - 0.5 * _WaterMode.w); crest = float3(0.2, 0.3, 0.34); }
                 float lvl = saturate(0.42 + w.x * 4.2 + ring * 1.3 + foam * 0.8);
                 float skyL = dot(sky, float3(0.3, 0.5, 0.2));
                 if (best > 0.26)

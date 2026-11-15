@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.43 · Unity";
+        public const string VERSION = "beta 0.44 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -43,7 +43,7 @@ namespace AsciiHero
         Camera display, sceneCam; AsciiRenderer ascii;
         Mats mats, actorMats;
         Character hero; MotionActor player;
-        bool world; Tavern tavern; Field field; Location loc; Character bartenderChar; MotionActor bartender;
+        bool world; Tavern tavern; Field field; Cave cave; Location loc; Light moonLight; Character bartenderChar; MotionActor bartender;
         // integrity instead of a health bar: five limbs (head, armL, armR, legL, legR), each worth 20 %
         readonly Vector4[] pushPts = new Vector4[4]; static readonly Vector4 FAR = new Vector4(9999, 0, 9999, 0);
         int hp = 100; readonly bool[] limbs = { true, true, true, true, true }; float respawnT; Vector3 heroTrail;
@@ -548,7 +548,7 @@ namespace AsciiHero
             worldLightsRoot = new GameObject("WorldLights");
             var hl = new GameObject("HeroLight"); hl.transform.SetParent(worldLightsRoot.transform, false);
             heroLight = hl.AddComponent<Light>(); heroLight.type = LightType.Point; heroLight.color = Mats.Hex(0xffe6c8); heroLight.intensity = 1.6f; heroLight.range = 4.2f; heroLight.renderMode = LightRenderMode.ForcePixel;
-            var moon = DirLight("Moon", worldLightsRoot.transform, Mats.Hex(0x8aa6ff), 0.3f, true);
+            var moon = DirLight("Moon", worldLightsRoot.transform, Mats.Hex(0x8aa6ff), 0.3f, true); moonLight = moon;
             // the moon stands 52 degrees up, a little beyond the field (seen from the camera): high enough to show in the
             // lake below the camera's view; its light comes from the same place
             Vector3 md = new Vector3(-0.12f, 0.788f, -0.604f).normalized;
@@ -576,7 +576,7 @@ namespace AsciiHero
         void UpdateWaterMirror()
         {
             int nb = 0, nt = 0;
-            if (loc == field && field != null && (new Vector2(pos.x - Field.LAKE.x, pos.z - Field.LAKE.z)).magnitude < 9f && hero != null)
+            if (loc != null && loc.HasWater && hero != null && (loc != field || (new Vector2(pos.x - Field.LAKE.x, pos.z - Field.LAKE.z)).magnitude < 9f))
             {
                 var hb = hero.human; float s = cfg.height / 180f;
                 for (int i = 0; i < WB_BONES.Length; i++)
@@ -728,29 +728,50 @@ namespace AsciiHero
         }
 
         // ---------- modes ----------
-        void EnterWorld(bool toField = false)
+        void EnterWorld(bool toField = false) { EnterWorld(toField ? 1 : 0); }
+        /// 0 the tavern, 1 the test field, 2 the cave
+        void EnterWorld(int where)
         {
             SaveCfg();
-            try { if (toField) { if (field == null) SetupField(); } else if (tavern == null) SetupWorld(); }
+            try
+            {
+                if (where == 1) { if (field == null) SetupField(); }
+                else if (where == 2) { if (cave == null) SetupCave(); }
+                else if (tavern == null) SetupWorld();
+            }
             catch (System.Exception e) { Debug.LogException(e); return; }
-            world = true; loc = toField ? (Location)field : tavern;
-            if (tavern != null) { tavern.SetActive(!toField); bartenderChar.go.SetActive(!toField); }
-            if (field != null) field.SetActive(toField);
+            world = true; loc = where == 1 ? (Location)field : where == 2 ? (Location)cave : tavern;
+            if (tavern != null) { tavern.SetActive(where == 0); bartenderChar.go.SetActive(where == 0); }
+            if (field != null) field.SetActive(where == 1);
+            if (cave != null) cave.SetActive(where == 2);
             worldLightsRoot.SetActive(true); editorRoot.SetActive(false);
+            if (moonLight != null) moonLight.enabled = where != 2;          // underground: no moon
+            heroLight.intensity = where == 2 ? 1.05f : 1.6f;
             pos = loc.spawn; heroTrail = pos; player.heading = Mathf.PI; player.ResetSim(); player.noLock = false;
             hero.go.transform.position = pos; hero.go.transform.rotation = Quaternion.Euler(0, 180, 0);
             camTgt = new Vector3(pos.x, 0.6f, pos.z);
             sceneCam.fieldOfView = 30; ascii.exposure = 1.3f; ascii.actorBoost = 1; Shader.SetGlobalFloat("_AsciiLod", ISO_LOD);
-            if (toField) SetAmbient(Mats.Hex(0x8fa4d8) * 0.55f, Mats.Hex(0x4a5a58) * 0.55f, Mats.Hex(0x1a2414) * 0.55f);
+            if (where == 1) SetAmbient(Mats.Hex(0x8fa4d8) * 0.55f, Mats.Hex(0x4a5a58) * 0.55f, Mats.Hex(0x1a2414) * 0.55f);
+            else if (where == 2) SetAmbient(Mats.Hex(0x40506a) * 0.16f, Mats.Hex(0x303840) * 0.14f, Mats.Hex(0x181410) * 0.12f);     // dark, a little cold: the lights do the rest
             else SetAmbient(Mats.Hex(0x50465a) * 0.45f, Mats.Hex(0x342b32) * 0.45f, Mats.Hex(0x18100a) * 0.45f);
             SetShadowDistance(26);      // (the view reaches about 21 m from the camera; a shorter range keeps the shadow map sharp at half its old size)
-            ShowToast(toField ? "Тестовое поле\nКучи брони возвращают оторванные части" : "Трактир «Пьяный дракон»\nСтик — шаг, палец за край — бег");
+            ShowToast(where == 1 ? "Тестовое поле\nКучи брони возвращают оторванные части" : where == 2 ? "Пещеры\nЧетыре сектора: вход, грот, сырой зал, костница" : "Трактир «Пьяный дракон»");
         }
+        void SetupCave()
+        {
+            if (worldLightsRoot == null) SetupWorldLights();
+            cave = Cave.Build(mats);
+            GlyphLayer.Build(cave.root);
+            cave.addRipple = AddRipple;
+            Debug.Log("Пещера построена, символов на сцене: " + GlyphLayer.count);
+        }
+        void AddRipple(float x, float z, float a) { ripples[rippleIx] = new Vector4(x, z, tNow, a); rippleIx = (rippleIx + 1) % ripples.Length; }
         void LeaveWorld()
         {
             world = false;
             if (tavern != null) { tavern.SetActive(false); bartenderChar.go.SetActive(false); }
             if (field != null) field.SetActive(false);
+            if (cave != null) cave.SetActive(false);
             worldLightsRoot.SetActive(false); editorRoot.SetActive(true);
             Shader.SetGlobalVector("_AsciiHeroA", new Vector4(0, -99, 0, 0)); Shader.SetGlobalVector("_AsciiHeroB", new Vector4(0, -99, 0, 0)); Shader.SetGlobalVector("_AsciiHeroVel", Vector4.zero);
             for (int i = 0; i < 4; i++) pushPts[i] = FAR; Shader.SetGlobalVectorArray("_AsciiPush", pushPts);
@@ -1277,6 +1298,7 @@ namespace AsciiHero
             float l = Mathf.Sqrt(ix * ix + iy * iy), mag = Mathf.Min(1, l / 0.8f); if (mag < 0.12f) mag = 0;   // 80 % of the ring = full walk
             float runIn = Mathf.Max(stickRun, InputHub.Key("Run") ? 1f : 0f);
             if (mag > 0.85f || (mag > 0 && runIn > 0)) mag = 1 + runIn;
+            { float sk = loc.SpeedK(pos.x, pos.z); if (sk < 1 && mag > sk) mag = sk; }        // mud, deep water: a slow wade
             Vector2? dir = null;
             if (mag > 0) dir = ScreenToWorldDir(new Vector2(ix, iy));
             // aim: in a fight (a cut, a block or a blow in the last few seconds) the hero faces the nearest creature
@@ -1300,7 +1322,7 @@ namespace AsciiHero
             if (player.trail.Count > 0) { foreach (var q in player.trail) SpawnPuff(q, 0.03f, Vector3.zero, 0.3f); player.trail.Clear(); }
             // in the lake the hero sinks a little (up to 18 cm in the middle; the feet and shins are under the surface)
             {
-                float want = loc == field ? 0.18f * Mathf.SmoothStep(0, 1, Mathf.InverseLerp(1.0f, 0.55f, Field.LakeK(pos.x, pos.z))) : 0;
+                float want = loc.WaterSink(pos.x, pos.z);
                 heroSink += (want - heroSink) * Mathf.Min(1, dt * 6);
             }
             hero.go.transform.position = pos + Vector3.down * heroSink;
@@ -1309,10 +1331,10 @@ namespace AsciiHero
             hero.go.transform.rotation = Quaternion.Euler(0, (player.heading - player.spinYaw + idleYaw) * Mathf.Rad2Deg, 0);      // the full-turn sweep spins the whole figure
             loc.Update(tNow); Pickups(); UpdateDummies(dt, tNow); UpdateDebris(dt); UpdateDanger(tNow);
             // the lake: every step in the water sends out a ring (standing still, now and then a small one)
-            if (loc == field)
+            if (loc.HasWater)
             {
                 float sp = player.Velocity.magnitude; rippleT -= dt;
-                if (Field.LakeK(pos.x, pos.z) < 0.97f && rippleT <= 0)
+                if (loc.InWater(pos.x, pos.z) && rippleT <= 0)
                 {
                     ripples[rippleIx] = new Vector4(pos.x, pos.z, tNow, sp > 0.3f ? 1.15f + 0.15f * Mathf.Min(sp, 4f) : 0.7f); rippleIx = (rippleIx + 1) % ripples.Length;
                     rippleT = sp > 0.3f ? Mathf.Lerp(0.42f, 0.24f, Mathf.Clamp01(sp / 4f)) : 1.1f + Random.value;
@@ -1367,7 +1389,7 @@ namespace AsciiHero
             Shader.SetGlobalFloat("_AsciiLod", Mathf.Max(1f, ISO_LOD / worldZoom));
             Vector3 off = Mirror(new Vector3(Mathf.Sin(isoYaw) * Mathf.Cos(isoPitch), Mathf.Sin(isoPitch), Mathf.Cos(isoYaw) * Mathf.Cos(isoPitch)) * (ISO_DIST / worldZoom));
             { var d = new Vector3(off.x, 0, off.z).normalized; heroLight.transform.position = new Vector3(pos.x + d.x * 1.3f - d.z * 0.5f, 2.3f, pos.z + d.z * 1.3f + d.x * 0.5f); }
-            loc.Cutaway(off);
+            loc.focus = pos; loc.Cutaway(off);
             camTgt = Vector3.Lerp(camTgt, new Vector3(pos.x, 0.6f, pos.z), Mathf.Min(1, dt * 5));
             sceneCam.transform.position = camTgt + off; sceneCam.transform.LookAt(camTgt);
             sceneCam.fieldOfView = 30 * (1 - 0.014f * heart);
@@ -1808,10 +1830,11 @@ namespace AsciiHero
                 }
             }
             float bw2 = (cw - 6 * k) / 2;
-            float bw3 = (cw - 12 * k) / 3;
+            float bw3 = (cw - 18 * k) / 4;
             if (Button(new Rect(x0, bottom, bw3, 32 * k), "СЛУЧАЙНО")) Randomize();
-            if (Button(new Rect(x0 + bw3 + 6 * k, bottom, bw3, 32 * k), "ТРАКТИР ▶", true)) EnterWorld(false);
-            if (Button(new Rect(x0 + (bw3 + 6 * k) * 2, bottom, bw3, 32 * k), "ПОЛЕ ▶", true)) EnterWorld(true);
+            if (Button(new Rect(x0 + bw3 + 6 * k, bottom, bw3, 32 * k), "ТРАКТИР ▶", true)) EnterWorld(0);
+            if (Button(new Rect(x0 + (bw3 + 6 * k) * 2, bottom, bw3, 32 * k), "ПОЛЕ ▶", true)) EnterWorld(1);
+            if (Button(new Rect(x0 + (bw3 + 6 * k) * 3, bottom, bw3, 32 * k), "ПЕЩЕРА ▶", true)) EnterWorld(2);
         }
 
         // the world: no interface on the screen at all (the controls are invisible); a tap on the hero opens the backpack
@@ -1990,17 +2013,17 @@ namespace AsciiHero
                     var d = JsonUtility.FromJson<SaveData>(System.IO.File.ReadAllText(SavePath(i)));
                     if (d == null) continue;
                     saveHas[i] = true;
-                    saveInfo[i] = d.date + " · " + (d.loc == "tavern" ? "трактир" : "тестовое поле") + " · " + (d.sex == "f" ? "женщина" : "мужчина") + ", " + d.height.ToString("0") + " см · целостность " + d.hp + " %";
+                    saveInfo[i] = d.date + " · " + (d.loc == "tavern" ? "трактир" : d.loc == "cave" ? "пещера" : "тестовое поле") + " · " + (d.sex == "f" ? "женщина" : "мужчина") + ", " + d.height.ToString("0") + " см · целостность " + d.hp + " %";
                 }
                 catch (System.Exception e) { saveInfo[i] = "не читается (" + e.GetType().Name + ")"; }
             }
         }
         void SaveGame(int i)
         {
-            bool tav = loc != null && loc == tavern;
+            bool tav = loc != null && loc == tavern, cv = loc != null && loc == cave;
             var d = new SaveData
             {
-                version = VERSION, date = System.DateTime.Now.ToString("dd.MM.yyyy HH:mm"), loc = tav ? "tavern" : "field",
+                version = VERSION, date = System.DateTime.Now.ToString("dd.MM.yyyy HH:mm"), loc = tav ? "tavern" : cv ? "cave" : "field",
                 x = loc != null ? pos.x : 0, z = loc != null ? pos.z : 1.5f, heading = player != null ? player.heading : Mathf.PI, hp = hp,
                 limbs = (bool[])limbs.Clone(), sex = cfg.sex.ToString(), build = cfg.build, height = cfg.height, armor = cfg.armor, weapon = cfg.weapon,
                 body = cfg.body != null ? (float[])cfg.body.Clone() : null, items = inventory.ToArray()
@@ -2027,7 +2050,7 @@ namespace AsciiHero
             inventory.Clear(); if (d.items != null) inventory.AddRange(d.items);
             invOpen = false; menuFromWorld = false; inMenu = false; respawnT = 0; dashT = 99; presetIx = -1;
             Rebuild();
-            EnterWorld(d.loc != "tavern");
+            EnterWorld(d.loc == "tavern" ? 0 : d.loc == "cave" ? 2 : 1);
             pos = new Vector3(d.x, 0, d.z); heroTrail = pos; player.heading = d.heading; player.ResetSim();
             hero.go.transform.position = pos; hero.go.transform.rotation = Quaternion.Euler(0, d.heading * Mathf.Rad2Deg, 0);
             camTgt = new Vector3(pos.x, 0.6f, pos.z);

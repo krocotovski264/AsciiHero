@@ -57,6 +57,15 @@ namespace AsciiHero
         public Vector3 spawn;
         public virtual void Update(float t) { }
         public virtual void Cutaway(Vector3 camOff) { }
+        // water, mud and the like (the lake of the field, the pools and the stream of the cave)
+        public Vector3 focus;                                        // where the hero is (for cutaways)
+        public System.Action<float, float, float> addRipple;         // x, z, strength: a ring on the water
+        public virtual bool HasWater => false;
+        public virtual bool InWater(float x, float z) { return false; }
+        /// how deep the hero sinks here (m)
+        public virtual float WaterSink(float x, float z) { return 0; }
+        /// the most of his normal pace he can go here (1 = no limit)
+        public virtual float SpeedK(float x, float z) { return 1; }
         public void SetActive(bool on) { root.SetActive(on); }
         public Vector2 Collide(Vector2 p, float r)
         {
