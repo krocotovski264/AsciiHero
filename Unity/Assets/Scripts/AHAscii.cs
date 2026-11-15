@@ -136,8 +136,20 @@ namespace AsciiHero
 
         void OnBeginCamera(ScriptableRenderContext ctx, Camera c)
         {
+            if (c != cam && c != ndCam && c != glyphCam) return;       // another renderer's camera (the backpack's projection has its own)
             Shader.SetGlobalFloat(ND_PASS, c == ndCam ? 1f : 0f);
+            // what the shaders read of this renderer: its targets and settings (two renderers can draw in one frame)
+            if (builtSurface && rtCol != null) { Shader.SetGlobalTexture("_AsciiLitTex", rtCol); Shader.SetGlobalTexture("_AsciiNDTex", rtND); }
+            Shader.SetGlobalFloat("_AsciiDepthLit", depthFromLit && !dbgForceND && builtSurface ? 1 : 0);
+            Shader.SetGlobalFloat("_AsciiExposure", exposure); Shader.SetGlobalFloat("_AsciiDepthRef", depthRef);
         }
+        /// switch the whole renderer on or off (its cameras stop rendering)
+        public void SetEnabled(bool on)
+        {
+            if (enabledAll == on) return; enabledAll = on;
+            cam.enabled = on; if (on) SyncND(); else { ndCam.enabled = false; glyphCam.enabled = false; }
+        }
+        bool enabledAll = true;
 
         public void Dispose() { RenderPipelineManager.beginCameraRendering -= OnBeginCamera; RenderPipelineManager.endContextRendering -= OnEndContext; }
 
@@ -210,7 +222,7 @@ namespace AsciiHero
         void SyncND()
         {
             bool lit = depthFromLit && !dbgForceND && builtSurface;
-            ndCam.enabled = !lit; glyphCam.enabled = builtSurface && !dbgNoGlyphs;
+            ndCam.enabled = !lit && enabledAll; glyphCam.enabled = builtSurface && !dbgNoGlyphs && enabledAll;
             Shader.SetGlobalFloat("_AsciiDepthLit", lit ? 1 : 0);
             finalMat.SetFloat("_Outline", lit && outline ? 1 : 0);
             ndCam.fieldOfView = cam.fieldOfView; ndCam.nearClipPlane = cam.nearClipPlane; ndCam.farClipPlane = cam.farClipPlane;

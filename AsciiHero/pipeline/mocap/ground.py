@@ -56,6 +56,16 @@ def process(fname, a=0, b=None):
     hipY = 0.0
     # RO y: hips height relative to standing (same meaning as retarget's RO + hipY - standY)
     RO[:, 1] = RO[:, 1] - standY
-    z = np.zeros(nf)
-    return dict(name=fname, mirror=False, LOC=LOC, dt=dt, n=nf, Q=Q, RO=RO, fwd=z, lat=z, yawr=z, yaw=yaw, con=np.ones((nf, 2)),
-                traj=traj, hipY=0.0, standY=0.0, P=P)
+    # root motion in the facing frame and foot contacts (same conventions as retarget.process)
+    vel = np.gradient(traj, dt, axis=0)
+    fwdv = vel[:, 0] * np.sin(yaw) + vel[:, 1] * np.cos(yaw)
+    latv = vel[:, 0] * np.cos(yaw) - vel[:, 1] * np.sin(yaw)
+    yawr = np.gradient(yaw, dt)
+    con = np.zeros((nf, 2))
+    for k, S in enumerate(('Left', 'Right')):
+        foot = P[S + 'Foot']; toe = P[S + 'Toe']
+        hv = np.linalg.norm(np.gradient(foot[:, [0, 2]], dt, axis=0), axis=1)
+        low = np.minimum(foot[:, 1] - foot[:, 1].min(), (toe[:, 1] - toe[:, 1].min()) * 1.5)
+        con[:, k] = ((low < 0.04) & (hv < 0.7)).astype(float)
+    return dict(name=fname, mirror=False, LOC=LOC, dt=dt, n=nf, Q=Q, RO=RO, fwd=fwdv, lat=latv, yawr=yawr, yaw=yaw, con=con,
+                traj=traj, hipY=0.0, standY=0.0, P=P, hipsY=P['Hips'][:, 1].copy())

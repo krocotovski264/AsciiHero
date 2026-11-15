@@ -128,7 +128,7 @@ Shader "AsciiHero/Water"
                     float2 sc2 = float2(-tg.x, -tg.y * 0.82);                  // on the screen (x right, y up; the camera looks along -z)
                     float an = atan2(sc2.y, sc2.x); an = an < 0.0 ? an + 3.14159 : an;     // 0 .. pi
                     row = 12.0; gi = an < 0.39 || an > 2.75 ? 1.0 : an < 1.18 ? 2.0 : an < 1.96 ? 0.0 : 3.0;     // - / | \
-                    col = float3(0.78, 0.88, 1.0) * (0.55 + 0.75 * saturate(best));
+                    col = float3(0.8, 0.8, 0.8) * (0.6 + 0.6 * saturate(best));          // light grey
                 }
                 else if (star > 0.15 && ring < 0.25)
                 {
@@ -141,7 +141,7 @@ Shader "AsciiHero/Water"
                     gi = lvl < 0.22 ? 1.0 : lvl < 0.38 ? 3.0 : lvl < 0.55 ? 8.0 : lvl < 0.75 ? 9.0 : 10.0;
                     if (ring > 0.35) gi = 9.0;
                     col = lerp(deep, crest, lvl) * (0.55 + 0.6 * lvl) + lit * 1.6;
-                    col += float3(0.5, 0.55, 0.65) * (saturate(ring) * 0.55 + foam * 0.45);
+                    col += float3(0.55, 0.55, 0.55) * (saturate(ring) * 0.55 + foam * 0.45);
                     col *= 0.75 + 0.35 * fres;
                 }
                 float sceneZ = dz > 1e-4 ? dz * 12.0 : 1e5;

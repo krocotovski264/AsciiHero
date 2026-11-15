@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.39 · Unity";
+        public const string VERSION = "beta 0.40 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -123,7 +123,11 @@ namespace AsciiHero
         // the lake: rings from the hero's steps (x, z, birth time, strength)
         readonly Vector4[] ripples = new Vector4[8]; int rippleIx; float rippleT;
         GUIStyle sDoll, sBag;
-        float invT, invBlend, invCamDist = 5, heroSink;      // the backpack's portrait camera; how deep the hero stands in the lake
+        float invT, heroSink;      // time the backpack has been open; how deep the hero stands in the lake
+        // the backpack shows a projection of the hero: a still copy of him in a "studio" far outside the world, filmed by
+        // its own camera through its own ASCII renderer
+        static readonly Vector3 STUDIO = new Vector3(600, 0, 600);
+        GameObject studio; Camera projCam; AsciiRenderer projAscii; Character projHero; MotionActor projActor; string projSig; float projDist = 4;
 
         // UI
         float k = 1; Rect safe; int tab; string toast; float toastT;
@@ -925,9 +929,8 @@ namespace AsciiHero
                 }
                 player.HoldInPlace(dt);
             }
-            bool frozen = world && invOpen && invT > 0.6f;      // in the backpack the hero stands still, like a model on a stand
-            if (world && invOpen) { invT += dt; player.PokeIdle(); }
-            if (player.driver == null && !perfNoAnim && !frozen) { long tA = System.Diagnostics.Stopwatch.GetTimestamp(); player.Animate(tNow, dt); accA += Ms(tA); }   // Animator mode: after the Animator, in LateUpdate
+            if (world && invOpen) invT += dt;
+            if (player.driver == null && !perfNoAnim) { long tA = System.Diagnostics.Stopwatch.GetTimestamp(); player.Animate(tNow, dt); accA += Ms(tA); }   // Animator mode: after the Animator, in LateUpdate
             if (toastT > 0) toastT -= dt;
             fpsAcc += Time.unscaledDeltaTime; fpsN++;
             if (fpsAcc > 1)
@@ -1295,7 +1298,7 @@ namespace AsciiHero
                 Shader.SetGlobalVector("_AsciiWind", new Vector4(wd.x, wd.y, windStr, windRun));
                 windV = new Vector3(wd.x, 0, wd.y) * (windStr * 2.4f);
             }
-            if (cloak != null && !perfNoAnim && !(invOpen && invT > 0.6f)) { long tC = System.Diagnostics.Stopwatch.GetTimestamp(); cloak.Update(dt, windV); accA += Ms(tC); if (clothMpb == null) clothMpb = new MaterialPropertyBlock(); cloak.Apply(clothMpb, cloakRs); }
+            if (cloak != null && !perfNoAnim) { long tC = System.Diagnostics.Stopwatch.GetTimestamp(); cloak.Update(dt, windV); accA += Ms(tC); if (clothMpb == null) clothMpb = new MaterialPropertyBlock(); cloak.Apply(clothMpb, cloakRs); }
             // grass is pressed down by the body itself - the feet, the pelvis over it, a weapon swept low - not by a collision circle
             {
                 var hb = hero.human; Transform fL = hb.Bone("foot.L"), fR = hb.Bone("foot.R"), rt = hb.Bone("root");
@@ -1323,25 +1326,6 @@ namespace AsciiHero
             camTgt = Vector3.Lerp(camTgt, new Vector3(pos.x, 0.6f, pos.z), Mathf.Min(1, dt * 5));
             sceneCam.transform.position = camTgt + off; sceneCam.transform.LookAt(camTgt);
             sceneCam.fieldOfView = 30 * (1 - 0.014f * heart);
-            // the backpack: the camera swings round in front of the hero and frames him in the left window
-            invBlend += ((invOpen ? 1f : 0f) - invBlend) * Mathf.Min(1, dt * 7);
-            if (invBlend > 0.002f)
-            {
-                Rect lp = BackpackLayout(Screen.width, Screen.height, out _, out _);
-                float W = Mathf.Max(1, Screen.width), H = Mathf.Max(1, Screen.height), asp = W / H, th = Mathf.Tan(15f * Mathf.Deg2Rad);
-                float hm = cfg.height / 100f, D = hm / (0.8f * Mathf.Max(0.3f, lp.height / H) * 2 * th);
-                invCamDist = D;
-                float hdg = player.heading - player.spinYaw;
-                Vector3 fwd = new Vector3(Mathf.Sin(hdg), 0, Mathf.Cos(hdg)), hp = hero.go.transform.position;
-                Vector3 cpos = hp + fwd * D + Vector3.up * (hm * 0.62f), look = -fwd, right = Vector3.Cross(Vector3.up, look).normalized;
-                float fx = lp.center.x / W, fy = lp.center.y / H, V = 2 * D * th;
-                Vector3 tgt = hp + Vector3.up * (hm * 0.5f + (fy - 0.5f) * V) + right * ((0.5f - fx) * V * asp);
-                var rot = Quaternion.LookRotation(tgt - cpos);
-                sceneCam.transform.position = Vector3.Lerp(sceneCam.transform.position, cpos, invBlend);
-                sceneCam.transform.rotation = Quaternion.Slerp(sceneCam.transform.rotation, rot, invBlend);
-                loc.Cutaway(sceneCam.transform.position - hp);
-                heroLight.transform.position = Vector3.Lerp(heroLight.transform.position, hp + fwd * 1.4f + right * 0.5f + Vector3.up * 2.0f, invBlend);
-            }
         }
 
         /// a direction on the screen (x right, y down) as a direction on the ground (web direction, mirrored on X)
@@ -1379,10 +1363,46 @@ namespace AsciiHero
             float hgt = Mathf.Abs(fa.y - fb.y), half = Mathf.Max(hgt * 0.32f, 0.45f * StickCm()), m = 0.3f * StickCm();
             return g.x > fa.x - half && g.x < fa.x + half && g.y > Mathf.Min(fa.y, fb.y) - m && g.y < Mathf.Max(fa.y, fb.y) + m;
         }
+        void MakeProjection()
+        {
+            var sb = new System.Text.StringBuilder(); sb.Append(cfg.sex).Append(cfg.build).Append(cfg.height).Append(cfg.armor).Append(cfg.weapon);
+            if (cfg.body != null) foreach (var x in cfg.body) sb.Append(',').Append(x.ToString("0.###"));
+            string sig = sb.ToString();
+            if (studio == null)
+            {
+                studio = new GameObject("Studio"); studio.transform.position = STUDIO;
+                var lg = new GameObject("StudioKey"); lg.transform.SetParent(studio.transform, false); lg.transform.localPosition = new Vector3(0.8f, 2.4f, 2.2f);
+                var key = lg.AddComponent<Light>(); key.type = LightType.Point; key.color = Mats.Hex(0xffe6c8); key.intensity = 2.2f; key.range = 7f; key.renderMode = LightRenderMode.ForcePixel;
+                var lg2 = new GameObject("StudioRim"); lg2.transform.SetParent(studio.transform, false); lg2.transform.localPosition = new Vector3(-1.2f, 2.0f, -1.6f);
+                var rimL = lg2.AddComponent<Light>(); rimL.type = LightType.Point; rimL.color = Mats.Hex(0x8aa6ff); rimL.intensity = 1.4f; rimL.range = 6f;
+                projCam = new GameObject("ProjectionCamera").AddComponent<Camera>(); projCam.transform.SetParent(studio.transform, false);
+                projCam.nearClipPlane = 0.05f; projCam.farClipPlane = 20; projCam.fieldOfView = 30; projCam.allowMSAA = false; projCam.allowHDR = false;
+                projAscii = new AsciiRenderer(projCam); projAscii.surfaceGlyphs = true; projAscii.actorBoost = 1;
+            }
+            studio.SetActive(true);
+            if (projHero == null || projSig != sig)
+            {
+                if (projHero != null) Destroy(projHero.go);
+                var hc = cfg.Clone(); hc.shadow = true;
+                projHero = Character.Build(hc, actorMats, "Projection");
+                projHero.glyphs = GlyphLayer.Build(projHero.go, Character.LimbOfBone());
+                projHero.go.transform.SetParent(studio.transform, false);
+                projActor = new MotionActor(projHero); projSig = sig;
+            }
+            projHero.go.transform.localPosition = Vector3.zero; projHero.go.transform.localRotation = Quaternion.identity;
+            projActor.SetLimbs(limbs);
+            // it stands at ease (the first seconds of the idle loop), then stays like that: a model on a stand
+            projActor.ResetSim(); projActor.heading = 0;
+            for (int i = 0; i < 45; i++) { projActor.Locomotion(1 / 30f, null, 0, null, new Vector2(STUDIO.x, STUDIO.z), null); projActor.Animate(i / 30f, 1 / 30f); }
+            float hm = cfg.height / 100f; projDist = hm / (0.8f * 2 * Mathf.Tan(15f * Mathf.Deg2Rad));
+            projCam.transform.localPosition = new Vector3(0, hm * 0.56f, projDist);
+            projCam.transform.LookAt(STUDIO + Vector3.up * hm * 0.5f);
+        }
         void OpenBackpack()
         {
             if (!world || perfRun) return;
             invOpen = true; menuFromWorld = false; invT = 0;
+            try { MakeProjection(); } catch (System.Exception e) { Debug.LogException(e); }
             stickId = int.MinValue; stick = Vector2.zero; stickRun = 0; stickRunArmed = false;
             foreach (var q in InputHub.active.Values) q.owner = "ui";
         }
@@ -1412,13 +1432,13 @@ namespace AsciiHero
             float dp = Screen.dpi > 0 ? Mathf.Clamp(Screen.dpi / 160f, 1f, 4f) : Mathf.Max(1f, k);
             float wcss = vr.width / dp;
             float cell = Mathf.Max(4f / dp, world ? Mathf.Min(1.7f, wcss / 540f) : Mathf.Min(2.0f, wcss / 310f));
-            float viewDist = world ? Mathf.Lerp(ISO_DIST / worldZoom, invCamDist, invBlend) : cam.dist;
+            float viewDist = world ? ISO_DIST / worldZoom : cam.dist;
             ascii.depthRef = viewDist;
             // characters: how many of their glyphs are drawn follows their size on the screen (pixels per glyph cell)
             {
                 float pxCell = vr.height / (2 * viewDist * Mathf.Tan(sceneCam.fieldOfView * 0.5f * Mathf.Deg2Rad)) * 0.0135f;
                 int lv = GlyphLayer.actorLod;
-                if (perfFullActors) lv = 0;
+                if (perfFullActors || (world && invOpen)) lv = 0;
                 else if (lv == 0) { if (pxCell < 3.3f) lv = pxCell < 1.7f ? 2 : 1; }
                 else if (lv == 1) { if (pxCell > 3.9f) lv = 0; else if (pxCell < 1.6f) lv = 2; }
                 else if (pxCell > 1.9f) lv = pxCell > 3.9f ? 0 : 1;
@@ -1426,6 +1446,23 @@ namespace AsciiHero
             }
             ascii.SelfCheck();
             ascii.SetSize(Mathf.RoundToInt(vr.width), Mathf.RoundToInt(vr.height), cell * dp);
+            // the backpack's projection of the hero: its own small ASCII render of the figure in the studio
+            if (projAscii != null)
+            {
+                bool on = world && invOpen && projHero != null;
+                projAscii.SetEnabled(on);
+                if (!on && studio != null && studio.activeSelf) studio.SetActive(false);
+                if (on)
+                {
+                    Rect lp = BackpackLayout(Screen.width, Screen.height, out _, out _);
+                    int pw = Mathf.Max(16, Mathf.RoundToInt(lp.width)), ph = Mathf.Max(16, Mathf.RoundToInt(lp.height));
+                    projCam.aspect = (float)pw / ph;
+                    projAscii.exposure = ascii.exposure; projAscii.bloom = ascii.bloom; projAscii.outline = ascii.outline; projAscii.litDiv = ascii.litDiv;
+                    projAscii.depthRef = projDist;
+                    projAscii.SetSize(pw, ph, cell * dp);
+                    projAscii.SelfCheck();
+                }
+            }
             if (!world)
             {
                 float cp = Mathf.Cos(cam.pitch), spch = Mathf.Sin(cam.pitch);
@@ -1767,9 +1804,10 @@ namespace AsciiHero
         {
             Rect btnCol, rp; var lp = BackpackLayout(W, H, out btnCol, out rp);
             var gold = new Color(0.93f, 0.74f, 0.33f); var line = new Color(0.45f, 0.4f, 0.3f, 1); var dim = new Color(0.01f, 0.01f, 0.02f, 0.84f);
-            // everything but the hero's window is dimmed
-            Fill(new Rect(0, 0, lp.x, H), dim); Fill(new Rect(lp.xMax, 0, W - lp.xMax, H), dim);
-            Fill(new Rect(lp.x, 0, lp.width, lp.y), dim); Fill(new Rect(lp.x, lp.yMax, lp.width, H - lp.yMax), dim);
+            Fill(new Rect(0, 0, W, H), dim);
+            // the projection of the hero
+            if (projAscii != null && projAscii.final != null) GUI.DrawTexture(lp, projAscii.final, ScaleMode.StretchToFill, false);
+            for (float yy = lp.y; yy < lp.yMax; yy += 3 * k) Fill(new Rect(lp.x, yy, lp.width, Mathf.Max(1, k * 0.5f)), new Color(0.4f, 0.6f, 1f, 0.035f));     // faint scan lines
             Frame(lp, line, Mathf.Max(1, k)); uiRects.Add(lp);
             // the game's own buttons: on the left, in the middle
             float bw = btnCol.width, bh = 38 * k, gap = 10 * k, bx = btnCol.x, by = H / 2 - (4 * bh + 3 * gap) / 2;
@@ -1779,9 +1817,9 @@ namespace AsciiHero
             if (Button(new Rect(bx, by + 3 * (bh + gap), bw, bh), "ВЫЙТИ")) { invOpen = false; LeaveWorld(); inMenu = true; menuPage = 0; return; }
             float R = safe.xMax - 12 * k, T = safe.y + 10 * k;
             if (Button(new Rect(R - 110 * k, T, 110 * k, 28 * k), "ЗАКРЫТЬ")) { invOpen = false; return; }
-            if (setDev && Button(new Rect(R - 226 * k, T, 110 * k, 28 * k), "УРОН −10%")) Damage(10);
+            if (setDev && Button(new Rect(R - 226 * k, T, 110 * k, 28 * k), "УРОН −10%")) { Damage(10); if (projActor != null) projActor.SetLimbs(limbs); }
             GUI.Label(new Rect(lp.x + 10 * k, lp.y + 6 * k, lp.width - 20 * k, 22 * k), "СНАРЯЖЕНИЕ", sTitle);
-            if (invBlend < 0.85f) return;        // (the camera is still turning)
+            if (projHero == null || projCam == null) return;
 
             int fs = Mathf.Max(7, Mathf.RoundToInt(11 * k));
             if (sDoll == null || sDoll.fontSize != fs)
@@ -1790,11 +1828,11 @@ namespace AsciiHero
                 sDoll.normal.textColor = Color.white;
             }
             float cw = fs * 0.62f, lh = fs * 1.18f;
-            Vector2 Scr(Vector3 w) { var v = sceneCam.WorldToViewportPoint(w); return new Vector2(v.x * W, (1 - v.y) * H); }
+            Vector2 Scr(Vector3 w) { var v = projCam.WorldToViewportPoint(w); return new Vector2(lp.x + v.x * lp.width, lp.y + (1 - v.y) * lp.height); }
             // what is missing of the hero: its outline in red dots where it should be
             var red = new Color(0.9f, 0.25f, 0.22f, 0.95f);
             void Dot(Vector3 w) { var q = Scr(w); var old = GUI.color; GUI.color = red; GUI.Label(new Rect(q.x - cw * 0.5f, q.y - lh * 0.55f, cw * 2, lh), ":", sDoll); GUI.color = old; }
-            var hb = hero.human; Transform root = hero.go.transform; float hm = cfg.height / 100f;
+            var hb = projHero.human; Transform root = projHero.go.transform; float hm = cfg.height / 100f;
             Vector3 upW = Vector3.up, side = root.right;
             for (int l = 0; l < 5; l++)
             {

@@ -195,7 +195,9 @@ namespace AsciiHero
             if (dl > 0.25f) { S.x = myPos.x + dxs / dl * 0.25f; S.z = myPos.y + dzs / dl * 0.25f; }
 
             if (driver != null) return AnimatorLocomotion(dt, dir, mag, spd, vgx, vgz, hGoal, myPos);
-            loopMode = !useMM && !lockPos.HasValue;
+            bool lm = !useMM && !lockPos.HasValue;
+            if (lm != loopMode) { blendNext = true; if (!lm) { searchT = 0; } }       // switching between the loops and motion matching: blend, never jump
+            loopMode = lm;
             if (loopMode) return LoopLocomotion(dt, myPos);
             // (the walk and run weights also decide how much the fighting layers hold the legs: keep them up to date here
             // too, or a hero who started a fight standing still kept his legs frozen in the stance while he moved)
@@ -339,8 +341,8 @@ namespace AsciiHero
         // Whatever starts, stops or takes over (an attack, the guard, an idle action, sitting down, getting up), the
         // skeleton never jumps into the new pose: a sudden change of the layered pose between two frames is taken up
         // as an offset that then fades out, so the body moves smoothly into the new pose.
-        Quaternion[] finQ = new Quaternion[0], inPrev, inOff; Vector3 inPrevRo, inOffRo; bool inReady;
-        const float IN_HALF = 0.1f;
+        Quaternion[] finQ = new Quaternion[0], inPrev, inOff; Vector3 inPrevRo, inOffRo; bool inReady, blendNext;
+        const float IN_HALF = 0.1f; float inBlendHalf = 0.1f;
         void Inertial(float dt)
         {
             int nb = MotionDB.nb;
@@ -351,9 +353,11 @@ namespace AsciiHero
                 for (int k = 0; k < nb; k++) { inPrev[k] = finQ[k]; inOff[k] = Quaternion.identity; }
                 inPrevRo = ro; inOffRo = Vector3.zero; inReady = true; return;
             }
-            float decay = 1 - Mathf.Exp(-dt * LN2 / IN_HALF), thr = Mathf.Max(14f, 1800f * dt), jump = 0;
+            inBlendHalf += (IN_HALF - inBlendHalf) * Mathf.Min(1, dt * 3);
+            float decay = 1 - Mathf.Exp(-dt * LN2 / inBlendHalf), thr = Mathf.Max(14f, 1800f * dt), jump = 0;
             for (int k = 0; k < nb; k++) if (map[k] >= 0) jump = Mathf.Max(jump, Quaternion.Angle(inPrev[k], inOff[k] * finQ[k]));
-            bool snap = jump > thr || ((inOffRo + ro) - inPrevRo).magnitude > Mathf.Max(0.035f, 1.2f * dt);
+            bool snap = blendNext || jump > thr || ((inOffRo + ro) - inPrevRo).magnitude > Mathf.Max(0.035f, 1.2f * dt);
+            if (blendNext) { blendNext = false; inBlendHalf = 0.16f; }      // a change of locomotion: a slightly longer, softer blend
             for (int k = 0; k < nb; k++)
             {
                 if (map[k] < 0) continue;
@@ -399,7 +403,7 @@ namespace AsciiHero
             for (int i = 0; i < L.len; i++) { int f = a + i, p = a + (i + L.len - 1) % L.len; if (CON[p * 2] < 0.5f && CON[f * 2] >= 0.5f) { L.off = i; break; } }   // phase 0 = left foot lands
             return L;
         }
-        static void PrepLoops() { if (LIdle != null) return; LIdle = Prep(10493, 10583); LIdleF = Prep(10583, 10663); LWalk = Prep(648, 685); LRun = Prep(7678, 7700); }
+        static void PrepLoops() { if (LIdle != null) return; LIdle = Prep(10493, 10583); LIdleF = Prep(10583, 10663); LWalk = Prep(2490, 2522); LRun = Prep(7851, 7872); }
         Quaternion[] lq, q2, q3; float phase, idlePh, wWalk, wRun;
         readonly float[] c2 = new float[2], c3 = new float[2], cTmp = new float[2];
         void SampleLoop(Loop L, float ph, Quaternion[] oq, ref Vector3 oro, float[] ocon)

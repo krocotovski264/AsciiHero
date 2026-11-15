@@ -7,51 +7,48 @@ import numpy as np, json, base64, gzip, glob
 import retarget as R
 
 SPEC = []  # (file, start, end)
-def add(fn, a=0, b=None): SPEC.append((fn, a, b))
-for n in '11 12 13 14 15 16 17 18 19 20 21 22 25 26 27 29 31 33 35 36 37 39 41 42 43 44 45 46 47 57 58 08'.split(): add(f'016/16_{n}.bvh')
-for n, a, b in (('02', 0, 300), ('06', 0, 420), ('07', 0, 420), ('12', 0, 420), ('13', 0, 420), ('16', 0, 300), ('18', 0, 300), ('21', 0, 300),
-                ('25', 0, 300), ('36', 0, 400), ('39', 0, 400), ('44', 0, 420), ('50', 0, 400)): add(f'069/69_{n}.bvh', a, b)
-for n in '06 08 09 10 53 55 56 57'.split(): add(f'104/104_{n}.bvh')
-for n in '01 02 03 04'.split(): add(f'143/143_{n}.bvh')
-for n in '01 02 03 04 05 06 12'.split(): add(f'009/09_{n}.bvh')
-add('036/36_02.bvh', 0, 420); add('111/111_01.bvh'); add('077/77_02.bvh'); add('040/40_10.bvh', 1000, 1400); add('035/35_01.bvh'); add('082/82_08.bvh', 200, 425)
-
+# locomotion: a studio-quality set (30 fps, one actor per file): walking with side steps and steps back, running
+# (much of it sideways, good for strafing in a fight), sprinting. Exactly 9945 frames, so everything after it keeps
+# its frame index.
+LOCO = [('walk1_subject1.bvh', 60, 4660), ('run1_subject2.bvh', 60, 3260)]
+def _sprint_window(n_need):
+    try: c = np.load('/tmp/lf_sprint1_subject2.npz')
+    except Exception: import ground as _g; c = _g.process('sprint1_subject2.bvh')
+    sp = np.hypot(c['fwd'], c['lat']); fast = (sp > 2.8).astype(float)
+    cs = np.concatenate([[0], np.cumsum(fast)]); best = max(range(60, len(sp) - n_need), key=lambda a: cs[a + n_need] - cs[a]); return best
 H = 10, 20, 30
 rows = {k: [] for k in ('Q', 'RO', 'RM', 'CON', 'F')}; ranges = []; valid = []; tags = []
 total = 0
-for fn, a, b in SPEC:
-    for mirror in (False,):
-        try: c = R.process(fn, mirror=mirror)
-        except Exception as e: print('skip', fn, e); continue
-        n = c['n']; b2 = n if b is None else min(b, n); a2 = min(a, b2 - 1)
-        yaw = c['yaw']; traj = c['traj']
-        if mirror: pass
-        LOC = c['LOC']; dt = c['dt']
-        vel = np.gradient(LOC, dt, axis=0)
-        F = np.zeros((n, 27))
-        for f in range(n):
-            F[f, 0:3] = LOC[f, 0]; F[f, 3:6] = LOC[f, 1]
-            F[f, 6:9] = vel[f, 0]; F[f, 9:12] = vel[f, 1]
-            F[f, 12:15] = [c['lat'][f], 0, c['fwd'][f]]   # hip/root velocity in local frame (x = left)
-            for k, h in enumerate(H):
-                g = min(f + h, n - 1)
-                d = traj[g] - traj[f]
-                y0 = (-yaw[f]) if mirror else yaw[f]        # yaw array was negated for mirrored clips
-                cy, sy = np.cos(-y0), np.sin(-y0)
-                lx, lz = cy * d[0] + sy * d[1], -sy * d[0] + cy * d[1]
-                if mirror: lx = -lx
-                F[f, 15 + 2 * k:17 + 2 * k] = [lx, lz]
-                dy = yaw[g] - yaw[f]
-                F[f, 21 + 2 * k:23 + 2 * k] = [np.sin(dy), np.cos(dy)]
-        sl = slice(a2, b2)
-        m = b2 - a2
-        rows['Q'].append(c['Q'][sl]); rows['RO'].append(c['RO'][sl]); rows['F'].append(F[sl])
-        rows['RM'].append(np.stack([c['fwd'][sl], c['lat'][sl], c['yawr'][sl]], 1)); rows['CON'].append(c['con'][sl])
-        v = np.ones(m, dtype=bool); v[-31:] = False; v[:2] = False
-        valid.append(v); ranges.append([total, total + m, fn + ('M' if mirror else '')]); total += m
-# sword cuts: appended after the locomotion frames and never
+_used = sum(b - a for _, a, b in LOCO); _need = 9945 - _used; _sa = _sprint_window(_need); LOCO.append(('sprint1_subject2.bvh', _sa, _sa + _need))
+import ground as lafan
+for fn, a, b in LOCO:
+    cache = '/tmp/lf_' + fn[:-4] + '.npz'
+    try: c = dict(np.load(cache)); c['n'] = len(c['Q']); c['dt'] = 1 / 30.0
+    except Exception: c = lafan.process(fn)
+    n = c['n']; b2 = min(b, n); a2 = min(a, b2 - 1)
+    yaw = c['yaw']; traj = c['traj']; LOC = c['LOC']; dt = c['dt']
+    RO = c['RO'].copy(); hy = c['hipsY']; RO[:, 1] = hy - np.percentile(hy, 95) + 0.01      # pelvis height: 0 = standing (as the idle stances)
+    vel = np.gradient(LOC, dt, axis=0)
+    F = np.zeros((n, 27))
+    for f in range(n):
+        F[f, 0:3] = LOC[f, 0]; F[f, 3:6] = LOC[f, 1]
+        F[f, 6:9] = vel[f, 0]; F[f, 9:12] = vel[f, 1]
+        F[f, 12:15] = [c['lat'][f], 0, c['fwd'][f]]
+        for k, h in enumerate(H):
+            g = min(f + h, n - 1); d = traj[g] - traj[f]
+            cy, sy = np.cos(-yaw[f]), np.sin(-yaw[f])
+            lx, lz = cy * d[0] + sy * d[1], -sy * d[0] + cy * d[1]
+            F[f, 15 + 2 * k:17 + 2 * k] = [lx, lz]
+            dy = yaw[g] - yaw[f]; F[f, 21 + 2 * k:23 + 2 * k] = [np.sin(dy), np.cos(dy)]
+    sl = slice(a2, b2); m = b2 - a2
+    rows['Q'].append(c['Q'][sl]); rows['RO'].append(RO[sl]); rows['F'].append(F[sl])
+    rows['RM'].append(np.stack([c['fwd'][sl], c['lat'][sl], c['yawr'][sl]], 1)); rows['CON'].append(c['con'][sl])
+    v = np.ones(m, dtype=bool); v[-31:] = False; v[:2] = False
+    valid.append(v); ranges.append([total, total + m, 'loco/' + fn[:-4]]); total += m
+print('locomotion frames', total)
+# sword cuts from the Bandai Namco Research Motiondataset (CC BY-NC 4.0): appended after the CMU frames and never
 # offered to motion matching (valid = 0); the game plays them by frame index
-import cuts as bandai, json as _json
+import bandai, json as _json
 ATK = []
 for fn, a, b in (('dataset-1_slash_normal_001.bvh', 164, 230), ('dataset-1_slash_normal_002.bvh', 164, 232)):
     c = bandai.process(fn, a, b); m = c['n']
@@ -127,8 +124,8 @@ for name, kind in (('sitM', 'lotus'), ('sitF', 'side')):
     rows['RM'].append(np.zeros((m, 3))); rows['CON'].append(np.ones((m, 2)))
     valid.append(np.zeros(m, dtype=bool)); ranges.append([total, total + m, name])
     IDLE[name] = {'a': total, 'n': m, 'minY': round(float(ro[1]), 3)}; total += m
-_json.dump(IDLE, open('idle.json', 'w'))
-_json.dump(ATK, open('atk.json', 'w'))
+_json.dump(IDLE, open('/home/claude/mocap/idle.json', 'w'))
+_json.dump(ATK, open('/home/claude/mocap/atk.json', 'w'))
 print('frames', total)
 Q = np.concatenate(rows['Q']); RO = np.concatenate(rows['RO']); RM = np.concatenate(rows['RM']); CON = np.concatenate(rows['CON']); F = np.concatenate(rows['F']); V = np.concatenate(valid)
 # hemisphere continuity inside each range
@@ -145,7 +142,9 @@ FN = (F - mean) * scale
 # idle-breaker frames (40_10 segment) are tagged so the runtime can pick them occasionally
 idleB = np.zeros(total, dtype=np.uint8)
 for s0, s1, nm in ranges:
-    if nm.startswith('040/40_10'): idleB[s0:s1] = 1
+    pass
+_sp = np.hypot(RM[:9945, 0], RM[:9945, 1]); _st = np.convolve((_sp < 0.08).astype(float), np.ones(90), 'valid')
+_ib = int(np.argmax(_st)); idleB[_ib:_ib + 90] = 1; print('idle breaker', _ib, _st[_ib])
 blob = bytearray()
 def put(arr):
     global blob
@@ -156,5 +155,5 @@ meta = {'bones': R.OUT_BONES, 'fps': 30, 'n': int(total), 'nf': 27, 'mean': mean
         'q': put(np.round(Qp[..., :3] * 32767).astype(np.int16)), 'ro': put(np.round(RO * 4000).astype(np.int16)), 'rm': put(np.round(RM * 2000).astype(np.int16)),
         'con': put((CON * 255).astype(np.uint8)), 'f': put(np.round(np.clip(FN, -32, 32) * 1000).astype(np.int16)), 'valid': put(V.astype(np.uint8)), 'idleB': put(idleB)}
 gz = gzip.compress(bytes(blob), 9)
-open('../../game/src/data_mm.js', 'w').write('export const MM_META=' + json.dumps(meta, separators=(',', ':')) + ';\nexport const MM_B64="' + base64.b64encode(gz).decode() + '";\n')
+open('/home/claude/game3d/src/data_mm.js', 'w').write('export const MM_META=' + json.dumps(meta, separators=(',', ':')) + ';\nexport const MM_B64="' + base64.b64encode(gz).decode() + '";\n')
 print('raw', len(blob), 'gz', len(gz), 'b64', len(gz) * 4 // 3)
