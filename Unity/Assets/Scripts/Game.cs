@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.54 · Unity";
+        public const string VERSION = "beta 0.55 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -1653,6 +1653,16 @@ namespace AsciiHero
             projCam.transform.localPosition = new Vector3(0, hm * 0.56f, projDist);
             projCam.transform.LookAt(STUDIO + Vector3.up * hm * 0.5f);
         }
+        // while the pocket is open the hero in the world is not drawn (nothing of him shows round the smoke)
+        readonly List<Renderer> heroRs = new List<Renderer>(); bool heroHidden; Character heroRsFor;
+        void HideHeroBehindPocket(bool hide)
+        {
+            if (hero == null || hide == heroHidden) return;
+            if (heroRsFor != hero) { heroRsFor = hero; heroRs.Clear(); }
+            if (hide) { heroRs.Clear(); foreach (var r in hero.go.GetComponentsInChildren<Renderer>(false)) if (r.enabled) { r.enabled = false; heroRs.Add(r); } }
+            else { foreach (var r in heroRs) if (r != null) r.enabled = true; heroRs.Clear(); }
+            heroHidden = hide;
+        }
         void ClosePocket() { if (invOpen && pocketClose < 0) pocketClose = 0; }
         // the projection in the pocket is the hero himself, live: every bone of the copy takes the pose of the hero's,
         // every part shown or hidden as his (so it stands, walks, fights and is missing what he is missing)
@@ -1762,6 +1772,7 @@ namespace AsciiHero
             }
             if (player != null && player.driver != null) player.Animate(tNow, Mathf.Min(0.1f, Time.deltaTime));
             if (world && invOpen) MirrorPose();
+            HideHeroBehindPocket(world && invOpen && pocketT > 0.3f && pocketClose < 0.3f);
         }
 
         void ToggleGlyphMode()
@@ -2118,8 +2129,9 @@ namespace AsciiHero
         Rect PocketGrid(float W, float H, out float cell)
         {
             Vector3 a, b; PocketClouds(W, H, out a, out b);
-            float side = b.z * 1.38f; cell = Mathf.Floor(Mathf.Min(side / 10f, side * 0.62f / 5f));
-            float gw = cell * 10, gh = cell * 5; return new Rect(b.x - gw / 2, b.y - gh / 2 - cell * 0.35f, gw, gh);
+            // 5 x 5 in sight (of 5 x 10), as big as fits in the cloud with the buttons under it
+            float side = b.z * 1.3f; cell = Mathf.Floor(Mathf.Min(side / 5f, (side - 30 * k) / 5f));
+            float gw = cell * 5, gh = cell * 5; return new Rect(b.x - gw / 2, b.y - gh / 2 - 12 * k, gw, gh);
         }
         float pocketScroll; Material keyMat;
         void PocketUI(float W, float H)
@@ -2135,7 +2147,7 @@ namespace AsciiHero
                 pocketMat.SetFloat("_PT", pocketT); pocketMat.SetFloat("_PClose", pocketClose < 0 ? 0 : pocketClose);
                 pocketMat.SetVector("_PRect", new Vector4(R.x, R.y, R.width, R.height));
                 pocketMat.SetVector("_PC1", c1); pocketMat.SetVector("_PC2", c2);
-                pocketMat.SetVector("_PCell", new Vector4(cellW, cellH, Mathf.Max(1.5f, 1.3f * k), 0));
+                pocketMat.SetVector("_PCell", new Vector4(cellW, cellH, Mathf.Max(0.6f, 0.45f * k), 0));      // (a thin outline)
                 Graphics.DrawTexture(R, texWhite, pocketMat);
             }
             // what lies on it fades in after the smoke has gathered, and goes first when it closes
@@ -2156,18 +2168,18 @@ namespace AsciiHero
                 float cell; var gr = PocketGrid(W, H, out cell); uiRects.Add(gr);
                 foreach (var pt in InputHub.active.Values)
                     if (pt.owner == "ui" && gr.Contains(pt.start) && live) pocketScroll -= pt.Delta.y / cell;
-                pocketScroll = Mathf.Clamp(pocketScroll, 0, 5);
+                pocketScroll = Mathf.Clamp(pocketScroll, 0, 5);      // (10 rows, 5 in sight)
                 var lineC = new Color(0.4f, 0.36f, 0.52f, 0.9f); var fillC = new Color(0.03f, 0.025f, 0.05f, 0.85f);
                 int fs = Mathf.Max(8, Mathf.RoundToInt(cell * 0.5f));
                 if (sBag == null || sBag.fontSize != fs) { sBag = new GUIStyle(sMono) { richText = false, alignment = TextAnchor.MiddleCenter, fontSize = fs, wordWrap = false }; sBag.normal.textColor = new Color(0.91f, 0.71f, 0.26f); }
                 GUI.BeginGroup(gr);
                 int r0 = Mathf.FloorToInt(pocketScroll); float off = (pocketScroll - r0) * cell;
                 for (int r = r0; r < Mathf.Min(10, r0 + 6); r++)
-                    for (int cc = 0; cc < 10; cc++)
+                    for (int cc = 0; cc < 5; cc++)
                     {
                         var cr = new Rect(cc * cell + 2, (r - r0) * cell - off + 2, cell - 4, cell - 4);
                         Fill(cr, fillC); Frame(cr, lineC, Mathf.Max(1, k));
-                        int ii = r * 10 + cc;
+                        int ii = r * 5 + cc;
                         if (ii < inventory.Count && inventory[ii].Length > 0) GUI.Label(cr, inventory[ii].Substring(0, 1), sBag);
                     }
                 GUI.EndGroup();
@@ -2175,7 +2187,7 @@ namespace AsciiHero
                 var sb = new Rect(gr.xMax + 4 * k, gr.y, 2 * k, gr.height); Fill(sb, new Color(0.25f, 0.22f, 0.32f, 0.6f));
                 Fill(new Rect(sb.x, gr.y + gr.height * (pocketScroll / 10f), sb.width, gr.height * 0.5f), lineC);
                 // the game's own buttons: small, under the cells
-                float bw = gr.width / 4 - 4 * k, bh = 18 * k, by = gr.yMax + cell * 0.35f;
+                float bw = gr.width / 4 - 4 * k, bh = 18 * k, by = gr.yMax + 6 * k;
                 if (Button(new Rect(gr.x, by, bw, bh), "сохранить", false, sSmallBtn()) && live) { saveMode = 1; menuPage = 3; menuFromWorld = true; saveInfoDirty = true; }
                 if (Button(new Rect(gr.x + (bw + 5 * k), by, bw, bh), "загрузить", false, sSmallBtn()) && live) { saveMode = 2; menuPage = 3; menuFromWorld = true; saveInfoDirty = true; }
                 if (Button(new Rect(gr.x + (bw + 5 * k) * 2, by, bw, bh), "настройки", false, sSmallBtn()) && live) { menuPage = 1; menuFromWorld = true; }

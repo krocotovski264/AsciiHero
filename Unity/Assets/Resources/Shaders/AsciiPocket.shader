@@ -60,16 +60,20 @@ Shader "Hidden/AsciiHero/Pocket"
                 }
                 // puffs breaking off and flying out, shrinking away (separate shapes, as the dash's smoke)
                 float Fly = 1e5;
-                [loop] for (int q = 0; q < 9; q++)
+                float flyK = 0;          // how close to a breaking-off puff (for its trail of characters)
+                [loop] for (int q = 0; q < 22; q++)
                 {
-                    float h1 = H1(q * 2.9 + 11.3), h2 = H1(q * 7.1 + 4.4), L = 0.9 + 0.8 * h2;
+                    float h1 = H1(q * 2.9 + 11.3), h2 = H1(q * 7.1 + 4.4), L = 0.55 + 0.6 * h2;
                     float ph = frac(t / L + h1);
                     float4 C = h1 < 0.4 ? _PC1 : _PC2;
                     float a = h2 * 6.2832 + 0.3 * ph;
                     float2 dir = float2(cos(a), sin(a));
-                    float2 P = C.xy + dir * C.z * s * (0.95 + (0.25 + 0.45 * h1) * ph);
-                    float rad = rr * s * (0.16 + 0.06 * h2) * (1.0 - ph) * (t > 0.25 ? 1.0 : t / 0.25);
-                    Fly = min(Fly, length(px - P) - rad);
+                    float2 P = C.xy + dir * C.z * s * (0.95 + (0.3 + 0.55 * h1) * ph);
+                    float rad = rr * s * (0.09 + 0.08 * h2) * (1.0 - ph) * (t > 0.25 ? 1.0 : t / 0.25);
+                    float dd = length(px - P) - rad;
+                    Fly = min(Fly, dd);
+                    // as it goes it blows away into violet characters: a cloud of them around it, growing as it shrinks
+                    flyK = max(flyK, saturate(1.0 - dd / (rr * (0.05 + 0.2 * ph)))  * ph * (1.0 - ph) * 4.0);
                 }
                 float G = min(F, Fly);
                 // closing: it comes apart - holes open in it by noise
@@ -82,10 +86,12 @@ Shader "Hidden/AsciiHero/Pocket"
                 float swirl = N2(cell * 0.23 + float2(t * 0.6, -t * 0.4)) * 0.7 + N2(cell * 0.61 - t * 0.9) * 0.3;
                 float dens = G < 0.0 ? saturate(edgeIn * (0.35 + 0.65 * swirl) + 0.12 * smoothstep(0.6, 0.85, swirl)) : 0.0;
                 float fleck = 0.0;
-                if (G > 0.0 && G < rr * 0.16)
-                {
-                    float hh = H2(cell + floor(t * 7.0) * float2(1.7, 3.3));
-                    fleck = hh > 0.9 ? (1.0 - G / (rr * 0.16)) * 0.6 : 0.0;
+                if (G > 0.0)
+                {   // violet characters coming off the edge and off the puffs, flickering, thinning out with distance
+                    float hh = H2(cell + floor(t * 9.0) * float2(1.7, 3.3));
+                    float nearEdge = saturate(1.0 - G / (rr * 0.22));
+                    float k2 = max(nearEdge * 0.8, saturate(flyK));
+                    fleck = hh > 1.0 - 0.22 * k2 ? (0.35 + 0.65 * k2) : 0.0;
                 }
                 float gd = max(dens, fleck);
                 float gi = floor(saturate(gd) * 15.99);
@@ -99,9 +105,10 @@ Shader "Hidden/AsciiHero/Pocket"
                 float3 black = float3(0.006, 0.004, 0.011);
                 float3 glyphC = lerp(float3(0.12, 0.1, 0.17), float3(0.42, 0.38, 0.52), gd);
                 float3 lineC = float3(0.46, 0.42, 0.58);
-                float3 col = lerp(black, glyphC, ink);
+                float3 violet = lerp(float3(0.36, 0.16, 0.6), float3(0.78, 0.5, 1.0), saturate(fleck));
+                float3 col = lerp(black, G > 0.0 ? violet : glyphC, ink);
                 col = lerp(col, lineC, edgeL);
-                float a = saturate(max(inside, max(edgeL, ink * fleck * 1.6)));
+                float a = saturate(max(inside, max(edgeL, ink * saturate(fleck * 1.8))));
                 return float4(col, a * alive * saturate(g * 2.0));
             }
             ENDCG
