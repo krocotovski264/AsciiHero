@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.52 · Unity";
+        public const string VERSION = "beta 0.53 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -123,7 +123,10 @@ namespace AsciiHero
         // the lake: rings from the hero's steps (x, z, birth time, strength)
         readonly Vector4[] ripples = new Vector4[8]; int rippleIx; float rippleT;
         GUIStyle sDoll, sBag;
-        float invT, heroSink;      // time the backpack has been open; how deep the hero stands in the lake
+        float invT, heroSink;
+        // the shadow pocket (the hero's menu): time since it opened, how far it has blown apart closing (-1 = open), the
+        // window shown (0 the hero's state, 1 the backpack); the interface's opacity while it appears
+        float pocketT, pocketClose = -1; int pocketTab; Material pocketMat; float uiAlpha = 1;      // time the backpack has been open; how deep the hero stands in the lake
         // the backpack shows a projection of the hero: a still copy of him in a "studio" far outside the world, filmed by
         // its own camera through its own ASCII renderer
         static readonly Vector3 STUDIO = new Vector3(600, 0, 600);
@@ -1151,7 +1154,7 @@ namespace AsciiHero
             HandlePointers(dt);
             if (InputHub.Key("Back"))
             {
-                if (world) { if (menuFromWorld) menuFromWorld = false; else if (invOpen) invOpen = false; else OpenBackpack(); }
+                if (world) { if (menuFromWorld) menuFromWorld = false; else if (invOpen) ClosePocket(); else OpenBackpack(); }
                 else Application.Quit();
             }
 
@@ -1165,7 +1168,11 @@ namespace AsciiHero
                 }
                 player.HoldInPlace(dt);
             }
-            if (world && invOpen) invT += dt;
+            if (world && invOpen)
+            {
+                invT += dt; pocketT += dt;
+                if (pocketClose >= 0) { pocketClose += dt / 0.35f; if (pocketClose >= 1) { invOpen = false; pocketClose = -1; } }
+            }
             if (player.driver == null && !perfNoAnim) { long tA = System.Diagnostics.Stopwatch.GetTimestamp(); player.Animate(tNow, dt); accA += Ms(tA); }   // Animator mode: after the Animator, in LateUpdate
             if (toastT > 0) toastT -= dt;
             fpsAcc += Time.unscaledDeltaTime; fpsN++;
@@ -1232,7 +1239,11 @@ namespace AsciiHero
             }
             foreach (var p in InputHub.ended)
             {
-                if (p.owner == "ui" && (p.pos - p.start).magnitude < 40 * k) taps.Add(p.pos);
+                if (p.owner == "ui" && (p.pos - p.start).magnitude < 40 * k)
+                {
+                    if (world && invOpen && !menuFromWorld && !InPocket(p.pos)) ClosePocket();      // a tap outside the smoke closes the pocket
+                    else taps.Add(p.pos);
+                }
                 if (world && (p.owner == "stick" || p.owner == "rt"))
                 {
                     bool tap = Time.unscaledTime - p.t0 < 0.25f && (p.pos - p.start).magnitude < 0.35f * StickCm();
@@ -1642,10 +1653,40 @@ namespace AsciiHero
             projCam.transform.localPosition = new Vector3(0, hm * 0.56f, projDist);
             projCam.transform.LookAt(STUDIO + Vector3.up * hm * 0.5f);
         }
+        void ClosePocket() { if (invOpen && pocketClose < 0) pocketClose = 0; }
+        // the projection in the pocket is the hero himself, live: every bone of the copy takes the pose of the hero's,
+        // every part shown or hidden as his (so it stands, walks, fights and is missing what he is missing)
+        Transform[] mirSrc, mirDst; Character mirFor; int mirLimbs = -1;
+        void MirrorPose()
+        {
+            if (projHero == null || hero == null) return;
+            int ls0 = 0; for (int l = 0; l < 5; l++) if (limbs[l]) ls0 |= 1 << l;
+            if (ls0 != mirLimbs && projActor != null) { mirLimbs = ls0; projActor.SetLimbs(limbs); }
+            if (mirFor != projHero || mirSrc == null)
+            {
+                mirFor = projHero; var map = new Dictionary<string, Transform>();
+                string Path(Transform t, Transform root) { var sb = new System.Text.StringBuilder(); for (var x = t; x != null && x != root; x = x.parent) sb.Insert(0, "/" + x.name); return sb.ToString(); }
+                foreach (var t in projHero.go.GetComponentsInChildren<Transform>(true)) if (t != projHero.go.transform) map[Path(t, projHero.go.transform)] = t;
+                var ls = new List<Transform>(); var ld = new List<Transform>();
+                foreach (var t in hero.go.GetComponentsInChildren<Transform>(true))
+                {
+                    if (t == hero.go.transform) continue; Transform d;
+                    if (map.TryGetValue(Path(t, hero.go.transform), out d)) { ls.Add(t); ld.Add(d); }
+                }
+                mirSrc = ls.ToArray(); mirDst = ld.ToArray();
+            }
+            for (int i = 0; i < mirSrc.Length; i++)
+            {
+                var a = mirSrc[i]; var b = mirDst[i]; if (a == null || b == null) continue;
+                b.localPosition = a.localPosition; b.localRotation = a.localRotation; b.localScale = a.localScale;
+                if (b.gameObject.activeSelf != a.gameObject.activeSelf) b.gameObject.SetActive(a.gameObject.activeSelf);
+            }
+        }
         void OpenBackpack()
         {
             if (!world || perfRun) return;
-            invOpen = true; menuFromWorld = false; invT = 0;
+            if (invOpen && pocketClose >= 0) { pocketClose = -1; return; }      // (tapped again while it was closing: it stays)
+            invOpen = true; menuFromWorld = false; invT = 0; pocketT = 0; pocketClose = -1;
             try { MakeProjection(); } catch (System.Exception e) { Debug.LogException(e); }
             stickId = int.MinValue; stick = Vector2.zero; stickRun = 0; stickRunArmed = false;
             foreach (var q in InputHub.active.Values) q.owner = "ui";
@@ -1694,12 +1735,12 @@ namespace AsciiHero
             // the backpack's projection of the hero: its own small ASCII render of the figure in the studio
             if (projAscii != null)
             {
-                bool on = world && invOpen && projHero != null;
+                bool on = world && invOpen && projHero != null && pocketTab == 0;
                 projAscii.SetEnabled(on);
                 if (!on && studio != null && studio.activeSelf) studio.SetActive(false);
                 if (on)
                 {
-                    Rect lp = BackpackLayout(Screen.width, Screen.height, out _, out _);
+                    Rect lp = PocketProjRect(Screen.width, Screen.height);
                     int pw = Mathf.Max(16, Mathf.RoundToInt(lp.width)), ph = Mathf.Max(16, Mathf.RoundToInt(lp.height));
                     projCam.aspect = (float)pw / ph;
                     projAscii.exposure = ascii.exposure; projAscii.bloom = ascii.bloom; projAscii.outline = ascii.outline; projAscii.litDiv = ascii.litDiv;
@@ -1720,6 +1761,7 @@ namespace AsciiHero
                 fill.transform.rotation = Quaternion.LookRotation(-rot(-2.5f, 0.8f, 2.0f));
             }
             if (player != null && player.driver != null) player.Animate(tNow, Mathf.Min(0.1f, Time.deltaTime));
+            if (world && invOpen && pocketTab == 0) MirrorPose();
         }
 
         void ToggleGlyphMode()
@@ -1780,7 +1822,7 @@ namespace AsciiHero
             sRight = new GUIStyle(sSmall) { alignment = TextAnchor.LowerRight, wordWrap = false };
             sRightSmall = new GUIStyle(sSmall) { alignment = TextAnchor.UpperRight, wordWrap = false }; sRightSmall.normal.textColor = new Color(0.93f, 0.74f, 0.33f);
         }
-        void Fill(Rect r, Color c) { var old = GUI.color; GUI.color = c; GUI.DrawTexture(r, texWhite); GUI.color = old; }
+        void Fill(Rect r, Color c) { var old = GUI.color; c.a *= uiAlpha; GUI.color = c; GUI.DrawTexture(r, texWhite); GUI.color = old; }
         void Frame(Rect r, Color c, float w = 1)
         {
             Fill(new Rect(r.x, r.y, r.width, w), c); Fill(new Rect(r.x, r.yMax - w, r.width, w), c);
@@ -2020,7 +2062,7 @@ namespace AsciiHero
         void WorldUI(float W, float H, float L, float T)
         {
             stickR = 62 * k;
-            if (invOpen) BackpackUI(W, H);
+            if (invOpen) PocketUI(W, H);
         }
 
         // ---------- backpack ----------
@@ -2047,130 +2089,157 @@ namespace AsciiHero
             for (int i = 0; i < 4; i++) { string l = art != null && i < art.Length ? art[i] : ""; l = (l + "     ").Substring(0, 5); o[i + 1] = "| " + l + " |"; }
             return o;
         }
-        void BackpackUI(float W, float H)
+        // ---------- the shadow pocket ----------
+        // A tap on the hero tears a pocket of his shadow open in the middle of the screen: ASCII smoke gathers into an
+        // oval a third of the screen in size (0.35 s), puffs break off its rim and drift away, and the windows come up on
+        // its dark hollow (0.65 s). The game goes on around it; a tap outside the smoke closes it (the smoke blows apart).
+        // Two windows: the hero's state (a live projection of him - as he stands, moves, with the limbs he has - and his
+        // integrity, limbs, armour, weapons) and the backpack.
+        void PocketOval(float W, float H, out Vector2 c, out Vector2 rad)
         {
-            Rect btnCol, rp; var lp = BackpackLayout(W, H, out btnCol, out rp);
-            var gold = new Color(0.93f, 0.74f, 0.33f); var line = new Color(0.45f, 0.4f, 0.3f, 1); var dim = new Color(0.01f, 0.01f, 0.02f, 0.84f);
-            Fill(new Rect(0, 0, W, H), dim);
-            // the projection of the hero
-            if (projAscii != null && projAscii.final != null) GUI.DrawTexture(lp, projAscii.final, ScaleMode.StretchToFill, false);
-            for (float yy = lp.y; yy < lp.yMax; yy += 3 * k) Fill(new Rect(lp.x, yy, lp.width, Mathf.Max(1, k * 0.5f)), new Color(0.4f, 0.6f, 1f, 0.035f));     // faint scan lines
-            Frame(lp, line, Mathf.Max(1, k)); uiRects.Add(lp);
-            // the game's own buttons: on the left, in the middle
-            float bw = btnCol.width, bh = 38 * k, gap = 10 * k, bx = btnCol.x, by = H / 2 - (4 * bh + 3 * gap) / 2;
-            if (Button(new Rect(bx, by, bw, bh), "СОХРАНИТЬ")) { saveMode = 1; menuPage = 3; menuFromWorld = true; saveInfoDirty = true; }
-            if (Button(new Rect(bx, by + (bh + gap), bw, bh), "ЗАГРУЗИТЬ")) { saveMode = 2; menuPage = 3; menuFromWorld = true; saveInfoDirty = true; }
-            if (Button(new Rect(bx, by + 2 * (bh + gap), bw, bh), "НАСТРОЙКИ")) { menuPage = 1; menuFromWorld = true; }
-            if (Button(new Rect(bx, by + 3 * (bh + gap), bw, bh), "ВЫЙТИ")) { invOpen = false; LeaveWorld(); inMenu = true; menuPage = 0; return; }
-            float R = safe.xMax - 12 * k, T = safe.y + 10 * k;
-            if (Button(new Rect(R - 110 * k, T, 110 * k, 28 * k), "ЗАКРЫТЬ")) { invOpen = false; return; }
-            if (setDev && Button(new Rect(R - 226 * k, T, 110 * k, 28 * k), "УРОН −10%")) { Damage(10); if (projActor != null) projActor.SetLimbs(limbs); }
-            GUI.Label(new Rect(lp.x + 10 * k, lp.y + 6 * k, lp.width - 20 * k, 22 * k), "СНАРЯЖЕНИЕ", sTitle);
-            if (projHero == null || projCam == null) return;
-
-            int fs = Mathf.Max(7, Mathf.RoundToInt(11 * k));
-            if (sDoll == null || sDoll.fontSize != fs)
+            c = new Vector2(W / 2, H / 2);
+            float b = Mathf.Sqrt(0.33f * W * H / (Mathf.PI * 1.6f)), a = b * 1.6f;           // pi a b = a third of the screen
+            a = Mathf.Min(a, W * 0.47f); b = Mathf.Min(b, H * 0.47f);
+            rad = new Vector2(a, b);
+        }
+        bool InPocket(Vector2 p)
+        {
+            Vector2 c, rad; PocketOval(Screen.width, Screen.height, out c, out rad);
+            var q = new Vector2((p.x - c.x) / rad.x, (p.y - c.y) / rad.y); return q.magnitude < 1.05f;
+        }
+        /// the windows' area: the rectangle inside the oval (with a little air)
+        Rect PocketContent(float W, float H)
+        {
+            Vector2 c, rad; PocketOval(W, H, out c, out rad);
+            float w = rad.x * 1.36f, h = rad.y * 1.36f; return new Rect(c.x - w / 2, c.y - h / 2, w, h);
+        }
+        Rect PocketProjRect(float W, float H)
+        {
+            var cr = PocketContent(W, H); float top = cr.y + 30 * k, bot = cr.yMax - 26 * k;
+            return new Rect(cr.x, top, cr.width * 0.42f, bot - top);
+        }
+        void PocketUI(float W, float H)
+        {
+            Vector2 c, rad; PocketOval(W, H, out c, out rad);
+            // the smoke
+            if (pocketMat == null) { var sh = Shader.Find("Hidden/AsciiHero/Pocket"); if (sh != null) pocketMat = new Material(sh); }
+            float cellW = ascii != null && ascii.cols > 0 ? W / ascii.cols : 8 * k, cellH = ascii != null && ascii.rows > 0 ? H / ascii.rows : 14 * k;
+            if (pocketMat != null)
             {
-                sDoll = new GUIStyle(sMono) { richText = true, alignment = TextAnchor.UpperLeft, fontSize = fs, wordWrap = false };
-                sDoll.normal.textColor = Color.white;
+                pocketMat.SetFloat("_PT", pocketT); pocketMat.SetFloat("_PClose", pocketClose < 0 ? 0 : pocketClose);
+                pocketMat.SetVector("_PCenter", new Vector4(c.x, c.y, W, H));
+                pocketMat.SetVector("_PRad", new Vector4(rad.x, rad.y, cellW, cellH));
+                Graphics.DrawTexture(new Rect(0, 0, W, H), texWhite, pocketMat);
             }
-            float cw = fs * 0.62f, lh = fs * 1.18f;
-            Vector2 Scr(Vector3 w) { var v = projCam.WorldToViewportPoint(w); return new Vector2(lp.x + v.x * lp.width, lp.y + (1 - v.y) * lp.height); }
-            // what is missing of the hero: its outline in red dots where it should be
-            var red = new Color(0.9f, 0.25f, 0.22f, 0.95f);
-            void Dot(Vector3 w) { var q = Scr(w); var old = GUI.color; GUI.color = red; GUI.Label(new Rect(q.x - cw * 0.5f, q.y - lh * 0.55f, cw * 2, lh), ":", sDoll); GUI.color = old; }
-            var hb = projHero.human; Transform root = projHero.go.transform; float hm = cfg.height / 100f;
-            Vector3 upW = Vector3.up, side = root.right;
+            else Fill(new Rect(c.x - rad.x * 0.7f, c.y - rad.y * 0.7f, rad.x * 1.4f, rad.y * 1.4f), new Color(0.01f, 0.01f, 0.02f, 0.8f));
+            // the windows fade in after the smoke has gathered, and go first when it closes
+            float ua = Mathf.SmoothStep(0, 1, (pocketT - 0.35f) / 0.65f);
+            if (pocketClose >= 0) ua *= 1 - Mathf.SmoothStep(0, 1, pocketClose / 0.45f);
+            if (ua <= 0.01f) return;
+            uiAlpha = ua; var oldC = GUI.color; GUI.color = new Color(1, 1, 1, ua);
+            bool live = ua > 0.6f;                       // (no taps until it can be seen)
+            if (!live) taps.Clear();
+            try
+            {
+                var cr = PocketContent(W, H);
+                var gold = new Color(0.93f, 0.74f, 0.33f); var line = new Color(0.42f, 0.38f, 0.5f, 0.8f);
+                // the tabs
+                float tw = Mathf.Min(150 * k, cr.width * 0.36f), th = 24 * k;
+                if (Button(new Rect(c.x - tw - 4 * k, cr.y, tw, th), "СОСТОЯНИЕ", pocketTab == 0) && live) pocketTab = 0;
+                if (Button(new Rect(c.x + 4 * k, cr.y, tw, th), "ИНВЕНТАРЬ", pocketTab == 1) && live) pocketTab = 1;
+                // the game's own buttons: a row along the bottom
+                float bw = (cr.width - 18 * k) / 4, bh = 20 * k, by = cr.yMax - bh;
+                if (Button(new Rect(cr.x, by, bw, bh), "сохранить", false, sSmallBtn()) && live) { saveMode = 1; menuPage = 3; menuFromWorld = true; saveInfoDirty = true; }
+                if (Button(new Rect(cr.x + (bw + 6 * k), by, bw, bh), "загрузить", false, sSmallBtn()) && live) { saveMode = 2; menuPage = 3; menuFromWorld = true; saveInfoDirty = true; }
+                if (Button(new Rect(cr.x + (bw + 6 * k) * 2, by, bw, bh), "настройки", false, sSmallBtn()) && live) { menuPage = 1; menuFromWorld = true; }
+                if (Button(new Rect(cr.x + (bw + 6 * k) * 3, by, bw, bh), "выйти", false, sSmallBtn()) && live) { invOpen = false; pocketClose = -1; LeaveWorld(); inMenu = true; menuPage = 0; return; }
+                var body = new Rect(cr.x, cr.y + th + 6 * k, cr.width, by - 6 * k - (cr.y + th + 6 * k));
+                if (pocketTab == 0) PocketState(body, gold, line); else PocketBag(body, gold, line);
+            }
+            finally { GUI.color = oldC; uiAlpha = 1; }
+        }
+        GUIStyle sSmallBtnS;
+        GUIStyle sSmallBtn()
+        {
+            int fs = Mathf.Max(7, Mathf.RoundToInt(10 * k));
+            if (sSmallBtnS == null || sSmallBtnS.fontSize != fs) { sSmallBtnS = new GUIStyle(sBtn) { fontSize = fs }; }
+            return sSmallBtnS;
+        }
+        void PocketState(Rect body, Color gold, Color line)
+        {
+            var lp = PocketProjRect(Screen.width, Screen.height); lp.y = body.y; lp.height = body.height;
+            if (projAscii != null && projAscii.final != null && pocketT > 0.1f) GUI.DrawTexture(lp, projAscii.final, ScaleMode.ScaleToFit, true);
+            Frame(lp, line, Mathf.Max(1, k)); uiRects.Add(lp);
+            // missing limbs: their outline in red dots on the projection
+            if (projHero != null && projCam != null)
+            {
+                int fs = Mathf.Max(7, Mathf.RoundToInt(11 * k));
+                if (sDoll == null || sDoll.fontSize != fs) { sDoll = new GUIStyle(sMono) { richText = true, alignment = TextAnchor.UpperLeft, fontSize = fs, wordWrap = false }; sDoll.normal.textColor = Color.white; }
+                float cw = fs * 0.62f, lh = fs * 1.18f;
+                Vector2 Scr(Vector3 w) { var v = projCam.WorldToViewportPoint(w); return new Vector2(lp.x + v.x * lp.width, lp.y + (1 - v.y) * lp.height); }
+                var red = new Color(0.9f, 0.25f, 0.22f, 0.95f * uiAlpha);
+                void Dot(Vector3 w) { var q = Scr(w); var old = GUI.color; GUI.color = red; GUI.Label(new Rect(q.x - cw * 0.5f, q.y - lh * 0.55f, cw * 2, lh), ":", sDoll); GUI.color = old; }
+                var hb = projHero.human; Transform root = projHero.go.transform; float hm = cfg.height / 100f; Vector3 side = root.right;
+                for (int l = 0; l < 5; l++)
+                {
+                    if (limbs[l]) continue;
+                    var b = hb.Bone(Character.LIMB_BONE[l]); if (b == null) continue; Vector3 o = b.position;
+                    if (l == 0) { Vector3 cc = o + Vector3.up * (0.11f * hm / 1.8f); float r = 0.11f * hm / 1.8f; for (int a = 0; a < 14; a++) { float t = a / 14f * Mathf.PI * 2; Dot(cc + side * (Mathf.Cos(t) * r) + Vector3.up * (Mathf.Sin(t) * r * 1.2f)); } }
+                    else
+                    {
+                        bool arm = l <= 2; float len = (arm ? 0.6f : 0.86f) * hm / 1.8f, wdt = (arm ? 0.05f : 0.075f) * hm / 1.8f;
+                        Vector3 dirD = (Vector3.down * 0.97f + side * (arm ? (l == 1 ? -1 : 1) * 0.06f * hm / 1.8f : 0)).normalized;
+                        for (int a = 0; a <= 9; a++) { Vector3 p0 = o + dirD * (len * a / 9f); Dot(p0 + side * wdt); Dot(p0 - side * wdt); }
+                    }
+                }
+            }
+            // the hero's state, on the right
+            float x = lp.xMax + 14 * k, w = body.xMax - x, y = body.y;
+            GUI.Label(new Rect(x, y, w, 20 * k), "ЦЕЛОСТНОСТЬ  " + hp + " %", sTitle); y += 22 * k;
+            var bar = new Rect(x, y, w * 0.9f, 6 * k);
+            Fill(bar, new Color(0.15f, 0.14f, 0.18f, 1)); Fill(new Rect(bar.x, bar.y, bar.width * hp / 100f, bar.height), hp > 50 ? gold : new Color(0.85f, 0.25f, 0.2f)); y += 14 * k;
+            string[] nm = { "Голова", "Левая рука", "Правая рука", "Левая нога", "Правая нога" };
             for (int l = 0; l < 5; l++)
             {
-                if (limbs[l]) continue;
-                var b = hb.Bone(Character.LIMB_BONE[l]); if (b == null) continue;
-                Vector3 o = b.position;
-                if (l == 0)
-                {   // the head: a ring of dots above the neck
-                    Vector3 c = o + upW * (0.11f * hm / 1.8f); float r = 0.11f * hm / 1.8f;
-                    for (int a = 0; a < 14; a++) { float t = a / 14f * Mathf.PI * 2; Dot(c + side * (Mathf.Cos(t) * r) + upW * (Mathf.Sin(t) * r * 1.2f)); }
-                }
-                else
-                {   // an arm or a leg: two dotted lines down from the shoulder or the hip, a little apart
-                    bool arm = l <= 2; float len = (arm ? 0.6f : 0.86f) * hm / 1.8f, wdt = (arm ? 0.05f : 0.075f) * hm / 1.8f;
-                    float outw = arm ? (l == 1 ? -1 : 1) * 0.06f * hm / 1.8f : 0;      // (the hero's left is the root's -x? keep both arms clear of the body)
-                    Vector3 dirD = (Vector3.down * 0.97f + side * outw).normalized;
-                    for (int a = 0; a <= 9; a++)
-                    {
-                        float t = a / 9f; Vector3 p0 = o + dirD * (len * t);
-                        Dot(p0 + side * wdt); Dot(p0 - side * wdt);
-                    }
-                    Dot(o + dirD * len);
-                }
+                GUI.Label(new Rect(x, y, w, 16 * k), (limbs[l] ? "<color=#b8d890>+</color> " : "<color=#e05040>x</color> ") + nm[l] + (limbs[l] ? "" : "  <color=#e05040>нет</color>"), sRich()); y += 15 * k;
             }
-            // the weapon slots, beside his hands (his right hand is on our left: he faces us)
-            string main = cfg.weapon == "none" ? null : cfg.weapon == "shield" ? "sword" : cfg.weapon;
-            string off = cfg.weapon == "shield" ? "shieldonly" : cfg.weapon == "axe" ? "axe" : null;
-            Transform wr = hb.Bone("wrist.R"), wl = hb.Bone("wrist.L");
-            float slotW = cw * 9 + 4 * k, slotH = lh * 6;
-            Vector2 heroC = Scr(root.position + upW * hm * 0.5f);
-            float hy = wr != null ? Scr(wr.position).y : heroC.y;
-            float halfBody = Mathf.Abs(Scr(root.position + side * 0.32f * hm / 1.8f).x - heroC.x);
-            void SlotBox(float x, string id, string caption, bool have, string name)
+            y += 6 * k;
+            string main = cfg.weapon == "none" ? "—" : cfg.weapon == "shield" ? "Меч" : WeaponName();
+            string off = cfg.weapon == "shield" ? "Щит" : cfg.weapon == "axe" ? "Томагавк" : "—";
+            GUI.Label(new Rect(x, y, w, 16 * k), "Броня: " + ArmorName(), sSmall); y += 15 * k;
+            GUI.Label(new Rect(x, y, w, 16 * k), "Правая рука: " + main, sSmall); y += 15 * k;
+            GUI.Label(new Rect(x, y, w, 16 * k), "Левая рука: " + off, sSmall); y += 15 * k;
+            GUI.Label(new Rect(x, y, w, 16 * k), player != null ? "Сейчас: " + StateWord() : "", sSmall);
+            if (setDev && Button(new Rect(body.xMax - 90 * k, body.yMax - 20 * k, 90 * k, 20 * k), "УРОН −10%", false, sSmallBtn())) { Damage(10); if (projActor != null) projActor.SetLimbs(limbs); }
+        }
+        string StateWord()
+        {
+            if (player.Attacking) return "бой"; if (player.guardHeld) return "защита"; if (heroSink > 0.12f) return "в воде";
+            float v = player.Velocity.magnitude; return v < 0.1f ? "стоит" : v < 1.6f ? "идёт" : "бежит";
+        }
+        GUIStyle sRichS;
+        GUIStyle sRich() { if (sRichS == null || sRichS.fontSize != sSmall.fontSize) sRichS = new GUIStyle(sSmall) { richText = true }; return sRichS; }
+        void PocketBag(Rect body, Color gold, Color line)
+        {
+            uiRects.Add(body);
+            GUI.Label(new Rect(body.x, body.y, body.width, 18 * k), "РЮКЗАК  " + inventory.Count + " / 24", sTitle);
+            var sb = new System.Text.StringBuilder(); const string G = "<color=#6e6080>", Y = "<color=#e8b443>", E = "</color>";
+            for (int r = 0; r < 4; r++)
             {
-                float y = Mathf.Clamp(hy - slotH / 2, lp.y + 30 * k, lp.yMax - slotH - 30 * k);
-                x = Mathf.Clamp(x, lp.x + 6 * k, lp.xMax - slotW - 6 * k);
-                var art = SlotArt(have ? id : null); var sb2 = new System.Text.StringBuilder();
-                for (int i = 0; i < art.Length; i++)
+                sb.Append(G).Append("+---+---+---+---+---+---+").Append(E).Append('\n').Append(G).Append('|');
+                for (int cc = 0; cc < 6; cc++)
                 {
-                    string a = art[i];
-                    if (i == 0 || i == art.Length - 1) sb2.Append("<color=#8a7a5a>").Append(a).Append("</color>");
-                    else sb2.Append("<color=#8a7a5a>| </color><color=#e8c070>").Append(a.Substring(2, 5)).Append("</color><color=#8a7a5a> |</color>");
-                    if (i < art.Length - 1) sb2.Append('\n');
+                    int ii = r * 6 + cc; string it = ii < inventory.Count && inventory[ii].Length > 0 ? inventory[ii].Substring(0, 1) : " ";
+                    sb.Append(' ').Append(E).Append(Y).Append(it).Append(E).Append(G).Append(" |");
                 }
-                GUI.Label(new Rect(x, y, slotW + 20 * k, slotH + 4 * k), sb2.ToString(), sDoll);
-                GUI.Label(new Rect(x - 20 * k, y + slotH + 2 * k, slotW + 40 * k, 16 * k), caption, sSmall);
-                GUI.Label(new Rect(x - 20 * k, y + slotH + 16 * k, slotW + 40 * k, 16 * k), have ? name : "пусто", sSmall);
+                sb.Append(E).Append('\n');
             }
-            string wname = WeaponName();
-            SlotBox(heroC.x - halfBody - slotW - 18 * k, main, "ПРАВАЯ РУКА", main != null, cfg.weapon == "shield" ? "Меч" : wname);
-            SlotBox(heroC.x + halfBody + 18 * k, off, "ЛЕВАЯ РУКА", off != null, cfg.weapon == "shield" ? "Щит" : cfg.weapon == "axe" ? "Томагавк" : "");
-            // integrity and armour, under the model
-            GUI.Label(new Rect(lp.x + 10 * k, lp.yMax - 40 * k, lp.width - 20 * k, 16 * k), ArmorName() + " · целостность " + hp + " %", sSmall);
-            var bar = new Rect(lp.x + lp.width * 0.2f, lp.yMax - 20 * k, lp.width * 0.6f, 6 * k);
-            Fill(bar, new Color(0.15f, 0.14f, 0.13f, 1)); Fill(new Rect(bar.x, bar.y, bar.width * hp / 100f, bar.height), hp > 50 ? gold : new Color(0.85f, 0.25f, 0.2f));
-
-            // --- right: the backpack, in characters
-            Fill(rp, new Color(0.05f, 0.05f, 0.06f, 0.6f)); uiRects.Add(rp);
-            GUI.Label(new Rect(rp.x + 10 * k, rp.y + 6 * k, rp.width - 20 * k, 22 * k), "РЮКЗАК", sTitle);
-            GUI.Label(new Rect(rp.x + 10 * k, rp.y + 8 * k, rp.width - 20 * k, 18 * k), inventory.Count + " / 24", sRight);
-            string Bag()
-            {
-                const string L = "<color=#a8763e>", G = "<color=#6e5e48>", Y = "<color=#e8b443>", E = "</color>";
-                var b = new System.Text.StringBuilder();
-                b.Append(L).Append("          .-------.          ").Append(E).Append('\n');
-                b.Append(L).Append("         /  .---.  \\         ").Append(E).Append('\n');
-                b.Append(L).Append(" .-------'--'---'--'-------. ").Append(E).Append('\n');
-                b.Append(L).Append(" |  .-------------------.  | ").Append(E).Append('\n');
-                b.Append(L).Append(" |  |").Append(E).Append(Y).Append("       (=O=)       ").Append(E).Append(L).Append("|  | ").Append(E).Append('\n');
-                b.Append(L).Append(" |  '-------------------'  | ").Append(E).Append('\n');
-                for (int r = 0; r < 4; r++)
-                {
-                    b.Append(L).Append(" | ").Append(E).Append(G).Append("+---+---+---+---+---+---+").Append(E).Append(L).Append(" | ").Append(E).Append('\n');
-                    b.Append(L).Append(" | ").Append(E).Append(G).Append('|');
-                    for (int c = 0; c < 6; c++)
-                    {
-                        int ii = r * 6 + c; string it = ii < inventory.Count && inventory[ii].Length > 0 ? inventory[ii].Substring(0, 1) : " ";
-                        b.Append(' ').Append(E).Append(Y).Append(it).Append(E).Append(G).Append(" |");
-                    }
-                    b.Append(E).Append(L).Append(" | ").Append(E).Append('\n');
-                }
-                b.Append(L).Append(" | ").Append(E).Append(G).Append("+---+---+---+---+---+---+").Append(E).Append(L).Append(" | ").Append(E).Append('\n');
-                b.Append(L).Append(" |                         | ").Append(E).Append('\n');
-                b.Append(L).Append(" '-------------------------' ").Append(E);
-                return b.ToString();
-            }
-            int lines = 17, cols = 29;
-            int bfs = Mathf.Max(7, Mathf.FloorToInt(Mathf.Min((rp.width - 16 * k) / (cols * 0.62f), (rp.height - 56 * k) / (lines * 1.18f))));
+            sb.Append(G).Append("+---+---+---+---+---+---+").Append(E);
+            float gh = body.height - 40 * k;
+            int bfs = Mathf.Max(7, Mathf.FloorToInt(Mathf.Min(body.width / (25 * 0.62f), gh / (9 * 1.18f))));
             if (sBag == null || sBag.fontSize != bfs) { sBag = new GUIStyle(sMono) { richText = true, alignment = TextAnchor.UpperCenter, fontSize = bfs, wordWrap = false }; sBag.normal.textColor = Color.white; }
-            GUI.Label(new Rect(rp.x, rp.y + 32 * k, rp.width, rp.height - 40 * k), Bag(), sBag);
-            if (inventory.Count == 0) GUI.Label(new Rect(rp.x + 10 * k, rp.yMax - 22 * k, rp.width - 20 * k, 16 * k), "Пусто: найденные вещи будут лежать здесь", sSmall);
+            GUI.Label(new Rect(body.x, body.y + 22 * k, body.width, gh), sb.ToString(), sBag);
+            if (inventory.Count == 0) GUI.Label(new Rect(body.x, body.yMax - 16 * k, body.width, 16 * k), "Пусто: найденные вещи будут лежать здесь", sSmall);
         }
 
         // ---------- saves ----------

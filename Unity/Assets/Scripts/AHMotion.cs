@@ -391,7 +391,7 @@ namespace AsciiHero
         // The standard way games get smooth movement from a small set of clips: three clean cycles cut from the mocap
         // (idle, walk, run) are aligned by foot contact and blended by speed with a shared phase. Game logic moves the
         // body, the playback rate follows the real speed so the feet do not slide, and nothing jumps between clips.
-        class Loop { public int a, b, len, off; public float T, v, dx, dz, mx, mz; }
+        class Loop { public int a, b, len, off, calm1, calm2; public float T, v, dx, dz, mx, mz; }
         static Loop LIdle, LIdleF, LWalk, LRun;     // standing at ease (motion capture): a man, a woman
         Loop IdleL => ch.cfg.sex == 'f' ? LIdleF : LIdle;
         static Loop Prep(int a, int b)
@@ -404,6 +404,26 @@ namespace AsciiHero
             for (int i = 0; i < L.len; i++) { L.mx += RO[(a + i) * 3] - L.dx * i / L.len; L.mz += RO[(a + i) * 3 + 2] - L.dz * i / L.len; }
             L.mx /= L.len; L.mz /= L.len;
             for (int i = 0; i < L.len; i++) { int f = a + i, p = a + (i + L.len - 1) % L.len; if (CON[p * 2] < 0.5f && CON[f * 2] >= 0.5f) { L.off = i; break; } }   // phase 0 = left foot lands
+            // the two calmest moments of the clip (both feet down, the weight over the middle, the pelvis still): standing,
+            // the hero rests between these two instead of playing the clip's weight shifts over and over
+            float best1 = 1e9f, best2 = 1e9f;
+            for (int i = 1; i < L.len - 1; i++)
+            {
+                int f = a + i;
+                float cx = RO[f * 3] - L.dx * i / L.len - L.mx, cz = RO[f * 3 + 2] - L.dz * i / L.len - L.mz;
+                float mv = Mathf.Abs(RO[(f + 1) * 3] - RO[(f - 1) * 3]) + Mathf.Abs(RO[(f + 1) * 3 + 2] - RO[(f - 1) * 3 + 2]);
+                float sc = Mathf.Abs(cx) + Mathf.Abs(cz) + mv * 4 + (CON[f * 2] < 0.5f || CON[f * 2 + 1] < 0.5f ? 1 : 0);
+                if (sc < best1) { best1 = sc; L.calm1 = i; }
+            }
+            for (int i = 1; i < L.len - 1; i++)
+            {
+                if (Mathf.Abs(i - L.calm1) < L.len / 4) continue; int f = a + i;
+                float cx = RO[f * 3] - L.dx * i / L.len - L.mx, cz = RO[f * 3 + 2] - L.dz * i / L.len - L.mz;
+                float mv = Mathf.Abs(RO[(f + 1) * 3] - RO[(f - 1) * 3]) + Mathf.Abs(RO[(f + 1) * 3 + 2] - RO[(f - 1) * 3 + 2]);
+                float sc = Mathf.Abs(cx) + Mathf.Abs(cz) + mv * 4 + (CON[f * 2] < 0.5f || CON[f * 2 + 1] < 0.5f ? 1 : 0);
+                if (sc < best2) { best2 = sc; L.calm2 = i; }
+            }
+            if (best2 > 1e8f) L.calm2 = L.calm1;
             return L;
         }
         static void PrepLoops() { if (LIdle != null) return; LIdle = Prep(10493, 10583); LIdleF = Prep(10583, 10663); LWalk = Prep(8, 48); LRun = Prep(7851, 7872); }
@@ -428,6 +448,22 @@ namespace AsciiHero
             }
         }
         static float Smooth01(float a, float b, float x) { float t = Mathf.Clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); }
+        /// standing: one continuous rest pose - the clip's two calmest moments, eased into each other over 18 s (with the
+        /// breathing and the slow sway of BodyLife over it), so there is no loop seam and no weight shift every few seconds
+        Quaternion[] calmQ; readonly float[] calmC = new float[2];
+        void CalmIdle(Loop L, Quaternion[] oq, ref Vector3 oro, float[] ocon)
+        {
+            int nb = MotionDB.nb; if (calmQ == null) calmQ = new Quaternion[nb];
+            float u = 0.5f - 0.5f * Mathf.Cos(Time.time * Mathf.PI * 2 / 18f);
+            SamplePose(L.a + L.calm1, oq, ref oro, ocon);
+            oro.x -= L.dx * L.calm1 / L.len + L.mx; oro.z -= L.dz * L.calm1 / L.len + L.mz;
+            if (L.calm2 == L.calm1 || u < 1e-3f) return;
+            Vector3 r2 = Vector3.zero; SamplePose(L.a + L.calm2, calmQ, ref r2, calmC);
+            r2.x -= L.dx * L.calm2 / L.len + L.mx; r2.z -= L.dz * L.calm2 / L.len + L.mz;
+            for (int k = 0; k < nb; k++) oq[k] = Quaternion.Slerp(oq[k], calmQ[k], u);
+            oro = Vector3.Lerp(oro, r2, u);
+            for (int j = 0; j < 2; j++) ocon[j] += (calmC[j] - ocon[j]) * u;
+        }
         Vector2 LoopLocomotion(float dt, Vector2 myPos)
         {
             PrepLoops();
@@ -448,7 +484,7 @@ namespace AsciiHero
             PrepLoops();
             int nb = MotionDB.nb;
             if (q2 == null) { q2 = new Quaternion[nb]; q3 = new Quaternion[nb]; }
-            SampleLoop(IdleL, idlePh, outQ, ref ro, con);
+            CalmIdle(IdleL, outQ, ref ro, con);
             if (wWalk > 0.001f)
             {
                 Vector3 ro2 = Vector3.zero, ro3 = Vector3.zero;
@@ -843,7 +879,7 @@ namespace AsciiHero
         const int SITF_A = 10962, SITF_N = 2;
         class IdleAct { public string kind, phase = "down"; public float t, w = 1, nextLook, look = -1, p = -1, g0, te; public bool o, wantUp; }
         IdleAct idleA; readonly List<string> idleDue = new List<string>(); float idleClock, idleNext, leapT = -1, idleW, footLift, idleLook, idleLookP, sitW;
-        static readonly float[] IDLE_AT = { 5, 10, 15, 90 }, IDLE_CHANCE = { 0.75f, 0.6f, 0.2f, 1 }; static readonly string[] IDLE_KIND = { "look", "shift", "wave", "sit" };
+        static readonly float[] IDLE_AT = { 6, 28, 45, 90 }, IDLE_CHANCE = { 0.7f, 0.35f, 0.2f, 1 }; static readonly string[] IDLE_KIND = { "look", "shift", "wave", "sit" };
         /// 0..1: how far the hero is turned towards the camera (the game adds the turn to his facing)
         public float idleYawW;
         static float Smoother(float x) { x = Mathf.Clamp01(x); return x * x * x * (x * (x * 6 - 15) + 10); }
@@ -881,8 +917,8 @@ namespace AsciiHero
             for (int k = 0; k < 4; k++) if (T0 < IDLE_AT[k] && idleClock >= IDLE_AT[k] && UnityEngine.Random.value < IDLE_CHANCE[k]) idleDue.Add(IDLE_KIND[k]);
             if (idleClock > IDLE_AT[2] && idleClock < IDLE_AT[3] - 8 && idleA == null && idleDue.Count == 0)
             {
-                if (idleNext <= 0) idleNext = idleClock + 12 + 8 * UnityEngine.Random.value;
-                else if (idleClock >= idleNext) { idleDue.Add(UnityEngine.Random.value < 0.7f ? "look" : "shift"); idleNext = 0; }
+                if (idleNext <= 0) idleNext = idleClock + 14 + 10 * UnityEngine.Random.value;
+                else if (idleClock >= idleNext) { idleDue.Add("look"); idleNext = 0; }       // (only looking round between: the weight shift is rare)
             }
             if (idleA == null && idleDue.Count > 0) { idleA = new IdleAct { kind = idleDue[0], nextLook = 4 + UnityEngine.Random.value * 3 }; idleDue.RemoveAt(0); }
             idleYawW = 0; idleLook = 0; idleLookP = 0; footLift = 0; idleW = 0; sitW = 0;
@@ -890,11 +926,11 @@ namespace AsciiHero
             if (I != null)
             {
                 I.t += dt;
-                float fade = I.o ? (I.w = Mathf.Max(0, I.w - dt / 0.25f)) : 1;
+                float fade = I.o ? (I.w = Mathf.Max(0, I.w - dt / 0.4f)) : 1;
                 if (I.kind == "look") { idleLook = LookYaw(I.t, 4.2f, 0.95f) * fade; idleLookP = -0.06f * Mathf.Abs(idleLook); if (I.t > 4.2f || fade <= 0) idleA = null; }
                 else if (I.kind == "shift")
                 {
-                    float cw = Mathf.Min(Smoother(I.t / 0.5f), 1 - Smoother((I.t - 4.0f) / 0.5f)) * fade;
+                    float cw = Mathf.Min(Smoother(I.t / 0.9f), 1 - Smoother((I.t - 3.6f) / 0.9f)) * fade;      // (eased in and out of the rest pose over 0.9 s)
                     if (I.t < 4.5f) LayClip(SHIFT_A, Mathf.Min(SHIFT_N - 1, I.t * 30), cw);
                     float lt = I.t - 4.1f; footLift = (lt > 0 ? Mathf.Min(Smoother(lt / 0.6f), 1 - Smoother((lt - 1.9f) / 0.6f)) : 0) * fade;
                     if (I.t > 6.7f || fade <= 0) idleA = null;
