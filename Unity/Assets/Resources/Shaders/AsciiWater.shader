@@ -39,6 +39,7 @@ Shader "AsciiHero/Water"
             float _AsciiRows, _AsciiTime; float4 _GlyphInk[224];
             float4 _AsciiWind; float4 _WaterRip[8]; float4 _MoonDir;
             float4 _WaterBody[16]; float _WaterBodyN; float4 _WaterTrees[8]; float _WaterTreeN;
+            float _WaterReflOn, _AsciiReflPass; TEXTURE2D(_WaterReflTex); SAMPLER(sampler_WaterReflTex);
             TEXTURE2D(_AsciiSkyMap); SAMPLER(sampler_AsciiSkyMap);
 
             float WHash(float2 p) { p = frac(p * float2(123.34, 456.21)); p += dot(p, p + 45.32); return frac(p.x * p.y); }
@@ -98,7 +99,7 @@ Shader "AsciiHero/Water"
                 float3 V = normalize(p - _WorldSpaceCameraPos);
                 // the mirror is tilted only a little by the waves, so the moon and the stars stay sharp (the waves show in the
                 // characters of the water itself)
-                float3 N = normalize(float3(-(w.y * 0.045 + rsl.x * 0.035), 1.0, -(w.z * 0.045 + rsl.y * 0.035)));
+                float3 N = normalize(float3(-w.y * 0.045, 1.0, -w.z * 0.045));     // (the rings do not tilt it: that swept the reflected ray across the coloured sky - rainbow rings)
                 float3 R = reflect(V, N);
                 float fres = 0.35 + 0.65 * pow(1.0 - saturate(dot(-V, N)), 3.0);
                 // the sky in the reflection: looked up in the night-sky map by the reflected direction (the moon, its halo,
@@ -111,7 +112,7 @@ Shader "AsciiHero/Water"
                 float hitT = 1e5; int hitK = 0; float3 hitP = 0;
                 [loop] for (int b = 0; b < 16; b++)
                 {
-                    if (b >= (int)_WaterBodyN) break;
+                    if (b >= (int)_WaterBodyN || _WaterReflOn > 0.5) break;
                     float4 sp = _WaterBody[b]; if (sp.w <= 0.0) continue;
                     float3 oc = sp.xyz - p; float tc = dot(oc, R); if (tc <= 0.0) continue;
                     float d2 = dot(oc, oc) - tc * tc; if (d2 > sp.w * sp.w) continue;
@@ -119,7 +120,7 @@ Shader "AsciiHero/Water"
                 }
                 [loop] for (int q = 0; q < 8; q++)
                 {
-                    if (q >= (int)_WaterTreeN) break;
+                    if (q >= (int)_WaterTreeN || _WaterReflOn > 0.5) break;
                     float4 tr = _WaterTrees[q];            // x, z, trunk height, crown radius
                     // trunk: a vertical cylinder
                     float2 o2 = p.xz - tr.xy, d2v = R.xz; float a2 = dot(d2v, d2v), b2 = dot(o2, d2v), c2 = dot(o2, o2) - 0.03;
@@ -150,6 +151,8 @@ Shader "AsciiHero/Water"
                 if (_WaterMode.x > 0.5) { deep = float3(0.05, 0.09, 0.11) * (1.0 - 0.5 * _WaterMode.w); crest = float3(0.2, 0.3, 0.34); }
                 float lvl = saturate(0.42 + w.x * 4.2 + ring * 1.3 + foam * 0.8);
                 float skyL = dot(sky, float3(0.3, 0.5, 0.2));
+                float3 wcol = lerp(deep, crest, lvl) * (0.55 + 0.6 * lvl) + lit * 1.6;
+                wcol += sky * 0.5 * fres; wcol *= 0.75 + 0.35 * fres;
                 if (best > 0.26)
                 {
                     // a ring: drawn with line characters following its curve, as a circle would be drawn in ASCII
@@ -157,7 +160,7 @@ Shader "AsciiHero/Water"
                     float2 sc2 = float2(-tg.x, -tg.y * 0.82);                  // on the screen (x right, y up; the camera looks along -z)
                     float an = atan2(sc2.y, sc2.x); an = an < 0.0 ? an + 3.14159 : an;     // 0 .. pi
                     row = 12.0; gi = an < 0.39 || an > 2.75 ? 1.0 : an < 1.18 ? 2.0 : an < 1.96 ? 0.0 : 3.0;     // - / | \
-                    col = float3(0.8, 0.8, 0.8) * (0.6 + 0.6 * saturate(best));          // light grey
+                    col = lerp(wcol, float3(0.58, 0.58, 0.6), 0.4 + 0.25 * saturate(best));   // grey, half see-through
                 }
                 else if (hitK == 1)
                 {   // the hero, upside down in the water: darker than himself, his armour catching a little light
@@ -190,12 +193,17 @@ Shader "AsciiHero/Water"
                     gi = lvl < 0.22 ? 1.0 : lvl < 0.38 ? 3.0 : lvl < 0.55 ? 8.0 : lvl < 0.75 ? 9.0 : 10.0;
                     if (ring > 0.35) gi = 9.0;
                     col = lerp(deep, crest, lvl) * (0.55 + 0.6 * lvl) + lit * 1.6;
-                    col += float3(0.55, 0.55, 0.55) * (saturate(ring) * 0.55 + foam * 0.45);
+                    col += float3(0.5, 0.5, 0.5) * (saturate(ring) * 0.3 + foam * 0.45);
                     col += sky * 0.5 * fres;
                     col *= 0.75 + 0.35 * fres;
                 }
+                if (_WaterReflOn > 0.5)
+                {
+                    float3 rf = SAMPLE_TEXTURE2D_LOD(_WaterReflTex, sampler_WaterReflTex, suv, 0).rgb;
+                    col *= 1.0 - 0.7 * saturate(dot(rf, float3(0.3, 0.5, 0.2)) * 2.5);
+                }
                 float sceneZ = dz > 1e-4 ? dz * 12.0 : 1e5;
-                bool vis = -pVS.z <= sceneZ + 0.08 && all(suv >= 0.0) && all(suv <= 1.0) && shore < 1.02;
+                bool vis = _AsciiReflPass < 0.5 && -pVS.z <= sceneZ + 0.08 && all(suv >= 0.0) && all(suv <= 1.0) && shore < 1.02;
                 o.col = col * (1.0 - smoothstep(0.93, 1.02, shore) * 0.5);
                 o.glyph = float2(row, gi);
                 float4 ink = _GlyphInk[(int)(row * 16.0 + gi + 0.5)];

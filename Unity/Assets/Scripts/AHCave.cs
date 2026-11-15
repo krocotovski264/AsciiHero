@@ -219,13 +219,13 @@ namespace AsciiHero
             }
 
             // ---- bones: skeletons in the walls of the bone chamber, on its floor, bones everywhere there ----
-            WallSkeleton(T, mats, "skel_sit", new Vector2(-HX - 0.15f, 2.4f), Vector2.right, 1.0f, 4);        // walled into the west wall
-            WallSkeleton(T, mats, "skel_stand", new Vector2(-HX - 0.15f, 6.0f), Vector2.right, 1.05f, 6);
-            WallSkeleton(T, mats, "skel_stand", new Vector2(-7.2f, 0.1f), Vector2.up, 1.0f, 8);              // in the middle wall, seen from the chamber
-            WallSkeleton(T, mats, "skel_sit", new Vector2(-0.25f, 6.8f), Vector2.left, 0.95f, 2);           // in the dividing wall
-            MeshGen.Obj(CaveMesh("skel_lie", Vector3.one), mats["BONE"], T, new Vector3(-6.2f, 0.0f, 6.4f), Quaternion.Euler(0, 35, 0), false, "Skeleton");       // lying on the floor
-            MeshGen.Obj(CaveMesh("skel_heap", Vector3.one * 0.7f), mats["BONE"], T, new Vector3(-4.0f, 0.0f, 3.2f), Quaternion.Euler(0, 160, 0), false, "Skeleton");
-            MeshGen.Obj(CaveMesh("skel_lie", Vector3.one * 0.95f), mats["BONE"], T, new Vector3(7.8f, 0.0f, 1.8f), Quaternion.Euler(0, -70, 0), false, "Skeleton");      // a miner in the entrance hall
+            WallSkeleton(T, mats, "anat_sit", new Vector2(-HX - 0.15f, 2.4f), Vector2.right, 1.0f, 4);        // walled into the west wall
+            WallSkeleton(T, mats, "anat_stand", new Vector2(-HX - 0.15f, 6.0f), Vector2.right, 1.05f, 6);
+            WallSkeleton(T, mats, "anat_stand", new Vector2(-7.2f, 0.1f), Vector2.up, 1.0f, 8);              // in the middle wall, seen from the chamber
+            WallSkeleton(T, mats, "anat_sit", new Vector2(-0.25f, 6.8f), Vector2.left, 0.95f, 2);           // in the dividing wall
+            MeshGen.Obj(CaveMesh("anat_lie", Vector3.one), mats["BONE"], T, new Vector3(-6.2f, 0.0f, 6.4f), Quaternion.Euler(0, 35, 0), false, "Skeleton");       // lying on the floor
+            MeshGen.Obj(CaveMesh("anat_curl", Vector3.one), mats["BONE"], T, new Vector3(-4.0f, 0.0f, 3.2f), Quaternion.Euler(0, 160, 0), false, "Skeleton");
+            MeshGen.Obj(CaveMesh("anat_lie", Vector3.one * 0.97f), mats["BONE"], T, new Vector3(7.8f, 0.0f, 1.8f), Quaternion.Euler(0, -70, 0), false, "Skeleton");      // a miner in the entrance hall
             colliders.Add(Collider2.Circle(-6.2f, 6.4f, 0.45f)); colliders.Add(Collider2.Circle(7.8f, 1.8f, 0.45f));
             for (int i = 0; i < 26; i++)
             {
@@ -326,24 +326,80 @@ namespace AsciiHero
         /// one piece of rock face (two scanned cliffs, straightened): len wide, h high, its relief d deep; local +z is the face
         Mesh RockPiece(float len, float h, float d, bool flip) { return CaveMesh(Rnd() < 0.5f ? "wall_a" : "wall_b", new Vector3(len, h, d), flip); }
         /// a wall from a to b, its face turned to 'face': overlapping rock pieces (mirrored at random) + a row of colliders
+        // ---- walls: one continuous rock face per wall, generated anew every time (no repeated pieces). The relief is
+        // layered noise as in procedural cliffs: large bulges from domain-warped fBm (the warp bends everything into
+        // irregular, flowing shapes), sharp creases from ridged noise, horizontal strata that jut out as ledges and
+        // wander up and down, a fine grain on top; the face leans back as it rises, its crest is ragged and a rough
+        // cap runs back from it so the top reads as thick rock ----
+        float Fbm(float x, float y, int oct)
+        {
+            float a = 0.5f, f = 1, sum = 0, norm = 0;
+            for (int o = 0; o < oct; o++) { sum += a * Mathf.PerlinNoise(x * f + 31.7f * o, y * f - 17.3f * o); norm += a; a *= 0.5f; f *= 2.03f; }
+            return sum / norm;
+        }
+        float Ridged(float x, float y) { float n = 1 - Mathf.Abs(2 * Fbm(x, y, 3) - 1); return n * n; }
         void RockWall(Transform T, Mats mats, Material mat, Vector2 a, Vector2 b, Vector2 face, float h0, float h1, bool collide = true)
         {
             var dir = b - a; float L = dir.magnitude; dir /= L;
-            float yaw = Mathf.Atan2(face.x, face.y) * Mathf.Rad2Deg;
-            int n = Mathf.Max(1, Mathf.CeilToInt(L / 2.2f)); float seg = L / n, hMax = 0, hMin = 99;
-            for (int k = 0; k < n; k++)
+            const float EXT = 0.18f; a -= dir * EXT; float LL = L + 2 * EXT;
+            float ox = Rr(0, 500), oy = Rr(0, 500);                      // this wall's own noise
+            float strataF = Rr(1.6f, 2.6f), strataK = Rr(0.06f, 0.13f), bulgeK = Rr(0.35f, 0.55f), leanK = Rr(0.04f, 0.14f);
+            System.Func<float, float> H = u => h0 + (h1 - h0) * Fbm(u * 0.22f + ox, oy, 3) + 0.35f * (Ridged(u * 0.9f + ox, 3.3f + oy) - 0.35f);
+            System.Func<float, float, float> D = (u, y) =>
             {
-                // the pieces overlap a little and step back and forth by turns (no two at the same depth: no flicker)
-                float len = seg * 1.22f, h = Rr(h0, h1); hMax = Mathf.Max(hMax, h); hMin = Mathf.Min(hMin, h);
-                var c = a + dir * (seg * (k + 0.5f)) + face * ((k & 1) == 0 ? 0.04f : -0.05f);
-                var g = MeshGen.Obj(RockPiece(len, h, Mathf.Min(len, 2.6f) * Rr(0.85f, 1.0f), Rnd() < 0.5f), mat, T, new Vector3(c.x, -0.06f, c.y), Quaternion.Euler(0, yaw + Rr(-2.5f, 2.5f), 0), true, "Wall");
-                wallPieces.Add(new KeyValuePair<Mesh, Matrix4x4>(g.GetComponent<MeshFilter>().sharedMesh, T.worldToLocalMatrix * g.transform.localToWorldMatrix));
-                if (Rnd() < 0.35f) Moss(T, mats, c.x + face.x * 0.25f + dir.x * Rr(-0.8f, 0.8f), c.y + face.y * 0.25f + dir.y * Rr(-0.8f, 0.8f), Rr(0.3f, 0.5f), 0.01f);
+                float wx = u * 0.42f + 2.2f * Fbm(u * 0.11f + ox, y * 0.11f + oy, 2), wy = y * 0.42f + 1.6f * Fbm(u * 0.11f + ox + 7.1f, y * 0.11f + oy + 3.7f, 2);
+                float big = (Fbm(wx * 0.7f + ox, wy * 0.7f + oy, 4) - 0.5f) * 2f * bulgeK;
+                float rid = Ridged(wx * 1.7f + ox, wy * 1.7f + oy) * 0.16f;
+                float s = y * strataF + 0.9f * Fbm(u * 0.23f + ox, 5.5f + oy, 2), ledge = s - Mathf.Floor(s);
+                float strata = Mathf.SmoothStep(0, 1, Mathf.Clamp01(ledge / 0.18f)) * strataK * (0.4f + 1.2f * Fbm(u * 0.17f + ox, 9.1f + oy, 2));
+                float fine = (Fbm(u * 3.3f + ox, y * 3.3f + oy, 2) - 0.5f) * 0.07f;
+                return big + rid + strata + fine - leanK * y;
+            };
+            const float DU = 0.13f, DY = 0.13f, BASE = -0.12f;
+            int nu = Mathf.CeilToInt(LL / DU); float hTop = 0; var hs = new float[nu + 1];
+            for (int i = 0; i <= nu; i++) { hs[i] = Mathf.Max(0.8f, H(i * DU)); hTop = Mathf.Max(hTop, hs[i]); }
+            int nf = Mathf.CeilToInt((hTop - BASE) / DY);              // rows of the face (squeezed to each column's height)
+            const int NC = 4;                                          // rows of the cap behind the crest
+            int nv = nf + 1 + NC;
+            var vs = new List<Vector3>(); var ts = new List<int>();
+            var f3 = new Vector3(face.x, 0, face.y);
+            for (int i = 0; i <= nu; i++)
+            {
+                float u = i * DU; var lp = a + dir * u; var basep = new Vector3(lp.x, 0, lp.y); float hh = hs[i];
+                for (int j = 0; j <= nf; j++)
+                {
+                    float y = Mathf.Lerp(BASE, hh, j / (float)nf);
+                    vs.Add(basep + f3 * (D(u, y) - 0.2f) + Vector3.up * y);
+                }
+                float dTop = D(u, hh) - 0.2f;
+                for (int k = 1; k <= NC; k++)
+                {
+                    float back = 0.22f * k + 0.1f * k * k, y = hh + 0.05f * k - 0.03f * k * k + 0.12f * (Fbm(u * 1.3f + ox, k * 0.7f + oy, 2) - 0.5f);
+                    vs.Add(basep + f3 * (dTop - back) + Vector3.up * y);
+                }
             }
-            Backing(T, mat, a - dir * 0.15f, b + dir * 0.15f, face, hMin * 0.93f);
+            for (int i = 0; i < nu; i++)
+                for (int j = 0; j < nv - 1; j++)
+                {
+                    int o = i * nv + j;
+                    ts.Add(o); ts.Add(o + 1); ts.Add(o + nv); ts.Add(o + 1); ts.Add(o + nv + 1); ts.Add(o + nv);
+                }
+            // wound so the face looks along 'face'
+            {
+                var n0 = Vector3.Cross(vs[1] - vs[0], vs[nv] - vs[0]);
+                if (Vector3.Dot(n0, f3) < 0) for (int t = 0; t < ts.Count; t += 3) { int x = ts[t + 1]; ts[t + 1] = ts[t + 2]; ts[t + 2] = x; }
+            }
+            var m = new Mesh { name = "cavewall", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 }; m.SetVertices(vs); m.uv = new Vector2[vs.Count]; m.SetTriangles(ts, 0);
+            m.RecalculateNormals(); m.RecalculateBounds(); MeshGen.AddGlyphUV(m, false);
+            var g = MeshGen.Obj(m, mat, T, Vector3.zero, Quaternion.identity, true, "Wall");
+            wallPieces.Add(new KeyValuePair<Mesh, Matrix4x4>(m, T.worldToLocalMatrix * g.transform.localToWorldMatrix));
+            for (float u = 0.6f; u < L; u += Rr(1.2f, 2.6f))
+                if (Rnd() < 0.5f) { var p = a + dir * (u + EXT) + face * 0.25f; Moss(T, mats, p.x, p.y, Rr(0.3f, 0.55f), 0.01f); }
             if (!collide) return;
-            for (float s = 0; s <= L + 0.01f; s += 0.5f) { var p = a + dir * s - face * 0.2f; colliders.Add(Collider2.Circle(p.x, p.y, 0.5f)); }
-            wallSegs.Add(new WallSeg { a = a, b = b, h = hMax });
+            float hMax = 0; foreach (var hh in hs) hMax = Mathf.Max(hMax, hh);
+            var a0 = a + dir * EXT;
+            for (float s2 = 0; s2 <= L + 0.01f; s2 += 0.5f) { var p = a0 + dir * s2 - face * 0.2f; colliders.Add(Collider2.Circle(p.x, p.y, 0.5f)); }
+            wallSegs.Add(new WallSeg { a = a0, b = a0 + dir * L, h = hMax });
         }
         /// a rough rock sheet behind a wall's pieces: wherever two scanned pieces leave a gap, there is rock in it
         void Backing(Transform T, Material mat, Vector2 a, Vector2 b, Vector2 face, float h)
@@ -426,10 +482,11 @@ namespace AsciiHero
             if (caps != null) caps.Add(cap.GetComponent<Renderer>());
         }
         // a skeleton laid along its local +z, face up (rot sets it upright when it is walled in)
+        static readonly string[] BONES = { "b_femur", "b_humerus", "b_tibia", "b_rib", "b_rib", "b_pelvis", "b_jaw" };
         void Bone(Transform T, Mats mats, float x, float z, float len)
         {
-            int k = R.Next(3); string nm = k == 0 ? "bone_a" : k == 1 ? "bone_b" : "bone_c"; float L0 = k == 0 ? 0.7f : k == 1 ? 0.61f : 1.1f, sc = len / L0;
-            MeshGen.Obj(CaveMesh(nm, new Vector3(sc, sc * 0.55f, sc * 0.55f)), mats["BONE"], T, new Vector3(x, -0.01f, z), Quaternion.Euler(0, Rr(0, 360), Rr(-8, 8)), false, "LooseBone");
+            // a real bone (from the same anatomical skeleton), lying on its flattest side
+            MeshGen.Obj(CaveMesh(BONES[R.Next(BONES.Length)], Vector3.one * Rr(0.9f, 1.05f)), mats["BONE"], T, new Vector3(x, -0.005f, z), Quaternion.Euler(0, Rr(0, 360), 0), false, "LooseBone");
         }
         void Torch(Transform T, Mats mats, float x, float z, bool leaning)
         {
@@ -470,7 +527,27 @@ namespace AsciiHero
                         if (r > 1) continue;
                         sp.Add(new Vector3(jx / radius, (y + Rr(-0.4f, 0.4f) * step) / len, jz / radius)); ss.Add(new Vector2(r, Rnd()));
                     }
-            GlyphLayer.MakeMotes(T, to, Quaternion.FromToRotation(Vector3.up, d.normalized), new Vector3(radius, len, radius), sp, ss, 3, c * 0.5f, new Vector4(0.075f, 0, 0, 0));
+            GlyphLayer.MakeMotes(T, to, Quaternion.FromToRotation(Vector3.up, d.normalized), new Vector3(radius, len, radius), sp, ss, 3, c * 0.9f, new Vector4(0.075f, 0, 0, 0));
+            // and the volume of the beam: an additive cone in the lit colour (AsciiHero/Beam)
+            var bsh = Shader.Find("AsciiHero/Beam");
+            if (bsh != null)
+            {
+                const int SEG = 28; float rTop = radius * 0.5f, rBot = radius * 1.08f;
+                var cv = new List<Vector3>(); var cn = new List<Vector3>(); var cu = new List<Vector2>(); var ct = new List<int>();
+                for (int k = 0; k <= SEG; k++)
+                    for (int e = 0; e <= 6; e++)
+                    {
+                        float a = k * Mathf.PI * 2 / SEG, v = e / 6f, rr = Mathf.Lerp(rBot, rTop, v);
+                        cv.Add(new Vector3(Mathf.Cos(a) * rr, v * len, Mathf.Sin(a) * rr)); cn.Add(new Vector3(Mathf.Cos(a), (rBot - rTop) / len, Mathf.Sin(a)).normalized); cu.Add(new Vector2(k / (float)SEG, v));
+                    }
+                for (int k = 0; k < SEG; k++)
+                    for (int e = 0; e < 6; e++) { int o = k * 7 + e; ct.Add(o); ct.Add(o + 1); ct.Add(o + 7); ct.Add(o + 1); ct.Add(o + 8); ct.Add(o + 7); }
+                var cm = new Mesh { name = "beam" }; cm.SetVertices(cv); cm.SetNormals(cn); cm.SetUVs(0, cu); cm.SetTriangles(ct, 0); cm.RecalculateBounds();
+                var bm = new Material(bsh); bm.SetColor("_BeamColor", c * (0.05f * intensity));
+                var cg = new GameObject("BeamCone"); cg.transform.SetParent(T, false); cg.transform.localPosition = to; cg.transform.localRotation = Quaternion.FromToRotation(Vector3.up, d.normalized);
+                cg.AddComponent<MeshFilter>().sharedMesh = cm; var cr = cg.AddComponent<MeshRenderer>(); cr.sharedMaterial = bm;
+                cr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; cr.receiveShadows = false;
+            }
         }
         // a flat surface (mud) covering where k < 1
         void Patch(Transform T, Material m, System.Func<float, float, float> k, Vector2 c, float r, float y, string name)

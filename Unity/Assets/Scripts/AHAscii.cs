@@ -38,6 +38,11 @@ namespace AsciiHero
         public string formats = "";
         public RenderTexture final;
         RenderTexture rtCol, rtND, rtAscii, rtB1, rtB2, rtFull;
+        /// planar reflection in the water: the scene mirrored in the plane y = waterY, drawn in characters by a second pair
+        /// of cameras into rtReflFull (0.8 of the output size); the water's surfaces show it (AsciiHero/WaterRefl)
+        public bool reflections; public bool waterOn; public float waterY;
+        Camera reflCam, reflGlyphCam; RenderTexture rtReflCol, rtReflFull;
+        static readonly int REFL_PASS = Shader.PropertyToID("_AsciiReflPass");
         readonly Material asciiMat, blurMat, finalMat; readonly Texture2D atlas;
         readonly Camera cam, ndCam, glyphCam;
         public float depthRef = 4f;
@@ -78,6 +83,7 @@ namespace AsciiHero
             glyphCam.cullingMask = 1 << GlyphLayer.LAYER;
             cam.cullingMask = ~(1 << GlyphLayer.LAYER);
             RenderPipelineManager.beginCameraRendering += OnBeginCamera;
+            RenderPipelineManager.endCameraRendering += OnEndCamera;
             RenderPipelineManager.endContextRendering += OnEndContext;
         }
 
@@ -136,12 +142,55 @@ namespace AsciiHero
 
         void OnBeginCamera(ScriptableRenderContext ctx, Camera c)
         {
+            if (c != null && (c == reflCam || c == reflGlyphCam))
+            {   // the mirrored cameras: their own lit target, and the winding flips in a mirror
+                GL.invertCulling = true;
+                Shader.SetGlobalFloat(ND_PASS, 0f); Shader.SetGlobalFloat(REFL_PASS, 1f);
+                Shader.SetGlobalTexture("_AsciiLitTex", rtReflCol); Shader.SetGlobalFloat("_AsciiDepthLit", 1);
+                Shader.SetGlobalFloat("_AsciiExposure", exposure); Shader.SetGlobalFloat("_AsciiDepthRef", depthRef);
+                return;
+            }
             if (c != cam && c != ndCam && c != glyphCam) return;       // another renderer's camera (the backpack's projection has its own)
+            GL.invertCulling = false;
+            Shader.SetGlobalFloat(REFL_PASS, 0f);
             Shader.SetGlobalFloat(ND_PASS, c == ndCam ? 1f : 0f);
             // what the shaders read of this renderer: its targets and settings (two renderers can draw in one frame)
             if (builtSurface && rtCol != null) { Shader.SetGlobalTexture("_AsciiLitTex", rtCol); Shader.SetGlobalTexture("_AsciiNDTex", rtND); }
             Shader.SetGlobalFloat("_AsciiDepthLit", depthFromLit && !dbgForceND && builtSurface ? 1 : 0);
             Shader.SetGlobalFloat("_AsciiExposure", exposure); Shader.SetGlobalFloat("_AsciiDepthRef", depthRef);
+        }
+        void OnEndCamera(ScriptableRenderContext ctx, Camera c)
+        {
+            if (c != null && (c == reflCam || c == reflGlyphCam)) { GL.invertCulling = false; Shader.SetGlobalFloat(REFL_PASS, 0f); }
+        }
+        /// the mirrored cameras follow the main one each frame (reflected in the water plane, clipped at it)
+        void UpdateReflection()
+        {
+            bool on = reflections && waterOn && enabledAll && builtSurface && rtReflFull != null && !plain;
+            Shader.SetGlobalFloat("_WaterReflOn", on ? 1 : 0);
+            if (reflCam == null) { if (!on) return; MakeReflectionCameras(); }
+            reflCam.enabled = on; reflGlyphCam.enabled = on && glyphCam.enabled;
+            if (!on) return;
+            Shader.SetGlobalTexture("_WaterReflTex", rtReflFull);
+            var R = Matrix4x4.identity; R.m11 = -1; R.m13 = 2 * waterY;            // the mirror y -> 2h - y
+            var view = cam.worldToCameraMatrix * R;
+            var cp = cam.transform.position; cp.y = 2 * waterY - cp.y;
+            foreach (var rc in new[] { reflCam, reflGlyphCam })
+            {
+                rc.transform.position = cp;
+                rc.fieldOfView = cam.fieldOfView; rc.aspect = cam.aspect; rc.nearClipPlane = cam.nearClipPlane; rc.farClipPlane = cam.farClipPlane;
+                rc.worldToCameraMatrix = view; rc.ResetProjectionMatrix();
+                // an oblique near plane on the water: nothing under the surface shows in the mirror
+                Vector3 pos = view.MultiplyPoint(new Vector3(0, waterY + 0.015f, 0)), n = view.MultiplyVector(Vector3.up).normalized;
+                rc.projectionMatrix = rc.CalculateObliqueMatrix(new Vector4(n.x, n.y, n.z, -Vector3.Dot(pos, n)));
+            }
+            reflCam.cullingMask = cam.cullingMask; reflGlyphCam.cullingMask = glyphCam.cullingMask;
+        }
+        void MakeReflectionCameras()
+        {
+            reflCam = new GameObject("ReflCamera").AddComponent<Camera>(); Setup(reflCam, -5, false);
+            reflGlyphCam = new GameObject("ReflGlyphCamera").AddComponent<Camera>(); Setup(reflGlyphCam, -4, false);
+            reflCam.targetTexture = rtReflCol; reflGlyphCam.targetTexture = rtReflFull;
         }
         /// switch the whole renderer on or off (its cameras stop rendering)
         public void SetEnabled(bool on)
@@ -151,7 +200,7 @@ namespace AsciiHero
         }
         bool enabledAll = true;
 
-        public void Dispose() { RenderPipelineManager.beginCameraRendering -= OnBeginCamera; RenderPipelineManager.endContextRendering -= OnEndContext; }
+        public void Dispose() { RenderPipelineManager.beginCameraRendering -= OnBeginCamera; RenderPipelineManager.endCameraRendering -= OnEndCamera; RenderPipelineManager.endContextRendering -= OnEndContext; }
 
         static Shader Load(string n) { var s = Shader.Find(n); if (s == null) Debug.LogError("Shader not found: " + n); return s; }
 
@@ -181,7 +230,8 @@ namespace AsciiHero
             if (w == W && h == H && c == cols && r == rows && final != null && builtSurface == surfaceGlyphs && builtDiv == litDiv) { SyncND(); return; }
             W = w; H = h; cols = c; rows = r; builtSurface = surfaceGlyphs; builtFull = fullLit; builtDiv = litDiv;
             cam.targetTexture = null; ndCam.targetTexture = null; glyphCam.targetTexture = null;
-            Free(ref rtCol); Free(ref rtND); Free(ref rtAscii); Free(ref rtB1); Free(ref rtB2); Free(ref final); Free(ref rtFull);
+            if (reflCam != null) { reflCam.targetTexture = null; reflGlyphCam.targetTexture = null; }
+            Free(ref rtCol); Free(ref rtND); Free(ref rtAscii); Free(ref rtB1); Free(ref rtB2); Free(ref final); Free(ref rtFull); Free(ref rtReflCol); Free(ref rtReflFull);
             var half = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGBHalf) ? RenderTextureFormat.ARGBHalf : RenderTextureFormat.ARGB32;
             var lite = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.RGB111110Float) && SystemInfo.SupportsBlendingOnRenderTextureFormat(RenderTextureFormat.RGB111110Float)
                 ? RenderTextureFormat.RGB111110Float : half;
@@ -194,6 +244,12 @@ namespace AsciiHero
                 // The glyph layer is the full-resolution target every character is blended into: a packed 32-bit float
                 // format halves the memory traffic of the 64-bit one where the device can blend into it
                 rtFull = RT(W, H, lite, FilterMode.Bilinear, 16, RenderTextureReadWrite.Linear);
+                if (reflections)
+                {   // the mirror at 0.8 of the picture's resolution (its lit colour at 0.8 of the lit one)
+                    rtReflCol = RT(Mathf.Max(8, hw * 4 / 5), Mathf.Max(8, hh * 4 / 5), half, FilterMode.Bilinear, 24, RenderTextureReadWrite.Linear);
+                    rtReflFull = RT(Mathf.Max(8, W * 4 / 5), Mathf.Max(8, H * 4 / 5), lite, FilterMode.Bilinear, 16, RenderTextureReadWrite.Linear);
+                    if (reflCam != null) { reflCam.targetTexture = rtReflCol; reflGlyphCam.targetTexture = rtReflFull; }
+                }
                 formats = "глифы " + lite + ", свет " + half + " " + hw + "×" + hh; checkFrames = 12;
                 Shader.SetGlobalTexture("_AsciiLitTex", rtCol); Shader.SetGlobalTexture("_AsciiNDTex", rtND);
             }
@@ -221,6 +277,7 @@ namespace AsciiHero
         // the ND camera follows the colour camera exactly
         void SyncND()
         {
+            UpdateReflection();
             bool lit = depthFromLit && !dbgForceND && builtSurface;
             ndCam.enabled = !lit && enabledAll; glyphCam.enabled = builtSurface && !dbgNoGlyphs && enabledAll;
             Shader.SetGlobalFloat("_AsciiDepthLit", lit ? 1 : 0);

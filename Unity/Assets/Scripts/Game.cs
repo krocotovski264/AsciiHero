@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.47 · Unity";
+        public const string VERSION = "beta 0.48 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -188,7 +188,7 @@ namespace AsciiHero
                 SetShadowDistance(14);
                 sceneCam = new GameObject("SceneCamera").AddComponent<Camera>();
                 sceneCam.nearClipPlane = 0.05f; sceneCam.farClipPlane = 40; sceneCam.fieldOfView = 36; sceneCam.allowMSAA = false; sceneCam.allowHDR = false;
-                ascii = new AsciiRenderer(sceneCam);
+                ascii = new AsciiRenderer(sceneCam); ascii.reflections = true;
                 ascii.surfaceGlyphs = PlayerPrefs.GetInt("ascii_glyph_mode", 1) == 1;
                 ApplySettings(false);
             })) yield break;
@@ -845,7 +845,7 @@ namespace AsciiHero
         int setQuality, setGrass, setRes, setFps, setMusic, setSound; bool setBloom, setShowFps, setOutline = true;
         static readonly string[] QUALITY = { "Низкое", "Среднее", "Высокое" };
         static readonly int[] GRASS = { 0, 25, 50, 75, 100 }, RES = { 50, 67, 75, 85, 100 }, FPS = { 30, 60, 90, 120 };
-        static readonly string[] DEVELOPERS = { "krocotovski264", "Тёма — программист", "", "Анимация ходьбы и передвижения в бою: набор 100STYLE —", "I. Mason, S. Starke, T. Komura (CC BY 4.0)" };
+        static readonly string[] DEVELOPERS = { "krocotovski264", "Тёма — программист", "", "Анимация ходьбы и передвижения в бою: набор 100STYLE —", "I. Mason, S. Starke, T. Komura (CC BY 4.0)", "", "Скелеты в пещере: BodyParts3D, DBCLS —", "© The Database Center for Life Science (CC BY 4.0)" };
         void LoadSettings()
         {
             bool phone = Application.isMobilePlatform;
@@ -1427,7 +1427,7 @@ namespace AsciiHero
             // camera
             isoYaw += (isoYawT - isoYaw) * Mathf.Min(1, dt * 12); isoPitch += (isoPitchT - isoPitch) * Mathf.Min(1, dt * 12);
             worldZoom += (worldZoomT - worldZoom) * Mathf.Min(1, dt * 12);
-            Shader.SetGlobalFloat("_AsciiLod", Mathf.Max(1f, ISO_LOD / worldZoom));
+            Shader.SetGlobalFloat("_AsciiLod", 1f);      // every character at every zoom (thinning them out when zoomed out read as characters vanishing)
             Vector3 off = Mirror(new Vector3(Mathf.Sin(isoYaw) * Mathf.Cos(isoPitch), Mathf.Sin(isoPitch), Mathf.Cos(isoYaw) * Mathf.Cos(isoPitch)) * (ISO_DIST / worldZoom));
             { var d = new Vector3(off.x, 0, off.z).normalized; heroLight.transform.position = new Vector3(pos.x + d.x * 1.3f - d.z * 0.5f, 2.3f, pos.z + d.z * 1.3f + d.x * 0.5f); }
             loc.focus = pos; loc.Cutaway(off);
@@ -1553,6 +1553,7 @@ namespace AsciiHero
                 GlyphLayer.SetActorLod(lv);
             }
             ascii.SelfCheck();
+            ascii.waterOn = world && loc != null && loc.HasWater; if (loc != null) ascii.waterY = loc.WaterY;
             ascii.SetSize(Mathf.RoundToInt(vr.width), Mathf.RoundToInt(vr.height), cell * dp);
             // the backpack's projection of the hero: its own small ASCII render of the figure in the studio
             if (projAscii != null)

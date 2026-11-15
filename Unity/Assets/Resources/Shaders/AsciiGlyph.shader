@@ -205,7 +205,7 @@ Shader "AsciiHero/Glyph"
                 bool inside = all(suv >= 0.0) && all(suv <= 1.0);
                 float seeK = _GlyphSee > 0.5 ? SeeK(pWS) : 0.0;
                 bool seeGone = frac(i.seed.x * 13.37 + 0.21) < seeK * 0.9;
-                bool vis = !seeGone && ((scat || smkA > 0.03) ? (lodKeep && !gone && inside) : lodKeep && !gone && ember < 0.999 && dot(nVS, toCam) > -0.05 - ember - _GlyphPuff * 4.0 - (_DashSpin.w != 0.0 ? 4.0 : 0.0) && myZ <= sceneZ + 0.008 + 0.0035 * myZ && inside);
+                bool vis = !seeGone && ((scat || smkA > 0.03) ? (lodKeep && !gone && inside) : lodKeep && !gone && ember < 0.999 && dot(nVS, toCam) > -0.05 - ember - _GlyphPuff * 4.0 - (_DashSpin.w != 0.0 ? 4.0 : 0.0) && myZ <= sceneZ + 0.008 + (0.0035 + 0.007 * (lod - 1.0)) * myZ && inside);
                 float3 lit = SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, sampler_AsciiLitTex, suv, 0).rgb;
                 float3 col = _AsciiLinear > 0.5 ? pow(max(lit, 0.0), 1.0 / 2.2) : max(lit, 0.0);
                 float lum = dot(col, float3(0.299, 0.587, 0.114));

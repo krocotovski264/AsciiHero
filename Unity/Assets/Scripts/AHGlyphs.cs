@@ -141,12 +141,23 @@ namespace AsciiHero
             var mat = new Material(sh); mat.SetVector("_FireSize", new Vector4(height, glyph, speed, 0));
             var r = go.AddComponent<MeshRenderer>(); r.sharedMaterial = mat;
             r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; r.receiveShadows = false;
+            // the mirror: the water surface itself, in the glyph layer, showing the reflected characters
+            var pmf = parent.GetComponent<MeshFilter>(); var rsh = Shader.Find("AsciiHero/WaterRefl");
+            if (pmf != null && rsh != null)
+            {
+                if (reflMat == null) reflMat = new Material(rsh);
+                var mg = new GameObject("Mirror"); mg.layer = LAYER; mg.transform.SetParent(parent, false);
+                mg.AddComponent<MeshFilter>().sharedMesh = pmf.sharedMesh;
+                var mr = mg.AddComponent<MeshRenderer>(); mr.sharedMaterial = reflMat;
+                mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; mr.receiveShadows = false;
+            }
             count += n;
             return go;
         }
 
         /// The lake's characters: one camera-facing quad per point (seed x: 0 in the middle .. 1 at the shore, y: random);
         /// what each one shows is worked out in the water shader
+        static Material reflMat;
         public static GameObject MakeWater(Transform parent, List<Vector3> pts, List<Vector2> seedList) { return MakeWater(parent, pts, seedList, Vector4.zero); }
         public static GameObject MakeWater(Transform parent, List<Vector3> pts, List<Vector2> seedList, Vector4 mode)
         {

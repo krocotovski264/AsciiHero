@@ -103,6 +103,7 @@ namespace AsciiHero
                 m.SetFloat("_AsciiFlat", kv.Key == "GROUND" || kv.Key == "FLOOR" || kv.Key == "WATER" || kv.Key == "CAVEFLOOR" || kv.Key == "MUD" ? 1 : 0);        // floors and walls get no outline
                 if (kv.Key == "GROUND" || kv.Key == "CAVEFLOOR" || kv.Key == "MUD") m.SetVector("_GlyphCell", new Vector4(0.11f, 0.18f, 0, 0)); else
                 if (kv.Key == "WETROCK") m.SetVector("_GlyphCell", new Vector4(0.07f, 0.115f, 0, 0)); else
+                if (kv.Key == "BONE") m.SetVector("_GlyphCell", new Vector4(0.022f, 0.036f, 0, 0)); else       // thin real bones: finer characters
                 m.SetVector("_GlyphCell", actor ? new Vector4(0.0135f, 0.0222f, 0, 0) : big ? new Vector4(0.06f, 0.1f, 0, 0) : new Vector4(0.034f, 0.056f, 0, 0));
                 map[kv.Key] = m;
             }
