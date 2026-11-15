@@ -485,25 +485,25 @@ namespace AsciiHero
             MeshGen.AddGlyphUV(m, false);
             // cut into 5 x 5 m pieces, so the parts of the rock off the screen are not drawn (nor their characters laid out)
             {
-                var uv2 = m.uv2; var chunks = new Dictionary<long, List<int>>();
+                var uv2 = m.uv2; var rchunks = new Dictionary<long, List<int>>();
                 for (int q = 0; q < ts.Count; q += 3)
                 {
                     var c = (vs[ts[q]] + vs[ts[q + 1]] + vs[ts[q + 2]]) / 3f;
                     long key = (long)Mathf.FloorToInt(c.x / 5f) * 1000L + Mathf.FloorToInt(c.z / 5f);
-                    List<int> l; if (!chunks.TryGetValue(key, out l)) { l = new List<int>(); chunks[key] = l; }
+                    List<int> l; if (!rchunks.TryGetValue(key, out l)) { l = new List<int>(); rchunks[key] = l; }
                     l.Add(ts[q]); l.Add(ts[q + 1]); l.Add(ts[q + 2]);
                 }
-                foreach (var kv in chunks)
+                foreach (var kv in rchunks)
                 {
-                    var map = new Dictionary<int, int>(); var cv = new List<Vector3>(); var cn = new List<Vector3>(); var cu = new List<Vector2>(); var ct = new List<int>();
+                    var rmap = new Dictionary<int, int>(); var rv = new List<Vector3>(); var rn = new List<Vector3>(); var ru = new List<Vector2>(); var rt = new List<int>();
                     foreach (int v in kv.Value)
                     {
-                        int j; if (!map.TryGetValue(v, out j)) { j = cv.Count; map[v] = j; cv.Add(vs[v]); cn.Add(ns[v]); cu.Add(uv2[v]); }
-                        ct.Add(j);
+                        int j; if (!rmap.TryGetValue(v, out j)) { j = rv.Count; rmap[v] = j; rv.Add(vs[v]); rn.Add(ns[v]); ru.Add(uv2[v]); }
+                        rt.Add(j);
                     }
-                    var cm = new Mesh { name = "caverock", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
-                    cm.SetVertices(cv); cm.SetNormals(cn); cm.uv = new Vector2[cv.Count]; cm.SetUVs(1, cu); cm.SetTriangles(ct, 0); cm.RecalculateBounds();
-                    MeshGen.Obj(cm, mat, T, Vector3.zero, Quaternion.identity, true, "Rock");
+                    var rm2 = new Mesh { name = "caverock", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+                    rm2.SetVertices(rv); rm2.SetNormals(rn); rm2.uv = new Vector2[rv.Count]; rm2.SetUVs(1, ru); rm2.SetTriangles(rt, 0); rm2.RecalculateBounds();
+                    MeshGen.Obj(rm2, mat, T, Vector3.zero, Quaternion.identity, true, "Rock");
                 }
             }
             Debug.Log("Пещера: скала " + vs.Count + " вершин, " + ts.Count / 3 + " треугольников");
