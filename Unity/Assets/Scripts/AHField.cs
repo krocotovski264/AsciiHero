@@ -129,7 +129,7 @@ namespace AsciiHero
             {
                 var p = Place(0.6f, -HX + 0.4f, -HX + 3.4f, -HZ + 1, HZ - 1); if (float.IsNaN(p.x)) continue;
                 if (i < 2) { NatureLib.Place("birch" + (i == 0 ? "3" : "5"), mats, T, new Vector3(p.x, -0.02f, p.y), Rr(0, 360), Rr(0.75f, 0.9f), seeMat); colliders.Add(Collider2.Circle(p.x, p.y, 0.25f)); occluders.Add(new Vector4(p.x, p.y, 1.4f, 5.5f)); }
-                else { NatureLib.Place(i == 4 ? "bushberry" : "bush1", mats, T, new Vector3(p.x, 0, p.y), Rr(0, 360), Rr(0.8f, 1.1f)); colliders.Add(Collider2.Circle(p.x, p.y, 0.45f)); }
+                else { NatureLib.Place(i == 4 ? "bushberry" : "bush1", mats, T, new Vector3(p.x, 0, p.y), Rr(0, 360), Rr(0.8f, 1.1f)); }
             }
             // ---- flowers in clumps in the southern meadow: poppies, cornflowers, daisies ----
             var POPPY = new Dictionary<string, string> { { "FLOWERB", "RED" }, { "WHEAT", "RED" } };
@@ -154,16 +154,26 @@ namespace AsciiHero
             }
             // ---- tall grass everywhere else (the wind sends waves over it) ----
             {
-                var pts = new List<Vector3>(); var seeds = new List<float>();
+                var pts = new List<Vector3>(); var seeds = new List<float>(); var fpts = new List<Vector3>(); var fseeds = new List<float>();
                 for (int i = 0; i < 2 * HX * 2 * HZ * 120; i++)
                 {
                     float x = Rr(-HX, HX + 3.5f), z = Rr(-HZ - 3f, HZ + 2.5f);
                     if (RoadD(x, z) < 1.1f || WHEAT.Contains(new Vector2(x, z)) || x > INN.x - 3.2f && Mathf.Abs(z) < 3.6f) continue;
                     bool blocked = false; foreach (var c in colliders) if (c.circle && (new Vector2(x - c.x, z - c.z)).magnitude < c.r * 0.8f) { blocked = true; break; }
                     if (blocked) continue;
+                    // the forest's edge: patches of its shorter, darker, sparser grass come out into the meadow
+                    if (Rnd() < BiomeBlend.Other(x - BiomeBlend.FIELD_FOREST_X, x, z)) { if (Rnd() < 0.32f) { fpts.Add(new Vector3(x, 0, z)); fseeds.Add(Rnd()); } continue; }
                     pts.Add(new Vector3(x, 0, z)); seeds.Add(Rnd());
                 }
                 GlyphLayer.MakeGrass(pts, seeds, T, new Color(0.16f, 0.50f, 0.24f), new Color(0.50f, 0.78f, 0.36f), 1.35f);
+                if (fpts.Count > 0) GlyphLayer.MakeGrass(fpts, fseeds, T, new Color(0.12f, 0.40f, 0.20f), new Color(0.36f, 0.62f, 0.28f), 1.15f);
+                // and its ferns and young bushes
+                for (int i = 0; i < 90; i++)
+                {
+                    float x = Rr(-HX, -HX + 7f), z = Rr(-HZ + 0.5f, HZ - 0.5f);
+                    if (RoadD(x, z) < 1.3f || Rnd() > BiomeBlend.Other(x - BiomeBlend.FIELD_FOREST_X, x, z) * 0.9f) continue;
+                    NatureLib.Place(Rnd() < 0.8f ? (Rnd() < 0.5f ? "fern1" : "fern3") : "bush2", mats, T, new Vector3(x, 0, z), Rr(0, 360), Rr(0.7f, 1.1f), null, false);
+                }
             }
             // ---- fireflies over the ears and the meadow ----
             {

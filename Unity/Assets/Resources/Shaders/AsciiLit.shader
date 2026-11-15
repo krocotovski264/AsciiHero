@@ -56,7 +56,7 @@ Shader "AsciiHero/Lit"
             float2 d = (pc.xy / pc.w - hc.xy / hc.w) * 0.5; d.x *= _ScreenParams.x / _ScreenParams.y;
             float hz = -TransformWorldToView(_SeeHero.xyz).z, pz = -TransformWorldToView(pWS).z;
             float front = saturate((hz - pz - 0.25) / 0.6);
-            return front * (1.0 - smoothstep(_SeeHero.w * 0.45, _SeeHero.w, length(d))) * _SeeFade;
+            return front * (1.0 - smoothstep(_SeeHero.w, _SeeHero.w * 1.4, length(d))) * _SeeFade;      // fully clear inside the circle, a gradient at its rim
         }
         float Bayer4(float2 pix)
         {
@@ -64,7 +64,7 @@ Shader "AsciiHero/Lit"
             int2 q = int2(fmod(floor(pix), 4.0));
             return (M[q.y * 4 + q.x] + 0.5) / 16.0;
         }
-        void SeeClip(float3 pWS, float2 pix) { if (_SeeThrough > 0.5) clip(Bayer4(pix) - SeeK(pWS) * 0.94); }
+        void SeeClip(float3 pWS, float2 pix) { if (_SeeThrough > 0.5) clip(Bayer4(pix) - SeeK(pWS) * 1.02); }
         float4 _DashShift;   // per renderer (world): during the dash the armour pieces lag behind the body
         float4 _DashSpin;    // per renderer: xyz = axis, w = angle; the piece tumbles about _DashPivot while it flies
         float4 _DashPivot;

@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.51 · Unity";
+        public const string VERSION = "beta 0.52 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -43,7 +43,7 @@ namespace AsciiHero
         Camera display, sceneCam; AsciiRenderer ascii;
         Mats mats, actorMats;
         Character hero; MotionActor player;
-        bool world; Tavern tavern; Field field; Cave cave; Forest forest; Location loc; readonly List<Location> outdoor = new List<Location>(); float doorCd; Light moonLight; Character bartenderChar; MotionActor bartender;
+        bool world; Tavern tavern; Field field; Cave cave; Forest forest; Location loc; readonly List<Location> outdoor = new List<Location>(); float doorCd, leafClear; Light moonLight; Character bartenderChar; MotionActor bartender;
         // integrity instead of a health bar: five limbs (head, armL, armR, legL, legR), each worth 20 %
         readonly Vector4[] pushPts = new Vector4[4]; static readonly Vector4 FAR = new Vector4(9999, 0, 9999, 0);
         int hp = 100; readonly bool[] limbs = { true, true, true, true, true }; float respawnT; Vector3 heroTrail;
@@ -335,7 +335,7 @@ namespace AsciiHero
                 }
             }
             var hv = player.Velocity;
-            if (loc.InWaterW(pos) && sp > 2.3f && heroSink < 0.12f)
+            if (loc.InWaterW(pos) && sp > 1.8f && heroSink < 0.5f)
             {
                 splashT -= dt;
                 if (splashT <= 0)
@@ -647,6 +647,7 @@ namespace AsciiHero
                 cave.addRipple = (x, z, a) => AddRipple(x + CAVE_O.x, z + CAVE_O.z, a);
             }
             outdoor.Clear(); outdoor.Add(field); outdoor.Add(forest); outdoor.Add(cave);
+            if (!outdoorGlows) { outdoorGlows = true; foreach (var l in outdoor) CollectGlows(l.root); }
             Debug.Log("Мир построен (поляна, лес, пещера), символов на сцене: " + GlyphLayer.count);
         }
         void SetupField() { SetupOutdoor(); }
@@ -669,6 +670,44 @@ namespace AsciiHero
                     if (n != loc && n.Active && RectDist(Core(n), q) < 2.5f) q = n.CollideNoClampW(q, r);
             return q;
         }
+        // ---- glowing things (lamps, torches, fires, glowing mushrooms, warm windows): their light and their flames are
+        // only on while they are on the screen or within 2 m past its edge; further out nothing of them is drawn or lit ----
+        struct Glow { public Light l; public Renderer r; public Transform t; }
+        readonly List<Glow> glows = new List<Glow>(); readonly Plane[] frustum = new Plane[6]; int glowsOn; bool outdoorGlows;
+        void CollectGlows(GameObject root)
+        {
+            foreach (var l in root.GetComponentsInChildren<Light>(true))
+                if (l.type == LightType.Point && l != heroLight) glows.Add(new Glow { l = l, t = l.transform });
+            foreach (var r in root.GetComponentsInChildren<Renderer>(true))
+            {
+                var m = r.sharedMaterial; if (m == null || m.shader == null) continue;
+                if (m.shader.name == "AsciiHero/Fire") glows.Add(new Glow { r = r, t = r.transform });
+            }
+        }
+        void UpdateGlows()
+        {
+            if (glows.Count == 0 || sceneCam == null) return;
+            GeometryUtility.CalculateFrustumPlanes(sceneCam, frustum); glowsOn = 0;
+            foreach (var g in glows)
+            {
+                if (g.t == null) continue;
+                Vector3 p = g.r != null ? g.r.bounds.center : g.t.position; bool on = true;
+                for (int i = 0; i < 4; i++) if (frustum[i].GetDistanceToPoint(p) < -2f) { on = false; break; }     // (the four side planes, 2 m slack)
+                if (g.l != null) { if (g.l.enabled != on) g.l.enabled = on; } else if (g.r.enabled != on) g.r.enabled = on;
+                if (on) glowsOn++;
+            }
+        }
+        /// the water deeper than the waist cannot be waded into: the step slides along that line or stops
+        Vector2 NoDeeper(Vector2 q)
+        {
+            if (loc == null) return q;
+            float d0 = loc.DepthW(pos);
+            bool Bad(Vector2 v) { float d = loc.DepthW(new Vector3(v.x, 0, v.y)); return d > WaterDepth.WAIST && d > d0 + 1e-4f; }
+            if (!Bad(q)) return q;
+            var a = new Vector2(q.x, pos.z); if (!Bad(a)) return a;
+            var b = new Vector2(pos.x, q.y); if (!Bad(b)) return b;
+            return new Vector2(pos.x, pos.z);
+        }
         /// which location the hero is in, which ones are on, how the light blends across a seam
         void UpdateOutdoor(bool force = false)
         {
@@ -682,7 +721,8 @@ namespace AsciiHero
                         ShowToast(n == field ? "Поляна" : n == forest ? "Лес" : "Пещера");
                         break;
                     }
-            if (forest != null) forest.ShowCrowns(loc != forest);       // inside the forest: no crowns over the hero (and far less to draw)
+            leafClear = Mathf.MoveTowards(leafClear, loc == forest ? 1f : 0f, Time.deltaTime * 1.5f);      // under the trees: the crowns clear off the screen but its rim
+            Shader.SetGlobalFloat("_AsciiLeafClear", Mathf.SmoothStep(0, 1, leafClear));
             foreach (var n in outdoor)
             {
                 bool on = n == loc || RectDist(Core(n), p2) < 14f;
@@ -748,6 +788,7 @@ namespace AsciiHero
             GlyphLayer.Build(bartenderChar.go);
             bartender = new MotionActor(bartenderChar);
             tavern.colliders.Add(Collider2.Circle(tavern.bartender.x, tavern.bartender.z, 0.3f));
+            CollectGlows(tavern.root);
         }
 
         // ---------- config ----------
@@ -1428,7 +1469,11 @@ namespace AsciiHero
             float l = Mathf.Sqrt(ix * ix + iy * iy), mag = Mathf.Min(1, l / 0.8f); if (mag < 0.12f) mag = 0;   // 80 % of the ring = full walk
             float runIn = Mathf.Max(stickRun, InputHub.Key("Run") ? 1f : 0f);
             if (mag > 0.85f || (mag > 0 && runIn > 0)) mag = 1 + runIn;
-            { float sk = loc.SpeedKW(pos); if (sk != 1 && mag > sk) mag = sk; }        // mud, deep water: a slow wade; shallows: a slower run
+            { float sk = loc.SpeedKW(pos); if (sk != 1 && mag > sk) mag = sk; }        // sticky mud: a slow wade
+            {   // water: the deeper, the slower - down to the walk (WaterDepth.WadeK); the walk itself is not slowed
+                float wd = loc.DepthW(pos); player.wadeDepth = wd;
+                player.speedCap = wd <= 0.05f ? 99f : Mathf.Max(1.05f, WaterDepth.WadeK(wd) * (player.maxSpeed + 0.5f));
+            }
             Vector2? dir = null;
             if (mag > 0) dir = ScreenToWorldDir(new Vector2(ix, iy));
             // aim: in a fight (a cut, a block or a blow in the last few seconds) the hero faces the nearest creature
@@ -1445,8 +1490,8 @@ namespace AsciiHero
             if (player.IdleBusy) { dir = null; mag = 0; }          // getting up from the ground first
             if (InputHub.Key("Attack")) DoAttack();
             if (InputHub.Key("Dash")) DoDash();
-            var dd = player.Locomotion(dt, dir, mag, lockPos, new Vector2(pos.x, pos.z), p => WCollide(p, 0.27f));
-            var np = WCollide(new Vector2(pos.x + dd.x, pos.z + dd.y), 0.27f);
+            var dd = player.Locomotion(dt, dir, mag, lockPos, new Vector2(pos.x, pos.z), p => NoDeeper(WCollide(p, 0.27f)));
+            var np = NoDeeper(WCollide(new Vector2(pos.x + dd.x, pos.z + dd.y), 0.27f));
             pos = new Vector3(np.x, 0, np.y);
             UpdateDash(dt);
             if (player.trail.Count > 0) { foreach (var q in player.trail) SpawnPuff(q, 0.03f, Vector3.zero, 0.3f); player.trail.Clear(); }
@@ -1456,7 +1501,7 @@ namespace AsciiHero
                 heroSink += (want - heroSink) * Mathf.Min(1, dt * 6);
             }
             hero.go.transform.position = pos + Vector3.down * heroSink;
-            UpdateOutdoor(); Doors(dt);
+            UpdateOutdoor(); Doors(dt); UpdateGlows();
             float idleYaw = 0;
             if (player.idleYawW > 0) { Vector3 co = Mirror(new Vector3(Mathf.Sin(isoYaw), 0, Mathf.Cos(isoYaw))); idleYaw = Mathf.DeltaAngle(player.heading * Mathf.Rad2Deg, Mathf.Atan2(co.x, co.z) * Mathf.Rad2Deg) * Mathf.Deg2Rad * player.idleYawW; }   // waving: turned to the camera
             hero.go.transform.rotation = Quaternion.Euler(0, (player.heading - player.spinYaw + idleYaw) * Mathf.Rad2Deg, 0);      // the full-turn sweep spins the whole figure

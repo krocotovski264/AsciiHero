@@ -196,23 +196,38 @@ namespace AsciiHero
         {
             var sh = Shader.Find("AsciiHero/Motes"); if (sh == null) { Debug.LogError("AsciiHero/Motes shader not found"); return null; }
             int n = pts.Count;
-            var verts = new List<Vector3>(n * 4); var corners = new List<Vector2>(n * 4); var seeds = new List<Vector2>(n * 4); var tris = new List<int>(n * 6);
-            Vector2[] C = { new Vector2(-0.5f, -0.5f), new Vector2(0.5f, -0.5f), new Vector2(0.5f, 0.5f), new Vector2(-0.5f, 0.5f) };
-            for (int i = 0; i < n; i++)
-            {
-                int o = verts.Count;
-                for (int k = 0; k < 4; k++) { verts.Add(pts[i]); corners.Add(C[k]); seeds.Add(seedList[i]); }
-                tris.Add(o); tris.Add(o + 2); tris.Add(o + 1); tris.Add(o); tris.Add(o + 3); tris.Add(o + 2);
-            }
-            var m = new Mesh { name = "motes", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
-            m.SetVertices(verts); m.SetUVs(0, corners); m.SetUVs(1, seeds); m.SetTriangles(tris, 0);
-            m.RecalculateBounds(); var b = m.bounds; b.Expand(new Vector3(2, prm.y + 1, 2)); m.bounds = b;
             var go = new GameObject("Motes"); go.layer = LAYER; go.transform.SetParent(parent, false);
             go.transform.localPosition = pos; go.transform.localRotation = rot; go.transform.localScale = scale;
-            go.AddComponent<MeshFilter>().sharedMesh = m;
             var mat = new Material(sh); mat.SetFloat("_MoteMode", mode); mat.SetColor("_MoteColor", col); mat.SetVector("_MoteParams", prm);
-            var r = go.AddComponent<MeshRenderer>(); r.sharedMaterial = mat;
-            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; r.receiveShadows = false;
+            // many motes spread over a location (fireflies, leaves) are split into 5 x 5 m tiles: the tiles off the screen
+            // are not drawn
+            var tiles = new Dictionary<long, List<int>>(); float TL = n > 150 ? 5f : 1e6f;
+            for (int i = 0; i < n; i++)
+            {
+                long key = (long)Mathf.FloorToInt(pts[i].x / TL) * 100000L + Mathf.FloorToInt(pts[i].z / TL);
+                List<int> l; if (!tiles.TryGetValue(key, out l)) { l = new List<int>(); tiles[key] = l; }
+                l.Add(i);
+            }
+            Vector2[] C = { new Vector2(-0.5f, -0.5f), new Vector2(0.5f, -0.5f), new Vector2(0.5f, 0.5f), new Vector2(-0.5f, 0.5f) };
+            foreach (var kv in tiles)
+            {
+                int tn = kv.Value.Count;
+                var verts = new List<Vector3>(tn * 4); var corners = new List<Vector2>(tn * 4); var seeds = new List<Vector2>(tn * 4); var tris = new List<int>(tn * 6);
+                foreach (int i in kv.Value)
+                {
+                    int o = verts.Count;
+                    for (int k = 0; k < 4; k++) { verts.Add(pts[i]); corners.Add(C[k]); seeds.Add(seedList[i]); }
+                    tris.Add(o); tris.Add(o + 2); tris.Add(o + 1); tris.Add(o); tris.Add(o + 3); tris.Add(o + 2);
+                }
+                var m = new Mesh { name = "motes", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+                m.SetVertices(verts); m.SetUVs(0, corners); m.SetUVs(1, seeds); m.SetTriangles(tris, 0);
+                m.RecalculateBounds(); var b = m.bounds; b.Expand(new Vector3(2, prm.y + 1, 2)); m.bounds = b;
+                var tg = tiles.Count == 1 ? go : new GameObject("MotesTile");
+                if (tg != go) { tg.layer = LAYER; tg.transform.SetParent(go.transform, false); }
+                tg.AddComponent<MeshFilter>().sharedMesh = m;
+                var r = tg.AddComponent<MeshRenderer>(); r.sharedMaterial = mat;
+                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; r.receiveShadows = false;
+            }
             count += n;
             return go;
         }

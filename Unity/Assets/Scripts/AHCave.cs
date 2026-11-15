@@ -51,13 +51,21 @@ namespace AsciiHero
             return k;
         }
         float MudK(float x, float z) { float k = 9; foreach (var p in muds) k = Mathf.Min(k, PoolK(p, x, z)); return k; }
-        float DeepAt(float x, float z) { float d = 0.06f; foreach (var p in pools) if (PoolK(p, x, z) < 1) d = Mathf.Max(d, p.depth); return d; }
+        /// the pools: the deep one a little lake (a shelf, then deeper than the waist in its middle), the others puddles; the
+        /// stream a few centimetres; the mud a swamp's - shallow water over sticky ground
+        public override float Depth(float x, float z)
+        {
+            float d = 0;
+            foreach (var p in pools) { float k = PoolK(p, x, z); if (k < 0.97f) { float u = (0.97f - k) / 0.97f; d = Mathf.Max(d, p.depth > 0.1f ? WaterDepth.Lake(u, 0.3f, 1.2f) : WaterDepth.Puddle(u, p.depth)); } }
+            if (d == 0 && WaterK(x, z) < 0.97f) d = WaterDepth.Stream(Mathf.Clamp01((0.97f - WaterK(x, z)) * 3f), 0.08f);
+            return d;
+        }
         public override bool HasWater => true;
         public override bool InWater(float x, float z) { return WaterK(x, z) < 0.97f; }
         public override float WaterSink(float x, float z)
         {
-            float w = WaterK(x, z), m = MudK(x, z);
-            float s = w < 1 ? DeepAt(x, z) * Mathf.SmoothStep(0, 1, Mathf.InverseLerp(1f, 0.5f, w)) : 0;
+            float m = MudK(x, z);
+            float s = Mathf.Min(Depth(x, z), WaterDepth.WAIST);
             if (m < 1) s = Mathf.Max(s, 0.08f * Mathf.SmoothStep(0, 1, Mathf.InverseLerp(1f, 0.6f, m)));
             return s;
         }
@@ -65,7 +73,7 @@ namespace AsciiHero
         {
             float k = 1;
             if (MudK(x, z) < 0.95f) k = 0.5f;                                   // sticky mud: a slow wade, no running
-            else if (WaterK(x, z) < 0.9f) k = DeepAt(x, z) > 0.12f ? 0.7f : 1.8f;     // deep: a wade; shallow: he can run (a bit slower)
+            // (in the water the depth decides: WaterDepth.WadeK)
             return k;
         }
 
@@ -81,7 +89,9 @@ namespace AsciiHero
         readonly List<Glow> glows = new List<Glow>(); Light ember; MaterialPropertyBlock mpb; Color glowEm;
         // ---- drops falling into the pools ----
         public readonly List<Vector3> drips = new List<Vector3>();      // x, z, phase
-        public const float DRIP_PERIOD = 2.3f, DRIP_FALL = 0.55f, DRIP_TOP = 2.9f;
+        static float Frac(float x) { return x - Mathf.Floor(x); }
+        // a drop every 3.5 s on average, each moved by up to +-0.75 s at random: one comes 2-5 s after the one before
+        public const float DRIP_PERIOD = 3.5f, DRIP_FALL = 0.55f, DRIP_TOP = 2.9f;
         float lastT = -1;
 
         public static Cave Build(Mats mats) { var C = new Cave(); C.Construct(mats); return C; }
@@ -173,15 +183,14 @@ namespace AsciiHero
             {
                 var p = Place(0.6f, 9.3f, -7.4f, 7.4f, 0.2f); float r = Rr(0.08f, 0.18f), sc = r * 2.6f;
                 MeshGen.Obj(CaveMesh("stone", new Vector3(sc, sc * Rr(0.9f, 1.4f), sc), Rnd() < 0.5f), mats["ROCK"], T, new Vector3(p.x, -0.02f, p.y), Quaternion.Euler(Rr(-12, 12), Rr(0, 360), Rr(-12, 12)), true, "SharpRock");
-                colliders.Add(Collider2.Circle(p.x, p.y, r * 0.8f));
-            }
+            }       // (small: walked over, no collider)
             // ---- boulders, everywhere but the water ----
             for (int i = 0; i < 12; i++)
             {
                 var p = Place(-9.2f, 9.2f, -7.3f, 7.3f, 0.6f); float s = Rr(0.3f, 0.7f);
                 float d = s * 2.3f;
                 MeshGen.Obj(CaveMesh(Rnd() < 0.5f ? "boulder_a" : "boulder_b", new Vector3(d * Rr(0.9f, 1.1f), d * Rr(0.85f, 1.15f), d * Rr(0.9f, 1.1f)), Rnd() < 0.5f), mats[Rnd() < 0.5f ? "ROCK" : "WETROCK"], T, new Vector3(p.x, -0.04f, p.y), Quaternion.Euler(0, Rr(0, 360), 0), true, "Boulder");
-                colliders.Add(Collider2.Circle(p.x, p.y, s * 1.05f));
+                if (s > 0.42f) colliders.Add(Collider2.Circle(p.x, p.y, s * 1.05f));      // (the small ones are stepped over)
                 if (Rnd() < 0.6f) Moss(T, mats, p.x, p.y, s * 0.8f, s * 0.75f);          // moss on its top
             }
             // moss along the foot of the walls in the wet hall and the grotto
@@ -474,7 +483,29 @@ namespace AsciiHero
             var m = new Mesh { name = "caverock", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
             m.SetVertices(vs); m.SetNormals(ns); m.uv = new Vector2[vs.Count]; m.SetTriangles(ts, 0); m.RecalculateBounds();
             MeshGen.AddGlyphUV(m, false);
-            MeshGen.Obj(m, mat, T, Vector3.zero, Quaternion.identity, true, "Rock");
+            // cut into 5 x 5 m pieces, so the parts of the rock off the screen are not drawn (nor their characters laid out)
+            {
+                var uv2 = m.uv2; var chunks = new Dictionary<long, List<int>>();
+                for (int q = 0; q < ts.Count; q += 3)
+                {
+                    var c = (vs[ts[q]] + vs[ts[q + 1]] + vs[ts[q + 2]]) / 3f;
+                    long key = (long)Mathf.FloorToInt(c.x / 5f) * 1000L + Mathf.FloorToInt(c.z / 5f);
+                    List<int> l; if (!chunks.TryGetValue(key, out l)) { l = new List<int>(); chunks[key] = l; }
+                    l.Add(ts[q]); l.Add(ts[q + 1]); l.Add(ts[q + 2]);
+                }
+                foreach (var kv in chunks)
+                {
+                    var map = new Dictionary<int, int>(); var cv = new List<Vector3>(); var cn = new List<Vector3>(); var cu = new List<Vector2>(); var ct = new List<int>();
+                    foreach (int v in kv.Value)
+                    {
+                        int j; if (!map.TryGetValue(v, out j)) { j = cv.Count; map[v] = j; cv.Add(vs[v]); cn.Add(ns[v]); cu.Add(uv2[v]); }
+                        ct.Add(j);
+                    }
+                    var cm = new Mesh { name = "caverock", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+                    cm.SetVertices(cv); cm.SetNormals(cn); cm.uv = new Vector2[cv.Count]; cm.SetUVs(1, cu); cm.SetTriangles(ct, 0); cm.RecalculateBounds();
+                    MeshGen.Obj(cm, mat, T, Vector3.zero, Quaternion.identity, true, "Rock");
+                }
+            }
             Debug.Log("Пещера: скала " + vs.Count + " вершин, " + ts.Count / 3 + " треугольников");
 
             // collisions: circles along the outline and the dividing walls, each as big as the rock reaches into the hall
@@ -664,8 +695,13 @@ namespace AsciiHero
             if (lastT >= 0 && addRipple != null)
                 foreach (var d in drips)
                 {
-                    float a = (lastT / DRIP_PERIOD + d.z) % 1f, b = (t / DRIP_PERIOD + d.z) % 1f, hit = DRIP_FALL / DRIP_PERIOD;
-                    if ((a < hit && b >= hit) || (b < a && b >= hit)) addRipple(d.x, d.y, 0.85f);
+                    float m0 = Mathf.Floor(t / DRIP_PERIOD + d.z);
+                    for (int q = -1; q <= 1; q++)
+                    {
+                        float m = m0 + q, h = Frac(m * 0.1031f + d.z * 0.6180f); h *= h + 33.33f; h *= h + h; h = Frac(h);
+                        float land = (m - d.z) * DRIP_PERIOD + (h - 0.5f) * 1.5f * DRIP_PERIOD / 3.5f + DRIP_FALL;
+                        if (lastT < land && t >= land) addRipple(d.x, d.y, 0.85f);
+                    }
                 }
             lastT = t;
         }

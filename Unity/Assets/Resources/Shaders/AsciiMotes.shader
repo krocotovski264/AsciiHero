@@ -84,12 +84,19 @@ Shader "AsciiHero/Motes"
                     bright = pow(saturate(1.0 - k), 1.6) * shimmer * smoothstep(0.0, 0.18, lp.y) * smoothstep(1.0, 0.7, lp.y) * (0.55 + 0.45 * lp.y);
                 }
                 else
-                {   // a falling drop
-                    float P = max(_MoteParams.z, 0.3), ph = frac(t / P + k);
-                    float fall = 0.55, u = saturate(ph * P / fall);        // it falls in a little over half a second
-                    float top = _MoteParams.y;
+                {   // a falling drop: one every 2-5 s, in a random order (drop m starts at (m - k) * P + jitter; the same sum
+                    // on the CPU puts the ring where and when it lands)
+                    float P = max(_MoteParams.z, 0.3), fall = 0.55, top = _MoteParams.y;
+                    float m0 = floor(t / P + k), local = -1.0;
+                    [unroll] for (int q = -1; q <= 1; q++)
+                    {
+                        float m = m0 + q, h = frac(m * 0.1031 + k * 0.6180); h *= h + 33.33; h *= h + h; h = frac(h);
+                        float st = (m - k) * P + (h - 0.5) * 1.5 * P / 3.5;
+                        float lt = t - st; if (lt >= 0.0 && lt < fall) local = lt;
+                    }
+                    float u = saturate(local / fall);
                     lp.y = lerp(top, 0.0, u * u);
-                    bright = ph * P < fall ? 1.0 : 0.0;
+                    bright = local >= 0.0 ? 1.0 : 0.0;
                     row = 1.0; gi = 10.0;                                // |
                 }
                 float3 p = TransformObjectToWorld(lp);

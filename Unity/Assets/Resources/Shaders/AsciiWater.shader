@@ -162,7 +162,7 @@ Shader "AsciiHero/Water"
                     row = 12.0; gi = an < 0.39 || an > 2.75 ? 1.0 : an < 1.18 ? 2.0 : an < 1.96 ? 0.0 : 3.0;     // - / | \
                     // white, half see-through: the water's own brightness shows through it, but none of its colour
                     float wl = dot(wcol, float3(0.3, 0.5, 0.2));
-                    col = (wl * 0.55 + 0.42 + 0.18 * saturate(best)) * float3(0.95, 0.97, 1.0);
+                    col = (wl * 0.78 + 0.21 + 0.09 * saturate(best)) * float3(0.95, 0.97, 1.0);      // (half as opaque as it was)
                 }
                 else if (hitK == 1)
                 {   // the hero, upside down in the water: darker than himself, his armour catching a little light
@@ -199,7 +199,7 @@ Shader "AsciiHero/Water"
                     col += sky * 0.5 * fres;
                     col *= 0.75 + 0.35 * fres;
                     float rk = saturate(ring * 1.6);          // where a ring passes: whiter, no tint
-                    col = lerp(col, dot(col, float3(0.3, 0.5, 0.2)) * 0.6 + 0.3, rk * 0.8);
+                    col = lerp(col, dot(col, float3(0.3, 0.5, 0.2)) * 0.8 + 0.15, rk * 0.4);
                 }
                 if (_WaterReflOn > 0.5)
                 {

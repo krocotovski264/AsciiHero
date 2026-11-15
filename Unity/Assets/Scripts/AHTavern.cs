@@ -63,7 +63,10 @@ namespace AsciiHero
         public virtual bool HasWater => false;
         public virtual bool InWater(float x, float z) { return false; }
         /// how deep the hero sinks here (m)
-        public virtual float WaterSink(float x, float z) { return 0; }
+        public virtual float WaterSink(float x, float z) { return Mathf.Min(Depth(x, z), WaterDepth.WAIST); }
+        /// how deep the water is here (m; 0 = dry) - see WaterDepth for how each kind of water is shaped
+        public virtual float Depth(float x, float z) { return 0; }
+        public float DepthW(Vector3 w) { return Depth(w.x - origin.x, w.z - origin.z); }
         /// the most of his normal pace he can go here (1 = no limit)
         public virtual float SpeedK(float x, float z) { return 1; } public virtual float WaterY => 0.04f;            // the height of the water surface (the mirror's plane)
         public void SetActive(bool on) { root.SetActive(on); }
@@ -146,6 +149,35 @@ namespace AsciiHero
                     }
                 }
             return p;
+        }
+    }
+
+    /// The depth of the water, by kind of water. u: how far in from the shore, 0 at the waterline .. 1 at the deepest
+    /// point (the centre of a lake or a pool, the middle of a river's channel). The hero wades to the waist (WAIST) and no
+    /// deeper; the speed falls with the depth (WadeK).
+    ///   puddle  3-8 cm, a dish: no slowing at all
+    ///   stream  10-30 cm, a flat bed with a soft edge: a slower run at most
+    ///   river   a shallow bank 20-40 cm, then the channel falls to 1-2 m (across only at a ford, 30-50 cm)
+    ///   lake    a shelf (to 40 cm over the first third), then a drop-off to 1.5-4 m in the middle
+    ///   sea     a beach rising 2 cm per metre for the first 10 m, then deep
+    ///   swamp   20-60 cm of water over mud, with bog holes over a metre deep
+    public static class WaterDepth
+    {
+        public const float WAIST = 0.95f, MID_THIGH = 0.5f;
+        static float S(float a, float b, float x) { float t = Mathf.Clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); }
+        public static float Puddle(float u, float max = 0.06f) { return max * S(0, 0.6f, u); }
+        public static float Stream(float u, float max = 0.22f) { return max * S(0, 0.35f, u); }
+        public static float River(float u, float bank = 0.3f, float channel = 1.6f) { return bank * S(0, 0.25f, u) + (channel - bank) * S(0.35f, 0.75f, u); }
+        public static float Lake(float u, float shelf = 0.4f, float deep = 2.2f) { return shelf * S(0, 0.35f, u) + (deep - shelf) * S(0.4f, 0.85f, u); }
+        public static float Sea(float metresFromShore) { return metresFromShore < 10 ? 0.02f * metresFromShore : 0.2f + (metresFromShore - 10) * 0.15f; }
+        public static float Swamp(float u, float hole = 0) { return 0.2f + 0.3f * S(0, 0.5f, u) + hole; }
+        /// the share of the full run speed the water allows: to 5 cm all of it, 5-15 cm down to 90 %, then 10 % less for
+        /// every 5 cm (it never goes below the walk: the game keeps the walk speed as the floor)
+        public static float WadeK(float d)
+        {
+            if (d <= 0.05f) return 1f;
+            if (d <= 0.15f) return 1f - 0.1f * (d - 0.05f) / 0.1f;
+            return Mathf.Max(0f, 0.9f - 0.1f * (d - 0.15f) / 0.05f);
         }
     }
 

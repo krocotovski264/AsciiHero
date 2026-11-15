@@ -48,6 +48,8 @@ namespace AsciiHero
         public bool useMM;
         bool loopMode;
         public float maxSpeed = 3.0f;
+        /// in water: how deep the hero stands (m), and the most speed the water lets him have (m/s) - set by the game
+        public float wadeDepth, speedCap = 99f;
         struct Sim { public float x, z, vx, vz, ax, az, h, w; public bool init; }
         Sim S; public Vector3 Velocity => new Vector3(S.vx, 0, S.vz); bool hadDir; Vector2 lastDir;
         Quaternion[] off, outQ, tmpQ; Vector3 offRO, ro; float[] con = { 1, 1 };
@@ -177,6 +179,7 @@ namespace AsciiHero
                 if (mag > 1.6f) spd += SPRINT_EXTRA * sprint;
                 if (lockPos.HasValue) spd = Mathf.Min(spd, 1.7f);
                 if (guardHeld) spd = Mathf.Min(spd, 1.1f);          // behind the shield you only walk
+                spd = Mathf.Min(spd, speedCap);                      // the water holds the legs back
                 int legsC = Legs, armsC = (limbs[1] ? 1 : 0) + (limbs[2] ? 1 : 0);
                 if (legsC == 1) spd = Mathf.Min(spd, 1.9f);                                        // hopping on one leg
                 if (legsC == 0) spd = Mathf.Min(spd, armsC == 2 ? 0.5f : armsC == 1 ? 0.35f : 0.18f);   // crawling
@@ -505,9 +508,56 @@ namespace AsciiHero
             if (loopMode) BodyLife(dt);
             ArmLean();
             RelaxArms();
+            Wade(dt);
             Combat(dt);
             JointLimits();
             FootIK(dt);
+        }
+        // ---- wading: a layer over the walk and the run. Two depths, each with a walk and a run flavour:
+        //   * up to mid-thigh: the knees come up higher out of the water, the body leans a little into it, the arms held
+        //     out from the sides for balance (in the run they swing higher, as if splashing through);
+        //   * from mid-thigh to the waist: a heavy push - leaning forward, the steps short and high, the forearms carried
+        //     forward over the water and swept alternately as if parting it.
+        float wadeA, wadeB, wadePh;
+        void Wade(float dt)
+        {
+            float a = Smooth01(0.12f, 0.45f, wadeDepth), b = Smooth01(0.5f, 0.85f, wadeDepth);
+            wadeA = Mathf.MoveTowards(wadeA, a, dt * 2.5f); wadeB = Mathf.MoveTowards(wadeB, b, dt * 2.5f);
+            if (wadeA < 0.01f && wadeB < 0.01f) return;
+            Quaternion gq = ch.go.transform.rotation; Vector3 X = gq * Vector3.right, F = gq * Vector3.forward;
+            bool moving = vel > 0.15f; float run = Mathf.Clamp01((vel - 1.2f) / 1.4f);
+            wadePh = (wadePh + dt * Mathf.PI * 2 * (0.6f + 0.5f * vel)) % (Mathf.PI * 2);
+            // legs: a thigh swinging forward is lifted further, its knee bent more
+            if (moving)
+                for (int si = 0; si < 2; si++)
+                {
+                    if (!limbs[3 + si]) continue; string sd = SIDES[si];
+                    Transform up = H.Bone("upperleg01." + sd), lo = H.Bone("lowerleg01." + sd); if (up == null || lo == null) continue;
+                    Vector3 d = (lo.position - up.position).normalized; float flex = Mathf.Atan2(Vector3.Dot(d, F), -d.y);
+                    float extra = Mathf.Max(0, flex + 0.05f) * (0.9f * wadeA * (1 - wadeB) + 0.6f * wadeB) * (1 + 0.4f * run);
+                    Rot("upperleg01." + sd, X, -extra); Rot("lowerleg01." + sd, X, extra * 1.1f);
+                }
+            float lean = (0.06f + 0.05f * run) * wadeA + (0.2f - 0.06f * wadeA) * wadeB;
+            Rot("spine05", X, lean * 0.45f); Rot("spine03", X, lean * 0.55f);
+            if (Attacking || guardHeld) return;           // the fight owns the arms
+            float sw = Mathf.Sin(wadePh);
+            for (int si = 0; si < 2; si++)
+            {
+                if (!limbs[1 + si]) continue;
+                string sd = SIDES[si]; float sg = si == 0 ? -1f : 1f, alt = si == 0 ? sw : -sw;
+                // to mid-thigh: out to the sides (higher in the run); deeper: forward over the water, sweeping
+                Vector3 ua = Vector3.Lerp(new Vector3(sg * (0.5f + 0.15f * run), -0.8f + 0.25f * run, 0.12f + 0.1f * alt * run), new Vector3(sg * 0.5f, -0.3f, 0.5f + 0.18f * alt), wadeB);
+                Vector3 fa = Vector3.Lerp(new Vector3(sg * 0.3f, -0.35f + 0.2f * run, 0.6f), new Vector3(-sg * 0.25f * alt, 0.0f, 1f), wadeB);
+                float w = Mathf.Clamp01(0.75f * wadeA + wadeB);
+                AimBlend("upperarm01." + sd, "lowerarm01." + sd, gq * ua, w);
+                AimBlend("lowerarm01." + sd, "wrist." + sd, gq * fa, w);
+            }
+        }
+        void AimBlend(string a, string b, Vector3 dirW, float w)
+        {
+            Transform ba = H.Bone(a), bb = H.Bone(b); if (ba == null || bb == null || w <= 0) return;
+            var q = Quaternion.FromToRotation((bb.position - ba.position).normalized, dirW.normalized) * ba.rotation;
+            ba.rotation = Quaternion.Slerp(ba.rotation, q, w);
         }
         void Aim(string a, string b, Vector3 dirW)
         {

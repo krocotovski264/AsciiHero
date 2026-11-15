@@ -11,7 +11,7 @@ namespace AsciiHero
 {
     public class Forest : Location
     {
-        public const float HX = 10, HZ = 10, WATER_Y = 0.06f;
+        public const float HX = 10, HZ = 10, WATER_Y = 0.06f, ORIGIN_X = -20f;     // (ORIGIN_X: where the game puts it, west of the meadow)
         public static readonly Vector3 LAKE = new Vector3(-4.6f, 0, 3.6f); public const float LAKE_RX = 3.0f, LAKE_RZ = 2.3f;
         /// the path (local): from the field edge (east) to the cave mouth (north)
         public static readonly Vector2[] PATH = { new Vector2(10.6f, 2.0f), new Vector2(7.0f, 1.5f), new Vector2(3.6f, -0.8f), new Vector2(4.0f, -4.6f), new Vector2(5.0f, -7.8f), new Vector2(5.0f, -10.8f) };
@@ -30,8 +30,8 @@ namespace AsciiHero
             return Mathf.Sqrt(dx * dx + dz * dz) / wob;
         }
         public override bool InWater(float x, float z) { return LakeK(x, z) < 0.97f; }
-        public override float WaterSink(float x, float z) { return 0.2f * Mathf.SmoothStep(0, 1, Mathf.InverseLerp(1.0f, 0.5f, LakeK(x, z))); }
-        public override float SpeedK(float x, float z) { float k = LakeK(x, z); return k < 0.6f ? 0.7f : k < 1f ? 1.8f : 1f; }
+        /// a forest lake: a shelf by the shore, the middle too deep to wade
+        public override float Depth(float x, float z) { float k = LakeK(x, z); return k >= 0.97f ? 0 : WaterDepth.Lake(Mathf.Clamp01((0.97f - k) / 0.97f), 0.42f, 2.0f); }
         public static float PathD(float x, float z)
         {
             float best = 99; var q = new Vector2(x, z);
@@ -143,8 +143,7 @@ namespace AsciiHero
             for (float x = -HX + 1.5f; x <= HX - 2.5f; x += Rr(1.8f, 2.6f))
             {
                 if (Rnd() < 0.55f) NatureLib.Place(Rnd() < 0.5f ? "bush1" : "bush2", mats, T, new Vector3(x, 0, HZ - Rr(0, 0.5f)), Rr(0, 360), Rr(0.9f, 1.3f));
-                else Tree(new Vector2(x, HZ + Rr(-0.3f, 0.3f)), Rr(0.7f, 0.9f));
-                colliders.Add(Collider2.Circle(x, HZ, 0.6f));
+                else { Tree(new Vector2(x, HZ + Rr(-0.3f, 0.3f)), Rr(0.7f, 0.9f)); colliders.Add(Collider2.Circle(x, HZ, 0.6f)); }
             }
             // ---- the rocky slope in the north with the cave mouth (the cave's own rock rises behind it) ----
             for (float x = -HX - 0.5f; x <= HX + 0.5f; x += 2.0f)
@@ -194,12 +193,13 @@ namespace AsciiHero
             for (int i = 0; i < 8; i++)
             {
                 var p = Place(0.6f, -HX + 1.5f, HX - 1.5f, -HZ + 2, HZ - 1.5f); if (float.IsNaN(p.x)) continue;
-                NatureLib.Place(i % 3 == 0 ? "mrock1" : i % 3 == 1 ? "mrock3" : "mrock6", mats, T, new Vector3(p.x, -0.03f, p.y), Rr(0, 360), Rr(0.8f, 1.3f));
-                colliders.Add(Collider2.Circle(p.x, p.y, 0.5f));
+                float rs = Rr(0.8f, 1.3f);
+                NatureLib.Place(i % 3 == 0 ? "mrock1" : i % 3 == 1 ? "mrock3" : "mrock6", mats, T, new Vector3(p.x, -0.03f, p.y), Rr(0, 360), rs);
+                if (i % 3 != 0 && rs > 1.05f) colliders.Add(Collider2.Circle(p.x, p.y, 0.5f));      // (the small stones are walked over)
             }
             // ---- undergrowth: ferns, bushes, berries, flowers; mushrooms at the roots and on the stumps ----
             for (int i = 0; i < 46; i++) { var p = Place(0.4f, -HX + 0.8f, HX - 0.5f, -HZ + 1.5f, HZ - 0.8f); if (!float.IsNaN(p.x)) NatureLib.Place(Rnd() < 0.5f ? "fern1" : "fern3", mats, T, new Vector3(p.x, 0, p.y), Rr(0, 360), Rr(0.8f, 1.3f), null, false); }
-            for (int i = 0; i < 16; i++) { var p = Place(0.6f, -HX + 0.8f, HX - 0.5f, -HZ + 1.5f, HZ - 0.8f); if (float.IsNaN(p.x)) continue; NatureLib.Place(i < 4 ? "bushberry" : Rnd() < 0.5f ? "bush1" : "bush2", mats, T, new Vector3(p.x, 0, p.y), Rr(0, 360), Rr(0.8f, 1.2f)); colliders.Add(Collider2.Circle(p.x, p.y, 0.45f)); }
+            for (int i = 0; i < 16; i++) { var p = Place(0.6f, -HX + 0.8f, HX - 0.5f, -HZ + 1.5f, HZ - 0.8f); if (float.IsNaN(p.x)) continue; NatureLib.Place(i < 4 ? "bushberry" : Rnd() < 0.5f ? "bush1" : "bush2", mats, T, new Vector3(p.x, 0, p.y), Rr(0, 360), Rr(0.8f, 1.2f)); }      // (bushes: walked through, they part)
             for (int i = 0; i < 18; i++) { var p = Place(0.2f, -HX + 0.8f, HX - 0.5f, -HZ + 1.5f, HZ - 0.8f); if (!float.IsNaN(p.x)) NatureLib.Place("flower3", mats, T, new Vector3(p.x, 0, p.y), Rr(0, 360), Rr(0.8f, 1.2f), null, false, Rnd() < 0.5f ? null : new Dictionary<string, string> { { "FLOWERB", "FLOWERW" } }); }
             for (int i = 0; i < 26; i++)
             {
@@ -210,16 +210,29 @@ namespace AsciiHero
             }
             // ---- grass: thinner than in the field, none on the path, in the water or under the trunks ----
             {
-                var pts = new List<Vector3>(); var seeds = new List<float>();
+                var pts = new List<Vector3>(); var seeds = new List<float>(); var mpts = new List<Vector3>(); var mseeds = new List<float>();
                 for (int i = 0; i < 2 * HX * 2 * HZ * 38; i++)
                 {
                     float x = Rr(-HX - 1.5f, HX), z = Rr(-HZ, HZ + 1.5f);
                     if (LakeK(x, z) < 1.06f || PathD(x, z) < 0.75f) continue;
                     bool blocked = false; foreach (var c in colliders) if (c.circle && (new Vector2(x - c.x, z - c.z)).magnitude < c.r * 0.8f) { blocked = true; break; }
                     if (blocked) continue;
+                    // the meadow's edge (east): patches of its tall light grass reach in among the trees, three times as dense
+                    float wx = x + ORIGIN_X;
+                    if (Rnd() < BiomeBlend.Other(BiomeBlend.FIELD_FOREST_X - wx, wx, z))
+                    { for (int k = 0; k < 3; k++) { mpts.Add(new Vector3(x + Rr(-0.08f, 0.08f), 0, z + Rr(-0.08f, 0.08f))); mseeds.Add(Rnd()); } continue; }
                     pts.Add(new Vector3(x, 0, z)); seeds.Add(Rnd());
                 }
                 GlyphLayer.MakeGrass(pts, seeds, T, new Color(0.12f, 0.40f, 0.20f), new Color(0.36f, 0.62f, 0.28f), 1.15f);
+                if (mpts.Count > 0) GlyphLayer.MakeGrass(mpts, mseeds, T, new Color(0.16f, 0.50f, 0.24f), new Color(0.50f, 0.78f, 0.36f), 1.35f);
+                // and its flowers
+                var POP = new Dictionary<string, string> { { "FLOWERB", "RED" }, { "WHEAT", "RED" } }; var DAI = new Dictionary<string, string> { { "FLOWERB", "FLOWERW" } };
+                for (int i = 0; i < 70; i++)
+                {
+                    float x = Rr(HX - 7f, HX + 1.5f), z = Rr(-HZ + 1f, HZ - 0.5f), wx = x + ORIGIN_X;
+                    if (PathD(x, z) < 1f || Rnd() > BiomeBlend.Other(BiomeBlend.FIELD_FOREST_X - wx, wx, z) * 0.8f) continue;
+                    float c = Rnd(); NatureLib.Place(c < 0.5f ? "flowers" : "flower3", mats, T, new Vector3(x, 0, z), Rr(0, 360), Rr(0.8f, 1.2f), null, false, c < 0.33f ? POP : c < 0.66f ? DAI : null);
+                }
             }
             // ---- night: fireflies at the water and over the grass, falling leaves, mist over the lake, moonlight ----
             {

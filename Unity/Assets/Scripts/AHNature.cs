@@ -18,6 +18,22 @@ namespace AsciiHero
         public int Count { get { int n = 0; foreach (var g in items) if (g != null) n++; return n; } }
     }
 
+    /// Where two biomes meet they mix over 3-7 m - the width changes along the seam, and inside it the neighbour's grass,
+    /// plants and flowers come in patches (noise), not as a line. Both sides use the same world-space noise, so the two
+    /// halves of the mix fit together at the seam (about half and half there).
+    public static class BiomeBlend
+    {
+        public const float FIELD_FOREST_X = -10f;      // the seam between the meadow (east) and the forest (west), world x
+        public static float Width(float along) { return 3f + 4f * Mathf.Clamp01(Mathf.PerlinNoise(along * 0.13f + 3.7f, 0.5f) * 1.25f - 0.12f); }
+        /// how likely a thing d metres inside this biome (world wx, wz) takes the neighbour's look
+        public static float Other(float d, float wx, float wz)
+        {
+            float w = Width(wz); if (d >= w || d < 0) return d < 0 ? 0.5f : 0;
+            float t = 1 - d / w, n = Mathf.PerlinNoise(wx * 0.31f + 11.3f, wz * 0.31f + 5.1f);
+            return Mathf.Clamp01(0.5f * t + (n - 0.5f) * 1.3f * t);
+        }
+    }
+
     public static class NatureLib
     {
         struct Part { public string mat; public Vector3[] v; public int[] t; }
@@ -115,6 +131,7 @@ namespace AsciiHero
             Material m; if (leafMats.TryGetValue(kind, out m) && m != null) return m;
             var sh = Shader.Find("AsciiHero/Leaves"); if (sh == null) { Debug.LogError("AsciiHero/Leaves shader not found"); return null; }
             m = new Material(sh); m.SetColor("_GrassA", LEAF_COL[kind, 0]); m.SetColor("_GrassB", LEAF_COL[kind, 1]); m.SetFloat("_GrassH", LEAF_SIZE[kind]);
+            m.SetFloat("_LeafSee", kind <= 2 ? 1 : 0);          // (tree crowns clear away under the trees; bushes and ferns stay)
             leafMats[kind] = m; return m;
         }
         /// points scattered over the crown's surface (by area, the faces turned down mostly left out: the camera looks from
@@ -136,7 +153,8 @@ namespace AsciiHero
             int n = Mathf.Clamp(Mathf.RoundToInt(tot * sq * sq * 14f), 8, LEAF_CAP[kind]);
             var R = new System.Random(name.GetHashCode() ^ part * 7919);
             var cum = new float[nt]; float acc = 0; for (int t = 0; t < nt; t++) { acc += area[t]; cum[t] = acc; }
-            var verts = new List<Vector3>(n * 4); var corners = new List<Vector2>(n * 4); var seeds = new List<Vector2>(n * 4); var nr = new List<Vector2>(n * 4); var tris = new List<int>(n * 6);
+            var verts = new List<Vector3>(n * 4); var corners = new List<Vector2>(n * 4); var seeds = new List<Vector2>(n * 4); var nr = new List<Vector2>(n * 4); var dirs = new List<Vector3>(n * 4); var tris = new List<int>(n * 6);
+            var leafPts = new List<Vector3>();
             Vector2[] CR = { new Vector2(-0.5f, -0.5f), new Vector2(0.5f, -0.5f), new Vector2(0.5f, 0.5f), new Vector2(-0.5f, 0.5f) };
             for (int k = 0; k < n; k++)
             {
@@ -147,11 +165,36 @@ namespace AsciiHero
                 var q = (A + (B - A) * r1 + (C - A) * r2 + nrm[lo] * 0.04f) * sq;
                 float hk = (q.y / sq - y0) / Mathf.Max(0.05f, y1 - y0), sd = (float)R.NextDouble();
                 int o = verts.Count;
-                for (int c = 0; c < 4; c++) { verts.Add(q); corners.Add(CR[c]); seeds.Add(new Vector2(sd, hk)); nr.Add(new Vector2(nrm[lo].y, 0)); }
+                for (int c = 0; c < 4; c++) { verts.Add(q); corners.Add(CR[c]); seeds.Add(new Vector2(sd, hk)); nr.Add(new Vector2(nrm[lo].y, 0)); dirs.Add(Vector3.up); }
                 tris.Add(o); tris.Add(o + 2); tris.Add(o + 1); tris.Add(o); tris.Add(o + 3); tris.Add(o + 2);
+                leafPts.Add(q);
+            }
+            if (kind == 3 && leafPts.Count > 6)
+            {
+                // a bush: a short stem, and branches from it out into the leaves (characters as well, swaying with the leaves:
+                // the sway grows with the height, so a branch bends from the ground up)
+                float H = (y1 - y0) * sq; var top = new Vector3(0, H * 0.38f, 0);
+                void Line(Vector3 a0, Vector3 b0)
+                {
+                    var d = b0 - a0; float len = d.magnitude; if (len < 0.05f) return; d /= len;
+                    for (float u = 0; u <= len; u += 0.085f)
+                    {
+                        var q = a0 + d * u; float hk = (q.y - y0 * sq) / Mathf.Max(0.05f, H); int o = verts.Count;
+                        for (int c = 0; c < 4; c++) { verts.Add(q); corners.Add(CR[c]); seeds.Add(new Vector2((float)R.NextDouble(), hk)); nr.Add(new Vector2(0.3f, 1)); dirs.Add(d); }
+                        tris.Add(o); tris.Add(o + 2); tris.Add(o + 1); tris.Add(o); tris.Add(o + 3); tris.Add(o + 2);
+                    }
+                }
+                Line(new Vector3(0, 0.02f, 0), top);
+                int nb = 4 + R.Next(3);
+                for (int k = 0; k < nb; k++)
+                {
+                    var to = leafPts[R.Next(leafPts.Count)]; var from = new Vector3(0, H * (0.1f + 0.28f * (float)R.NextDouble()), 0);
+                    var mid = Vector3.Lerp(from, to, 0.5f) + new Vector3(0, 0.06f, 0);
+                    Line(from, mid); Line(mid, Vector3.Lerp(from, to, 0.85f));
+                }
             }
             m = new Mesh { name = "leaves_" + name };
-            m.SetVertices(verts); m.SetUVs(0, corners); m.SetUVs(1, seeds); m.SetUVs(2, nr); m.SetTriangles(tris, 0);
+            m.SetVertices(verts); m.SetUVs(0, corners); m.SetUVs(1, seeds); m.SetUVs(2, nr); m.SetUVs(3, dirs); m.SetTriangles(tris, 0);
             m.RecalculateBounds(); var b = m.bounds; b.Expand(0.8f); m.bounds = b;
             GlyphLayer.count += n;
             leafCache[key] = m; return m;
