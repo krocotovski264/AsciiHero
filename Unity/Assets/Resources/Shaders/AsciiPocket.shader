@@ -94,14 +94,14 @@ Shader "Hidden/AsciiHero/Pocket"
                 ink = saturate((ink - 0.2) * 1.8) * (gi > 0.5 ? 1.0 : 0.0);
                 // the outline along the edge (the shadow body's: a thin cool line)
                 float ow = _PCell.z;
-                float line = 1.0 - smoothstep(ow * 0.5, ow * 1.3, abs(G));
+                float edgeL = 1.0 - smoothstep(ow * 0.5, ow * 1.3, abs(G));
                 float inside = 1.0 - smoothstep(-0.8, 0.8, G);
                 float3 black = float3(0.006, 0.004, 0.011);
                 float3 glyphC = lerp(float3(0.12, 0.1, 0.17), float3(0.42, 0.38, 0.52), gd);
                 float3 lineC = float3(0.46, 0.42, 0.58);
                 float3 col = lerp(black, glyphC, ink);
-                col = lerp(col, lineC, line);
-                float a = saturate(max(inside, max(line, ink * fleck * 1.6)));
+                col = lerp(col, lineC, edgeL);
+                float a = saturate(max(inside, max(edgeL, ink * fleck * 1.6)));
                 return float4(col, a * alive * saturate(g * 2.0));
             }
             ENDCG
