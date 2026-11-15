@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.42 · Unity";
+        public const string VERSION = "beta 0.43 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -1010,7 +1010,7 @@ namespace AsciiHero
             {
                 if (!p.began) continue;
                 // floating stick: its centre appears under the finger anywhere in the left part of the screen
-                if (world && (invOpen || menuFromWorld || perfRun)) p.owner = "ui";
+                if (world && (invOpen || menuFromWorld || perfRun || InUi(p.pos))) p.owner = "ui";      // the log and its buttons come before the controls
                 else if (world && PinchPartner(p)) p.owner = "cam";
                 else if (world && p.pos.x < Screen.width * 0.5f && stickId == int.MinValue)
                 {   // the stick: invisible, its centre where the finger came down; a tap just before (close by) means run

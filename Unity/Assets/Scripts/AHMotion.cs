@@ -403,7 +403,7 @@ namespace AsciiHero
             for (int i = 0; i < L.len; i++) { int f = a + i, p = a + (i + L.len - 1) % L.len; if (CON[p * 2] < 0.5f && CON[f * 2] >= 0.5f) { L.off = i; break; } }   // phase 0 = left foot lands
             return L;
         }
-        static void PrepLoops() { if (LIdle != null) return; LIdle = Prep(10493, 10583); LIdleF = Prep(10583, 10663); LWalk = Prep(2, 41); LRun = Prep(7851, 7872); }
+        static void PrepLoops() { if (LIdle != null) return; LIdle = Prep(10493, 10583); LIdleF = Prep(10583, 10663); LWalk = Prep(8, 48); LRun = Prep(7851, 7872); }
         Quaternion[] lq, q2, q3; float phase, idlePh, wWalk, wRun;
         readonly float[] c2 = new float[2], c3 = new float[2], cTmp = new float[2];
         void SampleLoop(Loop L, float ph, Quaternion[] oq, ref Vector3 oro, float[] ocon)
@@ -411,7 +411,7 @@ namespace AsciiHero
             int nb = MotionDB.nb; float pos = (Mathf.Repeat(ph, 1f) * L.len + L.off) % L.len, W = Mathf.Min(5f, L.len / 3f);
             SamplePose(L.a + pos, oq, ref oro, ocon);
             oro.x -= L.dx * pos / L.len + L.mx; oro.z -= L.dz * pos / L.len + L.mz;
-            if (pos > L.len - W)
+            if (pos > L.len - W && L.a + pos - L.len >= 0)       // (the frames before the cycle are its own end, one cycle earlier)
             {
                 // cross-fade the end of the cycle into its start: a seamless loop
                 float t = (pos - (L.len - W)) / W, u = t * t * (3 - 2 * t);
