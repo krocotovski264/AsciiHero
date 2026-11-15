@@ -37,6 +37,8 @@ Shader "AsciiHero/Water"
             SAMPLER(ascii_point_clamp_sampler); float _AsciiDepthLit;
             float _AsciiRows, _AsciiTime; float4 _GlyphInk[224];
             float4 _AsciiWind; float4 _WaterRip[8]; float4 _MoonDir;
+            float4 _WaterBody[16]; float _WaterBodyN; float4 _WaterTrees[8]; float _WaterTreeN;
+            TEXTURE2D(_AsciiSkyMap); SAMPLER(sampler_AsciiSkyMap);
 
             float WHash(float2 p) { p = frac(p * float2(123.34, 456.21)); p += dot(p, p + 45.32); return frac(p.x * p.y); }
             float WNoise(float2 p)
@@ -92,14 +94,41 @@ Shader "AsciiHero/Water"
                 float3 N = normalize(float3(-(w.y * 0.045 + rsl.x * 0.035), 1.0, -(w.z * 0.045 + rsl.y * 0.035)));
                 float3 R = reflect(V, N);
                 float fres = 0.35 + 0.65 * pow(1.0 - saturate(dot(-V, N)), 3.0);
-                float3 M = normalize(_MoonDir.xyz);
-                float md = acos(clamp(dot(R, M), -1.0, 1.0));
-                float moon = md < 0.062 ? 1.0 : 0.0, halo = (1.0 - smoothstep(0.07, 0.22, md)) * (1.0 - moon);
-                // stars: the reflected direction picks a cell of a star map; a star shows in few of them, and it twinkles
-                float2 sd = R.xz / max(R.y, 0.15) * 52.0;
-                float2 sc = floor(sd), sf = frac(sd);
-                float sh = WHash(sc + 17.0), tw = 0.78 + 0.22 * sin(t * (2.0 + 3.0 * WHash(sc + 3.0)) + sh * 40.0);
-                float star = sh > 0.955 && R.y > 0.05 && length(sf - 0.5) < 0.42 ? tw * (0.5 + 0.5 * WHash(sc + 9.0)) : 0;
+                // the sky in the reflection: looked up in the night-sky map by the reflected direction (the moon, its halo,
+                // the stars and the Milky Way are painted in it)
+                float2 skyUV = float2(atan2(R.x, R.z) / 6.2832 + 0.5, saturate(asin(saturate(R.y)) / 1.5708));
+                float3 sky = SAMPLE_TEXTURE2D_LOD(_AsciiSkyMap, sampler_AsciiSkyMap, skyUV, 0.6).rgb;
+                // what else the reflected ray meets first: the hero (spheres along his bones) and the trees (trunk and two
+                // spheres of crown each). Seen from the water, a crown is seen from below: leaves with gaps of sky in them.
+                float hitT = 1e5; int hitK = 0; float3 hitP = 0;
+                [loop] for (int b = 0; b < 16; b++)
+                {
+                    if (b >= (int)_WaterBodyN) break;
+                    float4 sp = _WaterBody[b]; if (sp.w <= 0.0) continue;
+                    float3 oc = sp.xyz - p; float tc = dot(oc, R); if (tc <= 0.0) continue;
+                    float d2 = dot(oc, oc) - tc * tc; if (d2 > sp.w * sp.w) continue;
+                    float th = tc - sqrt(sp.w * sp.w - d2); if (th > 0.0 && th < hitT) { hitT = th; hitK = 1; }
+                }
+                [loop] for (int q = 0; q < 8; q++)
+                {
+                    if (q >= (int)_WaterTreeN) break;
+                    float4 tr = _WaterTrees[q];            // x, z, trunk height, crown radius
+                    // trunk: a vertical cylinder
+                    float2 o2 = p.xz - tr.xy, d2v = R.xz; float a2 = dot(d2v, d2v), b2 = dot(o2, d2v), c2 = dot(o2, o2) - 0.03;
+                    float disc = b2 * b2 - a2 * c2;
+                    if (disc > 0.0 && a2 > 1e-5) { float tt = (-b2 - sqrt(disc)) / a2; float yy = p.y + tt * R.y; if (tt > 0.0 && yy < tr.z + 0.3 && tt < hitT) { hitT = tt; hitK = 2; } }
+                    // crown: two spheres, the lower one wider
+                    [unroll] for (int c = 0; c < 2; c++)
+                    {
+                        float3 cc = float3(tr.x, tr.z + (c == 0 ? 0.65 : 1.35), tr.y); float rr = tr.w * (c == 0 ? 1.0 : 0.72);
+                        float3 oc = cc - p; float tc = dot(oc, R); if (tc <= 0.0) continue;
+                        float d2 = dot(oc, oc) - tc * tc; if (d2 > rr * rr) continue;
+                        float th = tc - sqrt(rr * rr - d2);
+                        float3 hp = p + R * th;
+                        float leaf = WNoise(hp.xz * 7.0 + hp.y * 3.0) * 0.6 + WNoise(hp.xz * 17.0 - hp.y * 5.0) * 0.4;
+                        if (leaf > 0.42 && th > 0.0 && th < hitT) { hitT = th; hitK = 3; hitP = hp; }       // (a gap in the leaves lets the sky through)
+                    }
+                }
                 // what stands in the water (the hero) hides the cells behind it
                 float3 pVS = TransformWorldToView(p);
                 float4 clip = TransformWViewToHClip(pVS);
@@ -111,17 +140,8 @@ Shader "AsciiHero/Water"
                 float row, gi; float3 col;
                 float3 deep = float3(0.09, 0.17, 0.34), crest = float3(0.33, 0.52, 0.78);
                 float lvl = saturate(0.42 + w.x * 4.2 + ring * 1.3 + foam * 0.8);
-                if (moon > 0.5)
-                {
-                    row = 9.0; gi = md < 0.03 ? 7.0 : 5.0;
-                    col = float3(1.0, 0.96, 0.82) * (1.1 + 0.5 * fres);
-                }
-                else if (halo > 0.25 && WHash(floor(p.xz * 10.0) + 0.5) < halo * 1.1)
-                {
-                    row = 9.0; gi = halo > 0.6 ? 3.0 : (halo > 0.4 ? 2.0 : 1.0);
-                    col = float3(0.85, 0.86, 0.95) * (0.35 + 0.6 * halo) * fres;
-                }
-                else if (best > 0.26)
+                float skyL = dot(sky, float3(0.3, 0.5, 0.2));
+                if (best > 0.26)
                 {
                     // a ring: drawn with line characters following its curve, as a circle would be drawn in ASCII
                     float2 tg = float2(-bdv.y, bdv.x);                       // tangent on the ground
@@ -130,10 +150,30 @@ Shader "AsciiHero/Water"
                     row = 12.0; gi = an < 0.39 || an > 2.75 ? 1.0 : an < 1.18 ? 2.0 : an < 1.96 ? 0.0 : 3.0;     // - / | \
                     col = float3(0.8, 0.8, 0.8) * (0.6 + 0.6 * saturate(best));          // light grey
                 }
-                else if (star > 0.15 && ring < 0.25)
+                else if (hitK == 1)
+                {   // the hero, upside down in the water: darker than himself, his armour catching a little light
+                    row = 2.0; gi = 11.0 + floor(WHash(floor(p.xz * 9.0)) * 2.0);
+                    col = float3(0.32, 0.34, 0.42) * (0.75 + 0.35 * fres) + lit * 0.6;
+                }
+                else if (hitK == 2)
                 {
-                    row = 9.0; gi = star > 0.7 ? 2.0 : (star > 0.4 ? 3.0 : 1.0);
-                    col = float3(0.82, 0.88, 1.0) * (0.5 + 0.7 * star) * fres;
+                    row = 7.0; gi = 3.0;                                  // '|'
+                    col = float3(0.30, 0.19, 0.11) * (0.8 + 0.3 * fres);
+                }
+                else if (hitK == 3)
+                {
+                    row = 11.0; gi = 13.0 + floor(WHash(floor(p.xz * 11.0)) * 2.0);      // '%' '#'
+                    col = float3(0.10, 0.26, 0.13) * (0.8 + 0.4 * fres) + sky * 0.15;
+                }
+                else if (skyL > 0.5 && ring < 0.3)
+                {   // the moon
+                    row = 9.0; gi = skyL > 0.85 ? 7.0 : skyL > 0.7 ? 6.0 : 5.0;
+                    col = sky * (1.05 + 0.45 * fres);
+                }
+                else if (skyL > 0.09 && ring < 0.25 && best < 0.26)
+                {   // stars, the halo, the brighter parts of the Milky Way
+                    row = 9.0; gi = skyL > 0.32 ? 3.0 : skyL > 0.17 ? 2.0 : 1.0;
+                    col = sky * (1.4 + 0.8 * fres);
                 }
                 else
                 {
@@ -142,6 +182,7 @@ Shader "AsciiHero/Water"
                     if (ring > 0.35) gi = 9.0;
                     col = lerp(deep, crest, lvl) * (0.55 + 0.6 * lvl) + lit * 1.6;
                     col += float3(0.55, 0.55, 0.55) * (saturate(ring) * 0.55 + foam * 0.45);
+                    col += sky * 0.5 * fres;
                     col *= 0.75 + 0.35 * fres;
                 }
                 float sceneZ = dz > 1e-4 ? dz * 12.0 : 1e5;

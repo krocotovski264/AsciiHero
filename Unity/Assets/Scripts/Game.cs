@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.40 · Unity";
+        public const string VERSION = "beta 0.41 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -555,6 +555,50 @@ namespace AsciiHero
             moon.transform.rotation = Quaternion.LookRotation(-md);
             Shader.SetGlobalVector("_MoonDir", md);
             Shader.SetGlobalVectorArray("_WaterRip", ripples);
+            Shader.SetGlobalVectorArray("_WaterBody", waterBody); Shader.SetGlobalFloat("_WaterBodyN", 0);
+            Shader.SetGlobalVectorArray("_WaterTrees", waterTrees); Shader.SetGlobalFloat("_WaterTreeN", 0);
+            // the night sky the lake mirrors (see pipeline/sky/make_sky.py): azimuth across, elevation up
+            try
+            {
+                var ta = Resources.Load<TextAsset>("skymap");
+                var sky = new Texture2D(2, 2, TextureFormat.RGBA32, true, true);
+                if (ta != null && sky.LoadImage(ta.bytes, false)) { sky.wrapModeU = TextureWrapMode.Repeat; sky.wrapModeV = TextureWrapMode.Clamp; sky.filterMode = FilterMode.Trilinear; sky.Apply(true, true); Shader.SetGlobalTexture("_AsciiSkyMap", sky); }
+                else Debug.LogWarning("Карта неба не загрузилась");
+            }
+            catch (System.Exception e) { Debug.LogException(e); }
+        }
+        // what the lake mirrors besides the sky: the hero (spheres along his bones) and the trees
+        readonly Vector4[] waterBody = new Vector4[16], waterTrees = new Vector4[8];
+        static readonly string[] WB_BONES = { "head", "spine03", "spine05", "root", "lowerarm01.L", "lowerarm01.R", "wrist.L", "wrist.R",
+                                              "lowerleg01.L", "lowerleg01.R", "foot.L", "foot.R", "upperarm01.L", "upperarm01.R", "upperleg01.L", "upperleg01.R" };
+        static readonly float[] WB_R = { 0.12f, 0.19f, 0.17f, 0.17f, 0.07f, 0.07f, 0.06f, 0.06f, 0.09f, 0.09f, 0.08f, 0.08f, 0.08f, 0.08f, 0.11f, 0.11f };
+        static readonly int[] WB_LIMB = { 0, -1, -1, -1, 1, 2, 1, 2, 3, 4, 3, 4, 1, 2, 3, 4 };
+        void UpdateWaterMirror()
+        {
+            int nb = 0, nt = 0;
+            if (loc == field && field != null && (new Vector2(pos.x - Field.LAKE.x, pos.z - Field.LAKE.z)).magnitude < 9f && hero != null)
+            {
+                var hb = hero.human; float s = cfg.height / 180f;
+                for (int i = 0; i < WB_BONES.Length; i++)
+                {
+                    var b = hb.Bone(WB_BONES[i]); int l = WB_LIMB[i];
+                    if (b == null || (l >= 0 && !limbs[l])) { waterBody[i] = Vector4.zero; continue; }
+                    Vector3 c = b.position;
+                    // the upper arm and thigh spheres sit half way down the bone
+                    if (i >= 12) { var ch = b.childCount > 0 ? b.GetChild(0) : null; if (ch != null) c = (c + ch.position) * 0.5f; }
+                    waterBody[i] = new Vector4(c.x, c.y, c.z, WB_R[i] * s);
+                }
+                nb = WB_BONES.Length;
+            }
+            if (loc == field && field != null)
+                foreach (var t in field.trees)
+                {
+                    if (nt >= waterTrees.Length) break;
+                    if (Field.LakeK(t.x, t.y) > 4f) continue;          // too far from the lake to show in it
+                    waterTrees[nt++] = t;
+                }
+            Shader.SetGlobalVectorArray("_WaterBody", waterBody); Shader.SetGlobalFloat("_WaterBodyN", nb);
+            Shader.SetGlobalVectorArray("_WaterTrees", waterTrees); Shader.SetGlobalFloat("_WaterTreeN", nt);
         }
         void SetupField()
         {
@@ -1274,6 +1318,7 @@ namespace AsciiHero
                     rippleT = sp > 0.3f ? Mathf.Lerp(0.42f, 0.24f, Mathf.Clamp01(sp / 4f)) : 1.1f + Random.value;
                 }
                 Shader.SetGlobalVectorArray("_WaterRip", ripples);
+                UpdateWaterMirror();
             }
             if (respawnT > 0) { respawnT -= dt; if (respawnT <= 0) { RestoreBody(); pos = loc.spawn; player.ResetSim(); } }
             // grass: the hero and a point trailing behind him push the blades aside

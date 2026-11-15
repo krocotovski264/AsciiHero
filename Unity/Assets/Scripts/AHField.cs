@@ -16,6 +16,7 @@ namespace AsciiHero
     public class Field : Location
     {
         public readonly List<ArmourPile> piles = new List<ArmourPile>();
+        public readonly List<Vector4> trees = new List<Vector4>();     // x, z, trunk height, crown radius (the lake mirrors them)
         const float HX = 10, HZ = 8;
         // the lake in the bottom right corner of the view (the camera looks along -z, so screen right is -x, down is +z)
         public static readonly Vector3 LAKE = new Vector3(-6.2f, 0, 4.4f); public const float LAKE_RX = 3.1f, LAKE_RZ = 2.4f, WATER_Y = 0.06f;
@@ -127,6 +128,7 @@ namespace AsciiHero
                 MeshGen.Obj(MeshGen.Cylinder(r, r * 0.7f, h, 8), mats["WOOD"], T, new Vector3(p.x, h / 2, p.y), Quaternion.identity, true, "Trunk");
                 for (int k = 0; k < 3; k++) MeshGen.Obj(MeshGen.Cylinder(0.62f - k * 0.15f, 0, 0.9f, 9), mats["LEAF"], T, new Vector3(p.x, h + 0.25f + k * 0.55f, p.y), Quaternion.identity, true, "Crown");
                 colliders.Add(Collider2.Circle(p.x, p.y, r + 0.2f));
+                trees.Add(new Vector4(p.x, p.y, h, 0.62f));
             }
             // rocks
             for (int i = 0; i < 12; i++)
