@@ -10,6 +10,7 @@ Shader "AsciiHero/Glyph"
         _AsciiActor ("Actor boost", Float) = 0
         _GlyphSmoke ("Smoke body", Float) = 0
         _GlyphCloth ("Cloth", Float) = 0
+        _GlyphSee ("See-through wall", Float) = 0
         _GlyphCell ("Glyph size (m)", Vector) = (0.017, 0.028, 0, 0)
     }
     SubShader
@@ -34,8 +35,20 @@ Shader "AsciiHero/Glyph"
                 float _GlyphSmoke;
                 float4 _GlyphCell;
                 float _GlyphCloth;
+                float _GlyphSee;
             CBUFFER_END
             TEXTURE2D(_AsciiAtlas); SAMPLER(sampler_AsciiAtlas);
+            // see-through (same as AsciiHero/Lit): the characters of a wall in front of the hero thin out and dim
+            float4 _SeeHero; float _SeeFade;
+            float SeeK(float3 pWS)
+            {
+                if (_SeeHero.w <= 0.0 || _SeeFade <= 0.001) return 0.0;
+                float4 hc = TransformWorldToHClip(_SeeHero.xyz), pc = TransformWorldToHClip(pWS);
+                float2 d = (pc.xy / pc.w - hc.xy / hc.w) * 0.5; d.x *= _ScreenParams.x / _ScreenParams.y;
+                float hz = -TransformWorldToView(_SeeHero.xyz).z, pz = -TransformWorldToView(pWS).z;
+                float front = saturate((hz - pz - 0.25) / 0.6);
+                return front * (1.0 - smoothstep(_SeeHero.w * 0.45, _SeeHero.w, length(d))) * _SeeFade;
+            }
             TEXTURE2D(_AsciiLitTex); SAMPLER(sampler_AsciiLitTex);
             TEXTURE2D(_AsciiNDTex); SAMPLER(sampler_AsciiNDTex);
             SAMPLER(ascii_point_clamp_sampler);
@@ -190,7 +203,9 @@ Shader "AsciiHero/Glyph"
                 float sceneZ = dz > 1e-4 ? dz * 12.0 : 1e5;
                 float myZ = -pVS.z;
                 bool inside = all(suv >= 0.0) && all(suv <= 1.0);
-                bool vis = (scat || smkA > 0.03) ? (lodKeep && !gone && inside) : lodKeep && !gone && ember < 0.999 && dot(nVS, toCam) > -0.05 - ember - _GlyphPuff * 4.0 - (_DashSpin.w != 0.0 ? 4.0 : 0.0) && myZ <= sceneZ + 0.008 + 0.0035 * myZ && inside;
+                float seeK = _GlyphSee > 0.5 ? SeeK(pWS) : 0.0;
+                bool seeGone = frac(i.seed.x * 13.37 + 0.21) < seeK * 0.9;
+                bool vis = !seeGone && ((scat || smkA > 0.03) ? (lodKeep && !gone && inside) : lodKeep && !gone && ember < 0.999 && dot(nVS, toCam) > -0.05 - ember - _GlyphPuff * 4.0 - (_DashSpin.w != 0.0 ? 4.0 : 0.0) && myZ <= sceneZ + 0.008 + 0.0035 * myZ && inside);
                 float3 lit = SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, sampler_AsciiLitTex, suv, 0).rgb;
                 float3 col = _AsciiLinear > 0.5 ? pow(max(lit, 0.0), 1.0 / 2.2) : max(lit, 0.0);
                 float lum = dot(col, float3(0.299, 0.587, 0.114));
@@ -212,6 +227,7 @@ Shader "AsciiHero/Glyph"
                     gi = floor(lerp(gi, MIN_GLYPH + 3.0 * frac(i.seed.x * 4.3), smkA));
                 }
                 if (scat) { o.col = float3(0.62, 0.67, 0.76) * (0.5 + 0.5 * frac(i.seed.x * 5.1)); gi = MIN_GLYPH + floor(frac(i.seed.x * 9.7) * (15.99 - MIN_GLYPH)); }
+                o.col *= 1.0 - 0.5 * seeK;
                 if (ember > 0.0) { o.col = lerp(o.col, float3(1.6, 0.62, 0.12), min(1.0, ember * 2.0)) * (1.0 - ember * ember); gi = floor(lerp(gi, 2.0, ember)); }
                 o.gi = gi;
                 // the quad covers only the part of the cell the character's ink is in: the empty margins of a cell were most

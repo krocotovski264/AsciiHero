@@ -18,6 +18,7 @@ Shader "AsciiHero/Lit"
         _GlyphCell ("Glyph cell (m)", Vector) = (0.03, 0.05, 0, 0)
         _Cloth ("Cloth", Float) = 0
         _AsciiFlat ("Wall or floor (no outline)", Float) = 0
+        _SeeThrough ("Shows the hero through (cave walls)", Float) = 0
         [Enum(UnityEngine.Rendering.CullMode)] _Cull ("Cull", Float) = 2
     }
     SubShader
@@ -40,9 +41,30 @@ Shader "AsciiHero/Lit"
             float4 _GlyphCell;
             float _Cloth;
             float _AsciiFlat;
+            float _SeeThrough;
         CBUFFER_END
         TEXTURE2D(_MainTex); SAMPLER(sampler_MainTex);
         float _AsciiNDPass;
+        // ---- see-through: a wall in front of the hero dissolves in a circle around him on the screen (dithered, so it
+        // thins out gradually toward the middle instead of vanishing; _SeeFade brings the effect in and out over time) ----
+        float4 _SeeHero;   // xyz = the hero's chest (world), w = circle radius in screen heights (0 = off)
+        float _SeeFade;
+        float SeeK(float3 pWS)
+        {
+            if (_SeeHero.w <= 0.0 || _SeeFade <= 0.001) return 0.0;
+            float4 hc = TransformWorldToHClip(_SeeHero.xyz), pc = TransformWorldToHClip(pWS);
+            float2 d = (pc.xy / pc.w - hc.xy / hc.w) * 0.5; d.x *= _ScreenParams.x / _ScreenParams.y;
+            float hz = -TransformWorldToView(_SeeHero.xyz).z, pz = -TransformWorldToView(pWS).z;
+            float front = saturate((hz - pz - 0.25) / 0.6);
+            return front * (1.0 - smoothstep(_SeeHero.w * 0.45, _SeeHero.w, length(d))) * _SeeFade;
+        }
+        float Bayer4(float2 pix)
+        {
+            static const float M[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
+            int2 q = int2(fmod(floor(pix), 4.0));
+            return (M[q.y * 4 + q.x] + 0.5) / 16.0;
+        }
+        void SeeClip(float3 pWS, float2 pix) { if (_SeeThrough > 0.5) clip(Bayer4(pix) - SeeK(pWS) * 0.94); }
         float4 _DashShift;   // per renderer (world): during the dash the armour pieces lag behind the body
         float4 _DashSpin;    // per renderer: xyz = axis, w = angle; the piece tumbles about _DashPivot while it flies
         float4 _DashPivot;
@@ -152,6 +174,7 @@ Shader "AsciiHero/Lit"
 
             half4 frag (Varyings i, bool front : SV_IsFrontFace) : SV_Target
             {
+                SeeClip(i.positionWS, i.positionCS.xy);
                 float3 nWS = normalize(i.normalWS);
                 if (!front) nWS = -nWS;
                 if (_AsciiNDPass > 0.5)
@@ -242,9 +265,9 @@ Shader "AsciiHero/Lit"
             #pragma vertex vert
             #pragma fragment frag
             struct Attributes { float4 positionOS : POSITION; };
-            struct Varyings { float4 positionCS : SV_POSITION; };
-            Varyings vert (Attributes i) { Varyings o; o.positionCS = TransformWorldToHClip(DashWS(ClothWS(TransformObjectToWorld(i.positionOS.xyz), i.positionOS.xyz))); return o; }
-            half frag (Varyings i) : SV_Target { return i.positionCS.z; }
+            struct Varyings { float4 positionCS : SV_POSITION; float3 positionWS : TEXCOORD0; };
+            Varyings vert (Attributes i) { Varyings o; o.positionWS = DashWS(ClothWS(TransformObjectToWorld(i.positionOS.xyz), i.positionOS.xyz)); o.positionCS = TransformWorldToHClip(o.positionWS); return o; }
+            half frag (Varyings i) : SV_Target { SeeClip(i.positionWS, i.positionCS.xy); return i.positionCS.z; }
             ENDHLSL
         }
 
@@ -259,9 +282,9 @@ Shader "AsciiHero/Lit"
             #pragma vertex vert
             #pragma fragment frag
             struct Attributes { float4 positionOS : POSITION; float3 normalOS : NORMAL; };
-            struct Varyings { float4 positionCS : SV_POSITION; float3 normalWS : TEXCOORD0; };
-            Varyings vert (Attributes i) { Varyings o; o.positionCS = TransformWorldToHClip(DashWS(ClothWS(TransformObjectToWorld(i.positionOS.xyz), i.positionOS.xyz))); o.normalWS = TransformObjectToWorldNormal(i.normalOS); return o; }
-            half4 frag (Varyings i) : SV_Target { return half4(NormalizeNormalPerPixel(i.normalWS), 0); }
+            struct Varyings { float4 positionCS : SV_POSITION; float3 normalWS : TEXCOORD0; float3 positionWS : TEXCOORD1; };
+            Varyings vert (Attributes i) { Varyings o; o.positionWS = DashWS(ClothWS(TransformObjectToWorld(i.positionOS.xyz), i.positionOS.xyz)); o.positionCS = TransformWorldToHClip(o.positionWS); o.normalWS = TransformObjectToWorldNormal(i.normalOS); return o; }
+            half4 frag (Varyings i) : SV_Target { SeeClip(i.positionWS, i.positionCS.xy); return half4(NormalizeNormalPerPixel(i.normalWS), 0); }
             ENDHLSL
         }
     }

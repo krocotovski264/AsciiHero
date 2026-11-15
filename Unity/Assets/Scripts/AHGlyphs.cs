@@ -12,15 +12,15 @@ namespace AsciiHero
         public static int count;
         static readonly Dictionary<string, Material> MATS = new Dictionary<string, Material>();
 
-        static Material GlyphMaterial(float row, Vector4 cell, float actor, float smoke, float cloth = 0)
+        static Material GlyphMaterial(float row, Vector4 cell, float actor, float smoke, float cloth = 0, float see = 0)
         {
-            string key = row + ":" + cell.x + ":" + actor + ":" + smoke + ":" + cloth;
+            string key = row + ":" + cell.x + ":" + actor + ":" + smoke + ":" + cloth + ":" + see;
             Material m;
             if (MATS.TryGetValue(key, out m)) return m;
             var sh = Shader.Find("AsciiHero/Glyph");
             if (sh == null) { Debug.LogError("AsciiHero/Glyph shader not found"); return null; }
             m = new Material(sh) { name = "Glyph " + key };
-            m.SetFloat("_AsciiRow", row); m.SetFloat("_AsciiActor", actor); m.SetVector("_GlyphCell", cell); m.SetFloat("_GlyphSmoke", smoke); m.SetFloat("_GlyphCloth", cloth);
+            m.SetFloat("_AsciiRow", row); m.SetFloat("_AsciiActor", actor); m.SetVector("_GlyphCell", cell); m.SetFloat("_GlyphSmoke", smoke); m.SetFloat("_GlyphCloth", cloth); m.SetFloat("_GlyphSee", see);
             MATS[key] = m; return m;
         }
 
@@ -41,7 +41,7 @@ namespace AsciiHero
                 var smr = r as SkinnedMeshRenderer;
                 Mesh src = smr != null ? smr.sharedMesh : (r.GetComponent<MeshFilter>() != null ? r.GetComponent<MeshFilter>().sharedMesh : null);
                 if (src == null) continue;
-                var gm = GlyphMaterial(mat.GetFloat("_AsciiRow"), mat.GetVector("_GlyphCell"), mat.GetFloat("_AsciiActor"), mat.HasProperty("_GlyphSmoke") ? mat.GetFloat("_GlyphSmoke") : 0, mat.HasProperty("_Cloth") ? mat.GetFloat("_Cloth") : 0);
+                var gm = GlyphMaterial(mat.GetFloat("_AsciiRow"), mat.GetVector("_GlyphCell"), mat.GetFloat("_AsciiActor"), mat.HasProperty("_GlyphSmoke") ? mat.GetFloat("_GlyphSmoke") : 0, mat.HasProperty("_Cloth") ? mat.GetFloat("_Cloth") : 0, mat.HasProperty("_SeeThrough") ? mat.GetFloat("_SeeThrough") : 0);
                 if (gm == null) return made;
                 int[] cum; var mesh = Sample(src, mat.GetVector("_GlyphCell"), smr != null, limbOfBone, out cum);
                 if (mesh == null) continue;

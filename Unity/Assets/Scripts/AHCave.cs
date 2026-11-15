@@ -69,9 +69,12 @@ namespace AsciiHero
             return k;
         }
 
-        // ---- walls (rock blobs); the tall ones between the camera and the hero sink so he stays in view ----
-        class Blob { public Transform t; public Vector3 p; public float h, cur = 1; public bool tall; }
-        readonly List<Blob> blobs = new List<Blob>();
+        // ---- walls: continuous rock faces (a scanned cliff, straightened); a wall between the camera and the hero
+        // does not sink: it starts to show through around him (dithered, AsciiHero/Lit + Glyph, _SeeThrough) ----
+        struct WallSeg { public Vector2 a, b; public float h; }
+        readonly List<WallSeg> wallSegs = new List<WallSeg>();
+        float seeFade;
+        static Vector3[] RF_V; static int[] RF_T;
         // ---- light that lives ----
         class Glow { public Light l; public float baseI, ph; public List<Renderer> caps = new List<Renderer>(); }
         readonly List<Glow> glows = new List<Glow>(); Light ember; MaterialPropertyBlock mpb; Color glowEm;
@@ -142,14 +145,19 @@ namespace AsciiHero
             foreach (var p in pools) { var pp = p; Water(T, mats, (x, z) => PoolK(pp, x, z), p.c, Mathf.Max(p.rx, p.rz) + 0.3f, new Vector4(1, 0, 0, p.depth > 0.1f ? 1 : 0)); }
 
             // ---- walls: the outline, and the two dividing walls with passages ----
-            for (float x = -HX; x <= HX + 0.01f; x += 1.35f) { WallBlob(T, mats, x + Rr(-0.2f, 0.2f), -HZ - Rr(0.1f, 0.5f), true); WallBlob(T, mats, x + Rr(-0.2f, 0.2f), HZ + Rr(0.1f, 0.4f), false); }
-            for (float z = -HZ + 1.0f; z <= HZ - 0.6f; z += 1.35f)
-            {
-                if (!(z > 3.9f && z < 5.2f)) WallBlob(T, mats, HX + Rr(0.1f, 0.5f), z + Rr(-0.2f, 0.2f), true);        // (the crevice at z 4.5: the entrance light)
-                WallBlob(T, mats, -HX - Rr(0.1f, 0.5f), z + Rr(-0.2f, 0.2f), true);
+            var rock = new Material(mats["WETROCK"]) { name = "CaveWall" }; rock.SetFloat("_SeeThrough", 1); rock.SetFloat("_Cull", 0);
+            RockWall(T, mats, rock, new Vector2(-HX - 0.6f, -HZ - 0.15f), new Vector2(HX + 0.6f, -HZ - 0.15f), Vector2.up, 2.6f, 3.3f);       // far wall
+            RockWall(T, mats, rock, new Vector2(-HX - 0.6f, HZ + 0.35f), new Vector2(HX + 0.6f, HZ + 0.35f), Vector2.up, 1.7f, 2.3f);          // near wall (faces the camera)
+            RockWall(T, mats, rock, new Vector2(-HX - 0.15f, -HZ - 0.3f), new Vector2(-HX - 0.15f, HZ + 0.3f), Vector2.right, 2.4f, 3.1f);
+            RockWall(T, mats, rock, new Vector2(HX + 0.15f, -HZ - 0.3f), new Vector2(HX + 0.15f, 3.9f), Vector2.left, 2.4f, 3.1f);
+            RockWall(T, mats, rock, new Vector2(HX + 0.15f, 5.2f), new Vector2(HX + 0.15f, HZ + 0.3f), Vector2.left, 2.4f, 3.1f);         // (the crevice at z 4.5: the entrance light)
+            foreach (var r in new[] { new Vector2(-HZ, -5.6f), new Vector2(-2.4f, 2.4f), new Vector2(5.6f, HZ) })
+            {   // the wall across the middle (x 0), seen from both sides
+                RockWall(T, mats, rock, new Vector2(0.25f, r.x), new Vector2(0.25f, r.y), Vector2.right, 2.0f, 2.6f);
+                RockWall(T, mats, rock, new Vector2(-0.25f, r.x), new Vector2(-0.25f, r.y), Vector2.left, 2.0f, 2.6f, false);
             }
-            for (float z = -HZ + 0.6f; z <= HZ - 0.6f; z += 1.3f) if (!(z > -5.6f && z < -2.4f) && !(z > 2.4f && z < 5.6f)) WallBlob(T, mats, Rr(-0.25f, 0.25f), z, true, 0.85f);
-            for (float x = -HX + 0.6f; x <= HX - 0.6f; x += 1.3f) if (!(x > 3.4f && x < 6.6f) && !(x > -4.6f && x < -1.4f) && Mathf.Abs(x) > 0.7f) WallBlob(T, mats, x, Rr(-0.25f, 0.25f), true, 0.85f);
+            foreach (var r in new[] { new Vector2(-HX, -4.6f), new Vector2(-1.4f, 3.4f), new Vector2(6.6f, HX) })
+                RockWall(T, mats, rock, new Vector2(r.x, 0.1f), new Vector2(r.y, 0.1f), Vector2.up, 2.0f, 2.6f);
 
             // ---- the grotto: stalagmites, stalactites, sharp rocks, moss ----
             for (int i = 0; i < 16; i++)
@@ -275,19 +283,42 @@ namespace AsciiHero
             }
             return new Vector2(Rr(x0, x1), Rr(z0, z1));
         }
-        void WallBlob(Transform T, Mats mats, float x, float z, bool tall, float scale = 1f)
+        /// one piece of the rock face, the size baked into the vertices (the characters are laid out on the mesh as it
+        /// is): len wide, h high, its relief d deep; local +z is the face
+        static Mesh RockPiece(float len, float h, float d, bool flip)
         {
-            if (WaterK(x, z) < 1.3f) return;          // (the stream runs out under the walls)
-            float r = Rr(0.95f, 1.25f) * scale, h = tall ? Rr(2.2f, 3.0f) * scale : Rr(0.45f, 0.75f);
-            // (the size is baked into the vertices: the characters are laid out on the mesh as it is, so a stretched
-            // unit sphere would get them stretched apart)
-            var m = MeshGen.Sphere(1, 12, 6, Mathf.PI / 2); var v = m.vertices; float sx = r * Rr(0.9f, 1.1f), sz = r * Rr(0.9f, 1.1f);
-            for (int i = 0; i < v.Length; i++) { float n = 1 + 0.08f * Mathf.Sin(v[i].x * 5 + x) * Mathf.Sin(v[i].z * 4 + z); v[i] = new Vector3(v[i].x * sx * n, v[i].y * h, v[i].z * sz * n); }
-            m.vertices = v; m.RecalculateNormals(); m.RecalculateBounds(); MeshGen.AddGlyphUV(m, false);
-            var g = MeshGen.Obj(m, mats["WETROCK"], T, new Vector3(x, 0, z), Quaternion.Euler(0, Rr(0, 360), 0), true, "Wall");
-            colliders.Add(Collider2.Circle(x, z, r * 0.88f));
-            blobs.Add(new Blob { t = g.transform, p = new Vector3(x, 0, z), h = h, tall = tall && h > 1.2f });
-            if (Rnd() < 0.3f) Moss(T, mats, x + Rr(-0.3f, 0.3f), z + Rr(-0.3f, 0.3f), r * 0.7f, 0.01f);
+            if (RF_V == null)
+            {
+                var b = Resources.Load<TextAsset>("rockface").bytes;
+                int nv = System.BitConverter.ToInt32(b, 4), nt = System.BitConverter.ToInt32(b, 8), o = 12;
+                RF_V = new Vector3[nv]; RF_T = new int[nt * 3];
+                for (int i = 0; i < nv; i++, o += 12) RF_V[i] = new Vector3(System.BitConverter.ToSingle(b, o), System.BitConverter.ToSingle(b, o + 4), System.BitConverter.ToSingle(b, o + 8));
+                for (int i = 0; i < nt * 3; i++, o += 2) RF_T[i] = System.BitConverter.ToUInt16(b, o);
+            }
+            var v = new Vector3[RF_V.Length];
+            for (int i = 0; i < v.Length; i++) { var p = RF_V[i]; v[i] = new Vector3((flip ? -p.x : p.x) * len, p.y * h, p.z * d); }
+            var t = (int[])RF_T.Clone();
+            if (flip) for (int i = 0; i < t.Length; i += 3) { int x = t[i + 1]; t[i + 1] = t[i + 2]; t[i + 2] = x; }
+            var m = new Mesh { name = "rockface" }; m.vertices = v; m.uv = new Vector2[v.Length]; m.triangles = t;
+            m.RecalculateNormals(); m.RecalculateBounds(); MeshGen.AddGlyphUV(m, false);
+            return m;
+        }
+        /// a wall from a to b, its face turned to 'face': overlapping rock pieces (mirrored at random) + a row of colliders
+        void RockWall(Transform T, Mats mats, Material mat, Vector2 a, Vector2 b, Vector2 face, float h0, float h1, bool collide = true)
+        {
+            var dir = b - a; float L = dir.magnitude; dir /= L;
+            float yaw = Mathf.Atan2(face.x, face.y) * Mathf.Rad2Deg;
+            int n = Mathf.Max(1, Mathf.CeilToInt(L / 2.4f)); float seg = L / n, hMax = 0;
+            for (int k = 0; k < n; k++)
+            {
+                float len = seg * Rr(1.3f, 1.55f), h = Rr(h0, h1); hMax = Mathf.Max(hMax, h);
+                var c = a + dir * (seg * (k + 0.5f)) + face * Rr(-0.12f, 0.08f);
+                MeshGen.Obj(RockPiece(len, h, Mathf.Min(len, 3f) * Rr(0.8f, 1.1f), Rnd() < 0.5f), mat, T, new Vector3(c.x, -0.06f, c.y), Quaternion.Euler(0, yaw + Rr(-5, 5), 0), true, "Wall");
+                if (Rnd() < 0.35f) Moss(T, mats, c.x + face.x * 0.25f + dir.x * Rr(-0.8f, 0.8f), c.y + face.y * 0.25f + dir.y * Rr(-0.8f, 0.8f), Rr(0.3f, 0.5f), 0.01f);
+            }
+            if (!collide) return;
+            for (float s = 0; s <= L + 0.01f; s += 0.5f) { var p = a + dir * s - face * 0.2f; colliders.Add(Collider2.Circle(p.x, p.y, 0.5f)); }
+            wallSegs.Add(new WallSeg { a = a, b = b, h = hMax });
         }
         void Moss(Transform T, Mats mats, float x, float z, float r, float y)
         {
@@ -426,16 +457,28 @@ namespace AsciiHero
         }
         public override void Cutaway(Vector3 camOff)
         {
-            // a tall wall between the camera and the hero (in front of him on the screen) sinks to a stump
-            foreach (var b in blobs)
+            // is a wall between the camera and the hero? walk from him toward the camera (on the ground) and compare the
+            // heights of the walls crossed with the height of the line of sight there
+            var h2 = new Vector2(focus.x, focus.z); var c2 = new Vector2(camOff.x, camOff.z); float horiz = c2.magnitude;
+            bool hidden = false;
+            if (horiz > 1e-3f)
             {
-                if (!b.tall) continue;
-                float dz = b.p.z - focus.z, dx = Mathf.Abs(b.p.x - focus.x);
-                bool front = dz > -0.6f && dz < 4.6f && dx < 3.6f;
-                float want = front ? Mathf.Min(1f, 0.55f / b.h) : 1f;
-                b.cur += (want - b.cur) * 0.15f;
-                var s = b.t.localScale; s.y = b.cur; b.t.localScale = s;
+                c2 /= horiz; float tanP = camOff.y / horiz;
+                for (float t = 0.15f; t < 4.5f && !hidden; t += 0.15f)
+                {
+                    var q = h2 + c2 * t; float sight = 0.4f + t * tanP;
+                    foreach (var w in wallSegs)
+                    {
+                        if (w.h < sight) continue;
+                        var ab = w.b - w.a; float u = Mathf.Clamp01(Vector2.Dot(q - w.a, ab) / ab.sqrMagnitude);
+                        if ((w.a + ab * u - q).sqrMagnitude < 0.45f * 0.45f) { hidden = true; break; }
+                    }
+                }
             }
+            // the walls start to show through, then thin out (a second or so), and fill in again when he leaves
+            seeFade = Mathf.MoveTowards(seeFade, hidden ? 1f : 0f, Time.deltaTime * (hidden ? 1.6f : 2.2f));
+            Shader.SetGlobalVector("_SeeHero", new Vector4(focus.x, focus.y + 1.0f, focus.z, 0.2f));
+            Shader.SetGlobalFloat("_SeeFade", Mathf.SmoothStep(0f, 1f, seeFade));
         }
     }
 }
