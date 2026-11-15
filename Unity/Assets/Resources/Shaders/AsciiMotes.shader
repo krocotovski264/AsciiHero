@@ -5,6 +5,8 @@
 //  _MoteMode 2 - drops falling from the ceiling: each falls from _MoteParams.y to its point and is gone; one drop per
 //                _MoteParams.z seconds per point, the phase from seed.x (the game makes the ring on the water at the
 //                same moment)
+//  _MoteMode 3 - the shaft of a beam: faint streaks along the beam (/ | \ - by its direction on the screen), brightest
+//                on its axis, shimmering slowly as if dust drifted through it
 Shader "AsciiHero/Motes"
 {
     Properties
@@ -59,6 +61,16 @@ Shader "AsciiHero/Motes"
                     float ph = frac(t / (2.2 + 2.0 * frac(s * 4.3)) + s * 9.7);
                     bright = pow(saturate(sin(ph * 3.14159)), 6.0) * 0.9 + 0.08;
                     row = 9.0; gi = bright > 0.5 ? 2.0 : 1.0;          // * .
+                }
+                else if (_MoteMode > 2.5)
+                {   // the shaft of a beam
+                    float3 ax = normalize(TransformObjectToWorldDir(float3(0, 1, 0)));
+                    float2 sd = TransformWorldToViewDir(ax).xy; float ang = atan2(sd.y, sd.x);            // the beam on the screen
+                    float a8 = frac(ang / 3.14159 + 1.0);                                                  // 0..1 over half a turn
+                    gi = a8 < 0.125 || a8 >= 0.875 ? 1.0 : a8 < 0.375 ? 2.0 : a8 < 0.625 ? 0.0 : 3.0;     // - / | \ (row 12)
+                    row = 12.0;
+                    float shimmer = 0.75 + 0.25 * sin(t * (0.6 + frac(s * 3.3)) + s * 23.0 + lp.y * 9.0);
+                    bright = pow(saturate(1.0 - k), 1.6) * shimmer * smoothstep(0.0, 0.18, lp.y) * smoothstep(1.0, 0.7, lp.y) * (0.55 + 0.45 * lp.y);
                 }
                 else
                 {   // a falling drop

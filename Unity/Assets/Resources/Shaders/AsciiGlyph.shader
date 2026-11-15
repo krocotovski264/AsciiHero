@@ -185,7 +185,7 @@ Shader "AsciiHero/Glyph"
                     }
                 }
                 float lod = max(1.0, _AsciiLod);
-                bool lodKeep = lod < 1.01 || _AsciiActor > 0.5 || frac(i.seed.x * 31.7 + 0.37) < 1.7 / (lod * lod);     // (characters are thinned evenly on the CPU, see GlyphLayer.SetActorLod: no bald patches)
+                bool lodKeep = lod < 1.01 || _AsciiActor > 0.5 || (i.seed.y < 0.0 ? -i.seed.y < 1.12 / (lod * lod) : frac(i.seed.x * 31.7 + 0.37) < 1.7 / (lod * lod));   // scenery: ordered dither on the surface grid (even lattice)     // (characters are thinned evenly on the CPU, see GlyphLayer.SetActorLod: no bald patches)
                 if (_GlyphSmoke > 0.5) pWS.y += (0.15 + 0.4 * wisp) * ph * ph;
                 if (_GlyphSmoke > 0.5 && _GlyphPuff <= 0.0) pWS -= _AsciiHeroVel.xyz * (0.05 + 0.2 * wisp) * ph * ph;
                 if (_GlyphPuff > 0.0) pWS.y += _GlyphPuff * _GlyphPuff * (0.15 + 0.5 * frac(i.seed.x * 5.3));

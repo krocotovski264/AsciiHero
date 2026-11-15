@@ -65,7 +65,7 @@ namespace AsciiHero
         {
             float k = 1;
             if (MudK(x, z) < 0.95f) k = 0.5f;                                   // sticky mud: a slow wade, no running
-            else if (WaterK(x, z) < 0.9f) k = DeepAt(x, z) > 0.12f ? 0.7f : 0.9f;
+            else if (WaterK(x, z) < 0.9f) k = DeepAt(x, z) > 0.12f ? 0.7f : 1.8f;     // deep: a wade; shallow: he can run (a bit slower)
             return k;
         }
 
@@ -74,6 +74,7 @@ namespace AsciiHero
         struct WallSeg { public Vector2 a, b; public float h; }
         readonly List<WallSeg> wallSegs = new List<WallSeg>();
         float seeFade;
+        readonly List<KeyValuePair<Mesh, Matrix4x4>> wallPieces = new List<KeyValuePair<Mesh, Matrix4x4>>();      // for placing things against the rock
         static Dictionary<string, KeyValuePair<Vector3[], int[]>> CM;      // scanned rocks and the pickaxe (Resources/cavemeshes)
         // ---- light that lives ----
         class Glow { public Light l; public float baseI, ph; public List<Renderer> caps = new List<Renderer>(); }
@@ -146,9 +147,11 @@ namespace AsciiHero
 
             // ---- walls: the outline, and the two dividing walls with passages ----
             var rock = new Material(mats["WETROCK"]) { name = "CaveWall" }; rock.SetFloat("_SeeThrough", 1); rock.SetFloat("_Cull", 0);
-            RockWall(T, mats, rock, new Vector2(-HX - 0.6f, -HZ - 0.15f), new Vector2(HX + 0.6f, -HZ - 0.15f), Vector2.up, 2.6f, 3.3f);       // far wall
+            RockWall(T, mats, rock, new Vector2(-HX - 0.6f, -HZ - 0.15f), new Vector2(-6.1f, -HZ - 0.15f), Vector2.up, 2.6f, 3.3f);       // far wall (a crevice at x -5.7)
+            RockWall(T, mats, rock, new Vector2(-5.3f, -HZ - 0.15f), new Vector2(HX + 0.6f, -HZ - 0.15f), Vector2.up, 2.6f, 3.3f);
             RockWall(T, mats, rock, new Vector2(-HX - 0.6f, HZ + 0.35f), new Vector2(HX + 0.6f, HZ + 0.35f), Vector2.up, 1.7f, 2.3f);          // near wall (faces the camera)
-            RockWall(T, mats, rock, new Vector2(-HX - 0.15f, -HZ - 0.3f), new Vector2(-HX - 0.15f, HZ + 0.3f), Vector2.right, 2.4f, 3.1f);
+            RockWall(T, mats, rock, new Vector2(-HX - 0.15f, -HZ - 0.3f), new Vector2(-HX - 0.15f, -3.3f), Vector2.right, 2.4f, 3.1f);      // west wall (a crevice at z -2.9)
+            RockWall(T, mats, rock, new Vector2(-HX - 0.15f, -2.5f), new Vector2(-HX - 0.15f, HZ + 0.3f), Vector2.right, 2.4f, 3.1f);
             RockWall(T, mats, rock, new Vector2(HX + 0.15f, -HZ - 0.3f), new Vector2(HX + 0.15f, 3.9f), Vector2.left, 2.4f, 3.1f);
             RockWall(T, mats, rock, new Vector2(HX + 0.15f, 5.2f), new Vector2(HX + 0.15f, HZ + 0.3f), Vector2.left, 2.4f, 3.1f);         // (the crevice at z 4.5: the entrance light)
             foreach (var r in new[] { new Vector2(-HZ, -5.6f), new Vector2(-2.4f, 2.4f), new Vector2(5.6f, HZ) })
@@ -216,34 +219,45 @@ namespace AsciiHero
             }
 
             // ---- bones: skeletons in the walls of the bone chamber, on its floor, bones everywhere there ----
-            Skeleton(T, mats, new Vector3(-9.35f, 1.1f, 2.4f), Quaternion.Euler(-90, -90, 0) * Quaternion.Euler(0, 0, 8), 1.0f);      // walled into the east wall, upright, half sunk
-            Skeleton(T, mats, new Vector3(-9.4f, 0.9f, 6.0f), Quaternion.Euler(-80, -90, 0) * Quaternion.Euler(0, 0, -12), 0.95f);
-            Skeleton(T, mats, new Vector3(-0.55f, 1.0f, 6.6f), Quaternion.Euler(-90, 90, 0) * Quaternion.Euler(0, 0, 5), 1.0f);       // in the dividing wall
-            Skeleton(T, mats, new Vector3(-6.2f, 0.05f, 6.6f), Quaternion.Euler(0, 35, 0), 1.0f);                                       // lying on the floor
-            Skeleton(T, mats, new Vector3(-4.0f, 0.05f, 1.4f), Quaternion.Euler(0, 160, 0), 0.95f);
-            Skeleton(T, mats, new Vector3(7.8f, 0.05f, 1.8f), Quaternion.Euler(0, -70, 0), 1.0f);                                       // a miner in the entrance hall
+            WallSkeleton(T, mats, "skel_sit", new Vector2(-HX - 0.15f, 2.4f), Vector2.right, 1.0f, 4);        // walled into the west wall
+            WallSkeleton(T, mats, "skel_stand", new Vector2(-HX - 0.15f, 6.0f), Vector2.right, 1.05f, 6);
+            WallSkeleton(T, mats, "skel_stand", new Vector2(-7.2f, 0.1f), Vector2.up, 1.0f, 8);              // in the middle wall, seen from the chamber
+            WallSkeleton(T, mats, "skel_sit", new Vector2(-0.25f, 6.8f), Vector2.left, 0.95f, 2);           // in the dividing wall
+            MeshGen.Obj(CaveMesh("skel_lie", Vector3.one), mats["BONE"], T, new Vector3(-6.2f, 0.0f, 6.4f), Quaternion.Euler(0, 35, 0), false, "Skeleton");       // lying on the floor
+            MeshGen.Obj(CaveMesh("skel_heap", Vector3.one * 0.7f), mats["BONE"], T, new Vector3(-4.0f, 0.0f, 3.2f), Quaternion.Euler(0, 160, 0), false, "Skeleton");
+            MeshGen.Obj(CaveMesh("skel_lie", Vector3.one * 0.95f), mats["BONE"], T, new Vector3(7.8f, 0.0f, 1.8f), Quaternion.Euler(0, -70, 0), false, "Skeleton");      // a miner in the entrance hall
+            colliders.Add(Collider2.Circle(-6.2f, 6.4f, 0.45f)); colliders.Add(Collider2.Circle(7.8f, 1.8f, 0.45f));
             for (int i = 0; i < 26; i++)
             {
                 var p = i < 18 ? Place(-9.2f, -0.8f, 0.8f, 7.4f, 0.05f) : Place(0.8f, 9.2f, -7.4f, 7.4f, 0.05f);
                 Bone(T, mats, p.x, p.y, Rr(0.12f, 0.36f));
             }
-            for (int i = 0; i < 3; i++) { var p = Place(-9f, -1f, 1f, 7.2f, 0.1f); MeshGen.Obj(MeshGen.Sphere(0.1f, 9, 7), mats["BONE"], T, new Vector3(p.x, 0.08f, p.y), Quaternion.Euler(Rr(-30, 30), Rr(0, 360), Rr(-60, 60)), true, "Skull"); }
+            for (int i = 0; i < 4; i++) { var p = Place(-9f, -1f, 1f, 7.2f, 0.1f); MeshGen.Obj(CaveMesh("skull", Vector3.one * Rr(0.85f, 1f)), mats["BONE"], T, new Vector3(p.x, -0.015f, p.y), Quaternion.Euler(Rr(-15, 15), Rr(0, 360), Rr(-25, 25)), true, "Skull"); }
 
             // ---- the miners' leftovers in the entrance hall: torches, pickaxes, one torch still smouldering ----
             for (int i = 0; i < 5; i++) { var p = Place(1.0f, 9.0f, 0.8f, 7.2f, 0.15f); Torch(T, mats, p.x, p.y, Rnd() < 0.5f); }
             for (int i = 0; i < 3; i++) { var p = Place(1.0f, 9.0f, 0.8f, 7.2f, 0.2f); Pickaxe(T, mats, p.x, p.y); }
             {
-                var holder = new GameObject("WallTorch").transform; holder.SetParent(T, false); holder.localPosition = new Vector3(9.25f, 1.25f, 1.6f);
-                MeshGen.Obj(MeshGen.Cylinder(0.025f, 0.02f, 0.5f, 7), mats["WOOD"], holder, Vector3.zero, Quaternion.Euler(0, 0, 25), true, "TorchStick");
-                MeshGen.Obj(MeshGen.Cylinder(0.04f, 0.035f, 0.1f, 7), mats["DARK"], holder, new Vector3(-0.1f, 0.24f, 0), Quaternion.Euler(0, 0, 25), true, "TorchHead");
-                GlyphLayer.MakeFire(holder, new Vector3(-0.12f, 0.29f, 0), 0.03f, 0.03f, 0.13f, 0.04f, 14, 0.6f);
-                var lg = new GameObject("Ember"); lg.transform.SetParent(holder, false); lg.transform.localPosition = new Vector3(-0.3f, 0.4f, 0);
+                float wd = RayToWall(new Vector3(HX - 1.5f, 1.3f, 1.6f), Vector3.right, 3f); float wx = wd < 8 ? HX - 1.5f + wd : HX - 0.2f;
+                var holder = new GameObject("WallTorch").transform; holder.SetParent(T, false); holder.localPosition = new Vector3(wx + 0.03f, 1.3f, 1.6f);
+                holder.localRotation = Quaternion.Euler(0, -90, 0);              // its bracket to the rock, the basket into the hall
+                var k = Vector3.one * 0.55f;
+                MeshGen.Obj(CaveMesh("torch_wall_stick", k), mats["DARK"], holder, Vector3.zero, Quaternion.identity, true, "TorchBracket");
+                MeshGen.Obj(CaveMesh("torch_wall_head", k), mats["DARK"], holder, Vector3.zero, Quaternion.identity, true, "TorchHead");
+                GlyphLayer.MakeFire(holder, new Vector3(0, 0.39f, 0.2f), 0.04f, 0.04f, 0.15f, 0.05f, 16, 0.6f);
+                var lg = new GameObject("Ember"); lg.transform.SetParent(holder, false); lg.transform.localPosition = new Vector3(0, 0.55f, 0.45f);
                 ember = lg.AddComponent<Light>(); ember.type = LightType.Point; ember.color = new Color(1f, 0.55f, 0.25f); ember.intensity = 0.7f; ember.range = 2.8f;
             }
 
             // ---- light: a shaft through a break in the vault over the grotto, a beam through the crevice of the entrance ----
+            // from above: through breaks in the vault (the grotto, the wet hall, the bone chamber)
             Beam(T, new Vector3(5.2f, 0, -4.0f), new Vector3(5.6f, 7.5f, -4.6f), 0.85f, 230, new Color(1f, 0.93f, 0.78f), 5.5f, 30f);
+            Beam(T, new Vector3(-5.6f, 0, -4.4f), new Vector3(-5.1f, 7.5f, -5.2f), 0.6f, 170, new Color(0.9f, 0.95f, 1f), 4.0f, 24f);
+            Beam(T, new Vector3(-3.4f, 0, 4.6f), new Vector3(-3.0f, 7.5f, 4.0f), 0.5f, 140, new Color(0.75f, 0.85f, 1f), 3.2f, 22f);
+            // from the sides: the crevice of the entrance (east), a crack in the west wall, one in the far wall
             Beam(T, new Vector3(6.4f, 0, 4.1f), new Vector3(11.5f, 1.9f, 4.6f), 0.5f, 150, new Color(0.85f, 0.9f, 1f), 4.5f, 24f);
+            Beam(T, new Vector3(-6.4f, 0, -2.6f), new Vector3(-11.6f, 2.1f, -2.9f), 0.42f, 130, new Color(1f, 0.9f, 0.75f), 3.8f, 22f);
+            Beam(T, new Vector3(-5.4f, 0, -4.2f), new Vector3(-5.7f, 2.3f, -10.5f), 0.4f, 120, new Color(0.95f, 0.92f, 0.85f), 3.4f, 20f);
 
             // ---- fireflies over the wet hall and the bone chamber ----
             {
@@ -316,17 +330,84 @@ namespace AsciiHero
         {
             var dir = b - a; float L = dir.magnitude; dir /= L;
             float yaw = Mathf.Atan2(face.x, face.y) * Mathf.Rad2Deg;
-            int n = Mathf.Max(1, Mathf.CeilToInt(L / 2.4f)); float seg = L / n, hMax = 0;
+            int n = Mathf.Max(1, Mathf.CeilToInt(L / 2.2f)); float seg = L / n, hMax = 0, hMin = 99;
             for (int k = 0; k < n; k++)
             {
-                float len = seg * Rr(1.3f, 1.55f), h = Rr(h0, h1); hMax = Mathf.Max(hMax, h);
-                var c = a + dir * (seg * (k + 0.5f)) + face * Rr(-0.12f, 0.08f);
-                MeshGen.Obj(RockPiece(len, h, Mathf.Min(len, 3f) * Rr(0.8f, 1.1f), Rnd() < 0.5f), mat, T, new Vector3(c.x, -0.06f, c.y), Quaternion.Euler(0, yaw + Rr(-5, 5), 0), true, "Wall");
+                // the pieces overlap a little and step back and forth by turns (no two at the same depth: no flicker)
+                float len = seg * 1.22f, h = Rr(h0, h1); hMax = Mathf.Max(hMax, h); hMin = Mathf.Min(hMin, h);
+                var c = a + dir * (seg * (k + 0.5f)) + face * ((k & 1) == 0 ? 0.04f : -0.05f);
+                var g = MeshGen.Obj(RockPiece(len, h, Mathf.Min(len, 2.6f) * Rr(0.85f, 1.0f), Rnd() < 0.5f), mat, T, new Vector3(c.x, -0.06f, c.y), Quaternion.Euler(0, yaw + Rr(-2.5f, 2.5f), 0), true, "Wall");
+                wallPieces.Add(new KeyValuePair<Mesh, Matrix4x4>(g.GetComponent<MeshFilter>().sharedMesh, T.worldToLocalMatrix * g.transform.localToWorldMatrix));
                 if (Rnd() < 0.35f) Moss(T, mats, c.x + face.x * 0.25f + dir.x * Rr(-0.8f, 0.8f), c.y + face.y * 0.25f + dir.y * Rr(-0.8f, 0.8f), Rr(0.3f, 0.5f), 0.01f);
             }
+            Backing(T, mat, a - dir * 0.15f, b + dir * 0.15f, face, hMin * 0.93f);
             if (!collide) return;
             for (float s = 0; s <= L + 0.01f; s += 0.5f) { var p = a + dir * s - face * 0.2f; colliders.Add(Collider2.Circle(p.x, p.y, 0.5f)); }
             wallSegs.Add(new WallSeg { a = a, b = b, h = hMax });
+        }
+        /// a rough rock sheet behind a wall's pieces: wherever two scanned pieces leave a gap, there is rock in it
+        void Backing(Transform T, Material mat, Vector2 a, Vector2 b, Vector2 face, float h)
+        {
+            var dir = b - a; float L = dir.magnitude; dir /= L;
+            int nu = Mathf.CeilToInt(L / 0.22f), nv = Mathf.CeilToInt(h / 0.22f);
+            var vs = new List<Vector3>(); var ts = new List<int>();
+            for (int i = 0; i <= nu; i++)
+                for (int j = 0; j <= nv; j++)
+                {
+                    float u = L * i / nu, y = h * j / nv - 0.05f;
+                    float bump = 0.07f * Mathf.Sin(u * 2.1f + y * 1.3f) + 0.05f * Mathf.Sin(u * 5.3f - y * 4.1f) + 0.03f * Mathf.Sin(u * 11f + y * 9f);
+                    var p = a + dir * u - face * (0.34f + bump + 0.1f * y / h);
+                    vs.Add(new Vector3(p.x, y, p.y));
+                }
+            for (int i = 0; i < nu; i++)
+                for (int j = 0; j < nv; j++)
+                {
+                    int o = i * (nv + 1) + j;
+                    // wound so the sheet faces 'face'
+                    bool flip = Vector3.Cross(new Vector3(dir.x, 0, dir.y), Vector3.up).x * face.x + Vector3.Cross(new Vector3(dir.x, 0, dir.y), Vector3.up).z * face.y > 0;
+                    if (flip) { ts.Add(o); ts.Add(o + 1); ts.Add(o + nv + 1); ts.Add(o + 1); ts.Add(o + nv + 2); ts.Add(o + nv + 1); }
+                    else { ts.Add(o); ts.Add(o + nv + 1); ts.Add(o + 1); ts.Add(o + 1); ts.Add(o + nv + 1); ts.Add(o + nv + 2); }
+                }
+            var m = new Mesh { name = "wallback" }; m.SetVertices(vs); m.uv = new Vector2[vs.Count]; m.SetTriangles(ts, 0);
+            m.RecalculateNormals(); m.RecalculateBounds(); MeshGen.AddGlyphUV(m, false);
+            var g = MeshGen.Obj(m, mat, T, Vector3.zero, Quaternion.identity, true, "WallBack");
+            wallPieces.Add(new KeyValuePair<Mesh, Matrix4x4>(m, T.worldToLocalMatrix * g.transform.localToWorldMatrix));
+        }
+        /// how far from 'o' along 'd' the rock of the walls is (9 = none within reach)
+        float RayToWall(Vector3 o, Vector3 d, float maxD = 3f)
+        {
+            float best = 9;
+            foreach (var kv in wallPieces)
+            {
+                var M = kv.Value; var bnd = kv.Key.bounds; var wc = M.MultiplyPoint3x4(bnd.center); float rr = bnd.extents.magnitude * 1.2f + maxD;
+                if ((wc - o).sqrMagnitude > rr * rr) continue;
+                var V = kv.Key.vertices; var Tr = kv.Key.triangles;
+                for (int t = 0; t < Tr.Length; t += 3)
+                {
+                    Vector3 p0 = M.MultiplyPoint3x4(V[Tr[t]]), e1 = M.MultiplyPoint3x4(V[Tr[t + 1]]) - p0, e2 = M.MultiplyPoint3x4(V[Tr[t + 2]]) - p0;
+                    var pv = Vector3.Cross(d, e2); float det = Vector3.Dot(e1, pv); if (Mathf.Abs(det) < 1e-7f) continue;
+                    float inv = 1 / det; var tv = o - p0; float u = Vector3.Dot(tv, pv) * inv; if (u < 0 || u > 1) continue;
+                    var qv = Vector3.Cross(tv, e1); float v = Vector3.Dot(d, qv) * inv; if (v < 0 || u + v > 1) continue;
+                    float dist = Vector3.Dot(e2, qv) * inv; if (dist > 0 && dist < best && dist < maxD) best = dist;
+                }
+            }
+            return best;
+        }
+        /// a skeleton walled into the rock: its back sunk into the wall at (x, z) on the wall line; 'face' points into the room
+        void WallSkeleton(Transform T, Mats mats, string pose, Vector2 at, Vector2 face, float s, float tilt)
+        {
+            var side = new Vector2(-face.y, face.x); var hits = new List<float>();
+            foreach (float y in new[] { 0.35f, 0.7f, 1.0f })
+                foreach (float l in new[] { -0.25f, 0f, 0.25f })
+                {
+                    var o2 = at + face * 1.6f + side * l; float d = RayToWall(new Vector3(o2.x, y, o2.y), new Vector3(-face.x, 0, -face.y), 3f);
+                    if (d < 8) hits.Add(d);
+                }
+            float dd = 1.6f;
+            if (hits.Count > 0) { hits.Sort(); dd = hits[hits.Count / 2]; }
+            var p = at + face * (1.6f - dd + 0.07f);         // the back a few centimetres inside the rock
+            float yaw = Mathf.Atan2(face.x, face.y) * Mathf.Rad2Deg;
+            MeshGen.Obj(CaveMesh(pose, Vector3.one * s), mats["BONE"], T, new Vector3(p.x, -0.02f, p.y), Quaternion.Euler(0, yaw, 0) * Quaternion.Euler(-tilt, 0, 0), false, "WallSkeleton");
         }
         void Moss(Transform T, Mats mats, float x, float z, float r, float y)
         {
@@ -345,40 +426,18 @@ namespace AsciiHero
             if (caps != null) caps.Add(cap.GetComponent<Renderer>());
         }
         // a skeleton laid along its local +z, face up (rot sets it upright when it is walled in)
-        void Skeleton(Transform T, Mats mats, Vector3 pos, Quaternion rot, float s)
-        {
-            var sk = new GameObject("Skeleton").transform; sk.SetParent(T, false); sk.localPosition = pos; sk.localRotation = rot; sk.localScale = Vector3.one * s;
-            Material B = mats["BONE"];
-            void Rod(Vector3 a, Vector3 b, float r) { var d = b - a; MeshGen.Obj(MeshGen.Cylinder(r, r * 0.85f, d.magnitude, 6), B, sk, (a + b) / 2, Quaternion.FromToRotation(Vector3.up, d), false, "Bone"); }
-            MeshGen.Obj(MeshGen.Sphere(0.1f, 9, 7), B, sk, new Vector3(0, 0.06f, 0.82f), Quaternion.Euler(Rr(-20, 20), Rr(-30, 30), 0), false, "Skull");
-            MeshGen.Obj(MeshGen.Box(0.08f, 0.03f, 0.06f), B, sk, new Vector3(0, 0.0f, 0.9f), Quaternion.identity, false, "Jaw");
-            Rod(new Vector3(0, 0.03f, 0.7f), new Vector3(0, 0.03f, 0.05f), 0.018f);                                      // spine
-            for (int i = 0; i < 5; i++)
-                MeshGen.Obj(MeshGen.Torus(0.12f - i * 0.008f, 0.011f, 10, 4, Mathf.PI), B, sk, new Vector3(0, 0.05f, 0.62f - i * 0.065f), Quaternion.Euler(0, 0, 0), false, "Rib");
-            var pel = MeshGen.Obj(MeshGen.Sphere(0.11f, 8, 5), B, sk, new Vector3(0, 0.03f, 0.02f), Quaternion.identity, false, "Pelvis"); pel.transform.localScale = new Vector3(1.3f, 0.45f, 0.7f);
-            for (int sd = -1; sd <= 1; sd += 2)
-            {
-                float ax = Rr(0.05f, 0.25f);
-                Rod(new Vector3(sd * 0.17f, 0.02f, 0.64f), new Vector3(sd * (0.22f + ax), 0.02f, 0.36f), 0.017f);
-                Rod(new Vector3(sd * (0.22f + ax), 0.02f, 0.36f), new Vector3(sd * (0.26f + ax * 1.6f), 0.02f, 0.12f), 0.014f);
-                float lx = Rr(0.0f, 0.12f);
-                Rod(new Vector3(sd * 0.09f, 0.02f, -0.02f), new Vector3(sd * (0.12f + lx), 0.02f, -0.44f), 0.022f);
-                Rod(new Vector3(sd * (0.12f + lx), 0.02f, -0.44f), new Vector3(sd * (0.13f + lx * 1.5f), 0.02f, -0.86f), 0.018f);
-            }
-        }
         void Bone(Transform T, Mats mats, float x, float z, float len)
         {
-            var b = new GameObject("LooseBone").transform; b.SetParent(T, false); b.localPosition = new Vector3(x, 0.025f, z); b.localRotation = Quaternion.Euler(0, Rr(0, 360), 0);
-            MeshGen.Obj(MeshGen.Cylinder(0.016f, 0.014f, len, 6), mats["BONE"], b, Vector3.zero, Quaternion.Euler(90, 0, 0), false, "Bone");
-            MeshGen.Obj(MeshGen.Sphere(0.026f, 6, 4), mats["BONE"], b, new Vector3(0, 0, len / 2), Quaternion.identity, false, "BoneEnd");
-            MeshGen.Obj(MeshGen.Sphere(0.026f, 6, 4), mats["BONE"], b, new Vector3(0, 0, -len / 2), Quaternion.identity, false, "BoneEnd");
+            int k = R.Next(3); string nm = k == 0 ? "bone_a" : k == 1 ? "bone_b" : "bone_c"; float L0 = k == 0 ? 0.7f : k == 1 ? 0.61f : 1.1f, sc = len / L0;
+            MeshGen.Obj(CaveMesh(nm, new Vector3(sc, sc * 0.55f, sc * 0.55f)), mats["BONE"], T, new Vector3(x, -0.01f, z), Quaternion.Euler(0, Rr(0, 360), Rr(-8, 8)), false, "LooseBone");
         }
         void Torch(Transform T, Mats mats, float x, float z, bool leaning)
         {
-            var t = new GameObject("OldTorch").transform; t.SetParent(T, false); t.localPosition = new Vector3(x, 0.02f, z);
-            t.localRotation = Quaternion.Euler(0, Rr(0, 360), 0) * Quaternion.Euler(leaning ? Rr(25, 50) : 88, 0, 0);
-            MeshGen.Obj(MeshGen.Cylinder(0.022f, 0.018f, 0.5f, 6), mats["WOOD"], t, new Vector3(0, 0.25f, 0), Quaternion.identity, true, "TorchStick");
-            MeshGen.Obj(MeshGen.Cylinder(0.035f, 0.03f, 0.1f, 6), mats["DARK"], t, new Vector3(0, 0.53f, 0), Quaternion.identity, true, "TorchHead");      // burnt out
+            var t = new GameObject("OldTorch").transform; t.SetParent(T, false); t.localPosition = new Vector3(x, 0.05f, z);
+            t.localRotation = Quaternion.Euler(0, Rr(0, 360), 0) * Quaternion.Euler(leaning ? Rr(55, 70) : 86, 0, 0);
+            var k = Vector3.one * 0.55f;       // (an iron basket torch, 1 m: smaller here)
+            MeshGen.Obj(CaveMesh("torch_stick", k), mats["WOOD"], t, new Vector3(0, 0.22f, 0), Quaternion.identity, true, "TorchStick");
+            MeshGen.Obj(CaveMesh("torch_head", k), mats["DARK"], t, new Vector3(0, 0.22f, 0), Quaternion.identity, true, "TorchHead");      // burnt out
         }
         void Pickaxe(Transform T, Mats mats, float x, float z)
         {
@@ -399,6 +458,19 @@ namespace AsciiHero
             for (int i = 0; i < n; i++) { float a = Rr(0, 6.28f), r = Mathf.Sqrt(Rnd()); pts.Add(new Vector3(Mathf.Cos(a) * r, Rnd(), Mathf.Sin(a) * r)); sd.Add(new Vector2(r, Rnd())); }
             var d = from - to;
             GlyphLayer.MakeMotes(T, to, Quaternion.FromToRotation(Vector3.up, d.normalized), new Vector3(radius, d.magnitude, radius), pts, sd, 0, c * 0.85f, new Vector4(0.04f, 0, 0, 0));
+            // the shaft itself: faint streaks along the beam (characters picked by its direction on the screen),
+            // laid on a jittered grid across it so it reads as a column of light, brighter in the middle
+            var sp = new List<Vector3>(); var ss = new List<Vector2>(); float len = d.magnitude;
+            float step = Mathf.Clamp(radius * 0.32f, 0.13f, 0.22f);
+            for (float y = step * 0.5f; y < len; y += step * 1.55f)
+                for (float x = -radius; x <= radius; x += step)
+                    for (float z = -radius; z <= radius; z += step)
+                    {
+                        float jx = x + Rr(-0.35f, 0.35f) * step, jz = z + Rr(-0.35f, 0.35f) * step, r = Mathf.Sqrt(jx * jx + jz * jz) / radius;
+                        if (r > 1) continue;
+                        sp.Add(new Vector3(jx / radius, (y + Rr(-0.4f, 0.4f) * step) / len, jz / radius)); ss.Add(new Vector2(r, Rnd()));
+                    }
+            GlyphLayer.MakeMotes(T, to, Quaternion.FromToRotation(Vector3.up, d.normalized), new Vector3(radius, len, radius), sp, ss, 3, c * 0.5f, new Vector4(0.075f, 0, 0, 0));
         }
         // a flat surface (mud) covering where k < 1
         void Patch(Transform T, Material m, System.Func<float, float, float> k, Vector2 c, float r, float y, string name)

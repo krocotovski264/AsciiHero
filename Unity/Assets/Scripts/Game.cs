@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.46 · Unity";
+        public const string VERSION = "beta 0.47 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -319,6 +319,46 @@ namespace AsciiHero
         static Seg[] LegSegs(string s) { return new[] { new Seg("upperleg01." + s, "lowerleg01." + s, 0.078f, 0), new Seg("lowerleg01." + s, "foot." + s, 0.058f, 0), new Seg("foot." + s, null, 0.04f, 3) }; }
         static readonly Seg[][] DEBRIS_SEGS = { new[] { new Seg("head", null, 0.13f, 1) }, ArmSegs("L"), ArmSegs("R"), LegSegs("L"), LegSegs("R") };
         static void GlyphsOf(GameObject go, List<Renderer> into) { foreach (var r in go.GetComponentsInChildren<Renderer>(true)) if (r.gameObject.layer == GlyphLayer.LAYER) into.Add(r); }
+        // ---- splashes: running through shallow water throws up drops (a small pool of them, made once) ----
+        class Drop { public GameObject go; public Vector3 v; }
+        readonly List<Drop> drops = new List<Drop>(); GameObject dropRoot; float splashT; int dropIx;
+        void UpdateSplash(float dt, float sp)
+        {
+            if (dropRoot == null)
+            {
+                dropRoot = new GameObject("Splashes");
+                var m = new Material(mats["WATER"]) { name = "Spray" }; m.color = new Color(0.62f, 0.72f, 0.82f); m.SetColor("_EmissionColor", new Color(0.16f, 0.2f, 0.26f));
+                for (int i = 0; i < 48; i++)
+                {
+                    var go = MeshGen.Obj(MeshGen.Sphere(0.03f, 6, 4), m, dropRoot.transform, Vector3.zero, Quaternion.identity, false, "Drop");
+                    GlyphLayer.Build(go); go.SetActive(false); drops.Add(new Drop { go = go });
+                }
+            }
+            var hv = player.Velocity;
+            if (loc.InWater(pos.x, pos.z) && sp > 2.3f && heroSink < 0.12f)
+            {
+                splashT -= dt;
+                if (splashT <= 0)
+                {
+                    splashT = 0.09f;
+                    Vector3 fw = new Vector3(hv.x, 0, hv.z).normalized, side = new Vector3(fw.z, 0, -fw.x);
+                    for (int k = 0; k < 4; k++)
+                    {
+                        var d = drops[dropIx]; dropIx = (dropIx + 1) % drops.Count;
+                        float lr = Random.Range(-1f, 1f);
+                        d.go.transform.position = pos + fw * Random.Range(-0.05f, 0.25f) + side * lr * 0.18f + Vector3.up * 0.04f;
+                        d.v = new Vector3(hv.x, 0, hv.z) * Random.Range(0.25f, 0.55f) + side * lr * Random.Range(0.4f, 1.1f) + Vector3.up * Random.Range(1.4f, 2.7f);
+                        d.go.SetActive(true);
+                    }
+                }
+            }
+            foreach (var d in drops)
+            {
+                if (!d.go.activeSelf) continue;
+                d.v.y -= 9.8f * dt; var q = d.go.transform.position + d.v * dt; d.go.transform.position = q;
+                if (q.y < -0.02f) d.go.SetActive(false);
+            }
+        }
         void SpawnPuff(Vector3 p, float size, Vector3 v, float life = 0)
         {
             if (puffs.Count > 90) return;
@@ -1298,7 +1338,7 @@ namespace AsciiHero
             float l = Mathf.Sqrt(ix * ix + iy * iy), mag = Mathf.Min(1, l / 0.8f); if (mag < 0.12f) mag = 0;   // 80 % of the ring = full walk
             float runIn = Mathf.Max(stickRun, InputHub.Key("Run") ? 1f : 0f);
             if (mag > 0.85f || (mag > 0 && runIn > 0)) mag = 1 + runIn;
-            { float sk = loc.SpeedK(pos.x, pos.z); if (sk < 1 && mag > sk) mag = sk; }        // mud, deep water: a slow wade
+            { float sk = loc.SpeedK(pos.x, pos.z); if (sk != 1 && mag > sk) mag = sk; }        // mud, deep water: a slow wade; shallows: a slower run
             Vector2? dir = null;
             if (mag > 0) dir = ScreenToWorldDir(new Vector2(ix, iy));
             // aim: in a fight (a cut, a block or a blow in the last few seconds) the hero faces the nearest creature
@@ -1340,6 +1380,7 @@ namespace AsciiHero
                     rippleT = sp > 0.3f ? Mathf.Lerp(0.42f, 0.24f, Mathf.Clamp01(sp / 4f)) : 1.1f + Random.value;
                 }
                 Shader.SetGlobalVectorArray("_WaterRip", ripples);
+                UpdateSplash(dt, sp);
                 UpdateWaterMirror();
             }
             if (respawnT > 0) { respawnT -= dt; if (respawnT <= 0) { RestoreBody(); pos = loc.spawn; player.ResetSim(); } }

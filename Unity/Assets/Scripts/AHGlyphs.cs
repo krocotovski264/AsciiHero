@@ -28,6 +28,9 @@ namespace AsciiHero
         /// limbOfBone (optional): bone index -> limb number 1..5 (0 = body); stored per glyph so torn-off limbs can be hidden.
         /// Returns the created skinned glyph renderers.
         /// source renderer -> its glyph renderer, for the last Build call
+        static readonly int[] BAYER8 = {
+            0, 32, 8, 40, 2, 34, 10, 42, 48, 16, 56, 24, 50, 18, 58, 26, 12, 44, 4, 36, 14, 46, 6, 38, 60, 28, 52, 20, 62, 30, 54, 22,
+            3, 35, 11, 43, 1, 33, 9, 41, 51, 19, 59, 27, 49, 17, 57, 25, 15, 47, 7, 39, 13, 45, 5, 37, 63, 31, 55, 23, 61, 29, 53, 21 };
         public static readonly Dictionary<Renderer, Renderer> pairs = new Dictionary<Renderer, Renderer>();
         public static List<Renderer> Build(GameObject root, int[] limbOfBone = null)
         {
@@ -290,11 +293,14 @@ namespace AsciiHero
                             Add(acc, BW[ia], wa); Add(acc, BW[ib], wb); Add(acc, BW[ic], wc);
                             bw = Top4(acc);
                         }
+                        // scenery: the ordered-dither rank of the point in its 8x8 block of the surface grid (y < 0), so
+                        // a far camera keeps an even lattice of characters instead of random ones (no bald patches)
+                        float dith = (BAYER8[(((j % 8) + 8) % 8) * 8 + ((i % 8) + 8) % 8] + 0.5f) / 64f;
                         float limb = skinned && limbOfBone != null && bw.boneIndex0 < limbOfBone.Length ? limbOfBone[bw.boneIndex0] : 0;
                         int o = verts.Count;
                         for (int k = 0; k < 4; k++)
                         {
-                            verts.Add(p); nors.Add(n); corners.Add(CORNER[k]); seeds.Add(new Vector2(seed, limb));
+                            verts.Add(p); nors.Add(n); corners.Add(CORNER[k]); seeds.Add(new Vector2(seed, skinned ? limb : -dith));
                             if (skinned) bws.Add(bw);
                         }
                         tris.Add(o); tris.Add(o + 2); tris.Add(o + 1); tris.Add(o); tris.Add(o + 3); tris.Add(o + 2);

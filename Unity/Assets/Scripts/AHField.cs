@@ -24,7 +24,7 @@ namespace AsciiHero
         public override bool HasWater => true;
         public override bool InWater(float x, float z) { return LakeK(x, z) < 0.97f; }
         public override float WaterSink(float x, float z) { return 0.18f * Mathf.SmoothStep(0, 1, Mathf.InverseLerp(1.0f, 0.55f, LakeK(x, z))); }
-        public override float SpeedK(float x, float z) { return LakeK(x, z) < 0.8f ? 0.75f : 1f; }
+        public override float SpeedK(float x, float z) { float k = LakeK(x, z); return k < 0.62f ? 0.75f : k < 1f ? 1.8f : 1f; }     // deep: a wade; the shallows: he can run
         public static float LakeK(float x, float z)
         {
             float a = Mathf.Atan2((z - LAKE.z) / LAKE_RZ, (x - LAKE.x) / LAKE_RX);
