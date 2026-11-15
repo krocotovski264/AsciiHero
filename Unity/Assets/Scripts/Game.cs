@@ -784,7 +784,7 @@ namespace AsciiHero
         int setQuality, setGrass, setRes, setFps, setMusic, setSound; bool setBloom, setShowFps, setOutline = true;
         static readonly string[] QUALITY = { "Низкое", "Среднее", "Высокое" };
         static readonly int[] GRASS = { 0, 25, 50, 75, 100 }, RES = { 50, 67, 75, 85, 100 }, FPS = { 30, 60, 90, 120 };
-        static readonly string[] DEVELOPERS = { "krocotovski264", "Тёма — программист" };
+        static readonly string[] DEVELOPERS = { "krocotovski264", "Тёма — программист", "", "Анимация ходьбы и передвижения в бою: набор 100STYLE —", "I. Mason, S. Starke, T. Komura (CC BY 4.0)" };
         void LoadSettings()
         {
             bool phone = Application.isMobilePlatform;
