@@ -142,6 +142,31 @@ namespace AsciiHero
             return go;
         }
 
+        /// The lake's characters: one camera-facing quad per point (seed x: 0 in the middle .. 1 at the shore, y: random);
+        /// what each one shows is worked out in the water shader
+        public static GameObject MakeWater(Transform parent, List<Vector3> pts, List<Vector2> seedList)
+        {
+            var sh = Shader.Find("AsciiHero/Water"); if (sh == null) { Debug.LogError("AsciiHero/Water shader not found"); return null; }
+            int n = pts.Count;
+            var verts = new List<Vector3>(n * 4); var corners = new List<Vector2>(n * 4); var seeds = new List<Vector2>(n * 4); var tris = new List<int>(n * 6);
+            Vector2[] C = { new Vector2(-0.5f, -0.5f), new Vector2(0.5f, -0.5f), new Vector2(0.5f, 0.5f), new Vector2(-0.5f, 0.5f) };
+            for (int i = 0; i < n; i++)
+            {
+                int o = verts.Count;
+                for (int k = 0; k < 4; k++) { verts.Add(pts[i]); corners.Add(C[k]); seeds.Add(seedList[i]); }
+                tris.Add(o); tris.Add(o + 2); tris.Add(o + 1); tris.Add(o); tris.Add(o + 3); tris.Add(o + 2);
+            }
+            var m = new Mesh { name = "water", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+            m.SetVertices(verts); m.SetUVs(0, corners); m.SetUVs(1, seeds); m.SetTriangles(tris, 0);
+            m.RecalculateBounds(); var b = m.bounds; b.Expand(0.6f); m.bounds = b;
+            var go = new GameObject("Glyphs"); go.layer = LAYER; go.transform.SetParent(parent, false);      // ("Glyphs" under the water: GlyphLayer.Build leaves it alone)
+            go.AddComponent<MeshFilter>().sharedMesh = m;
+            var r = go.AddComponent<MeshRenderer>(); r.sharedMaterial = new Material(sh);
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; r.receiveShadows = false;
+            count += n;
+            return go;
+        }
+
         /// Grass. The blades are split into tiles of 4 x 4 m, each its own mesh, so the tiles outside the view are not
         /// sent to the GPU at all (as one mesh, every blade of the field ran the vertex shader every frame).
         public static GameObject MakeGrass(List<Vector3> pts, List<float> seedList, Transform parent)

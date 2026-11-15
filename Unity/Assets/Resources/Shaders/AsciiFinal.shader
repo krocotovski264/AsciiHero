@@ -26,8 +26,12 @@ Shader "Hidden/AsciiHero/Final"
                     if (cc.a > 1e-4)
                     {
                         float thr = cc.a + 0.02 + 0.015 * cc.a;
-                        float n1 = tex2Dlod(_AsciiLitTex, float4(uvc + float2(_LitPx.x, 0), 0, 0)).a, n2 = tex2Dlod(_AsciiLitTex, float4(uvc - float2(_LitPx.x, 0), 0, 0)).a;
-                        float n3 = tex2Dlod(_AsciiLitTex, float4(uvc + float2(0, _LitPx.y), 0, 0)).a, n4 = tex2Dlod(_AsciiLitTex, float4(uvc - float2(0, _LitPx.y), 0, 0)).a;
+                        // neighbours 1.5 texels away from this pixel (each snapped to its texel's centre): the line is
+                        // one and a half texels wide on the object's side of the edge
+                        float2 ox = float2(_LitPx.x * 1.5, 0), oy = float2(0, _LitPx.y * 1.5);
+                        #define SNAP(u) float4((floor((u) / _LitPx.xy) + 0.5) * _LitPx.xy, 0, 0)
+                        float n1 = tex2Dlod(_AsciiLitTex, SNAP(i.uv + ox)).a, n2 = tex2Dlod(_AsciiLitTex, SNAP(i.uv - ox)).a;
+                        float n3 = tex2Dlod(_AsciiLitTex, SNAP(i.uv + oy)).a, n4 = tex2Dlod(_AsciiLitTex, SNAP(i.uv - oy)).a;
                         float lo = min(min(n1, n2), min(n3, n4)), hi = max(max(n1, n2), max(n3, n4));
                         if (lo <= 1e-4 || hi > thr)
                         {

@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.37 · Unity";
+        public const string VERSION = "beta 0.38 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -111,7 +111,18 @@ namespace AsciiHero
         // world camera
         // MOBA camera: fixed (no rotation), high and far, looking down at about 55 degrees
         const float ISO_LOD = 2.5f / 1.5f; float isoYaw = 0, isoPitch = 0.96f, isoYawT = 0, isoPitchT = 0.96f; const float ISO_DIST = 7.6f * ISO_LOD;
-        Vector3 pos, camTgt; bool lockOn; Vector3? lockFixed; float labelT; string animLabel = "idle";
+        Vector3 pos, camTgt; bool lockOn; float labelT; string animLabel = "idle";
+        // controls (0.38): left half - an invisible stick that appears under the finger, a double tap (tap, then press
+        // and drag) runs; right half - a short tap attacks, holding blocks, a swipe dashes that way; a tap on the hero
+        // opens the backpack. In a fight the hero turns to the nearest creature within 5 m by himself.
+        const float AIM_R = 5f;
+        float lastLeftTapT = -9; Vector2 lastLeftTapPos; bool stickRunArmed;
+        bool invOpen, menuFromWorld; int saveMode;          // saves page: 0 both, 1 save, 2 load
+        readonly List<string> inventory = new List<string>();
+        readonly string[] saveInfo = new string[SAVE_SLOTS]; readonly bool[] saveHas = new bool[SAVE_SLOTS]; bool saveInfoDirty = true; const int SAVE_SLOTS = 3;
+        // the lake: rings from the hero's steps (x, z, birth time, strength)
+        readonly Vector4[] ripples = new Vector4[8]; int rippleIx; float rippleT;
+        GUIStyle sDoll;
 
         // UI
         float k = 1; Rect safe; int tab; string toast; float toastT;
@@ -533,7 +544,12 @@ namespace AsciiHero
             var hl = new GameObject("HeroLight"); hl.transform.SetParent(worldLightsRoot.transform, false);
             heroLight = hl.AddComponent<Light>(); heroLight.type = LightType.Point; heroLight.color = Mats.Hex(0xffe6c8); heroLight.intensity = 1.6f; heroLight.range = 4.2f; heroLight.renderMode = LightRenderMode.ForcePixel;
             var moon = DirLight("Moon", worldLightsRoot.transform, Mats.Hex(0x8aa6ff), 0.3f, true);
-            moon.transform.rotation = Quaternion.LookRotation(new Vector3(1f, -7.5f, 7.5f));
+            // the moon stands 52 degrees up, a little beyond the field (seen from the camera): high enough to show in the
+            // lake below the camera's view; its light comes from the same place
+            Vector3 md = new Vector3(-0.12f, 0.788f, -0.604f).normalized;
+            moon.transform.rotation = Quaternion.LookRotation(-md);
+            Shader.SetGlobalVector("_MoonDir", md);
+            Shader.SetGlobalVectorArray("_WaterRip", ripples);
         }
         void SetupField()
         {
@@ -757,13 +773,15 @@ namespace AsciiHero
             {
                 float bw = 230 * k, bh = 40 * k, y = top + 80 * k;
                 if (Button(new Rect(cx - bw / 2, y, bw, bh), "ИГРАТЬ")) inMenu = false;
-                if (Button(new Rect(cx - bw / 2, y + bh + 12 * k, bw, bh), "НАСТРОЙКИ")) menuPage = 1;
-                if (Button(new Rect(cx - bw / 2, y + 2 * (bh + 12 * k), bw, bh), "ВЫХОД")) Application.Quit();
+                if (Button(new Rect(cx - bw / 2, y + bh + 12 * k, bw, bh), "СОХРАНЕНИЯ")) { menuPage = 3; saveMode = 0; saveInfoDirty = true; }
+                if (Button(new Rect(cx - bw / 2, y + 2 * (bh + 12 * k), bw, bh), "НАСТРОЙКИ")) menuPage = 1;
+                if (Button(new Rect(cx - bw / 2, y + 3 * (bh + 12 * k), bw, bh), "ВЫХОД")) Application.Quit();
                 if (Button(new Rect(safe.x + 10 * k, bottom - 22 * k, 104 * k, 22 * k), "Разработчики")) menuPage = 2;
                 GUI.Label(new Rect(safe.xMax - 210 * k, bottom - 22 * k, 200 * k, 22 * k), VERSION, sRight);
                 return;
             }
             float pw = 460 * k, x0 = cx - pw / 2, y0 = top + 56 * k;
+            if (menuPage == 3) { SavesUI(cx, top, bottom); return; }
             if (menuPage == 2)
             {
                 GUI.Label(new Rect(x0, y0, pw, 22 * k), "РАЗРАБОТЧИКИ", sTitle);
@@ -773,7 +791,7 @@ namespace AsciiHero
             }
             y0 = top + 46 * k;
             GUI.Label(new Rect(x0, y0, pw, 22 * k), "НАСТРОЙКИ", sTitle);
-            if (Button(new Rect(x0 + pw - 100 * k, y0 - 3 * k, 100 * k, 24 * k), "НАЗАД")) menuPage = 0;
+            if (Button(new Rect(x0 + pw - 100 * k, y0 - 3 * k, 100 * k, 24 * k), "НАЗАД")) { menuPage = 0; menuFromWorld = false; }
             float rh = Mathf.Min(25 * k, (bottom - 34 * k - (y0 + 26 * k)) / 11f), y1 = y0 + 26 * k; int row = 0; bool changed = false;
             void Row(string name, string value, System.Action dec, System.Action inc)
             {
@@ -810,7 +828,7 @@ namespace AsciiHero
         void StartPerfTest()
         {
             if (perfRun) return;
-            inMenu = false; if (!world || loc != field) EnterWorld(true);
+            inMenu = false; invOpen = false; menuFromWorld = false; if (!world || loc != field) EnterWorld(true);
             if (!world) return;
             worldZoomT = 1; perfRun = true; perfIx = 0; PerfReset();
             savedVsync = QualitySettings.vSyncCount; QualitySettings.vSyncCount = 0; Application.targetFrameRate = 240;
@@ -890,7 +908,11 @@ namespace AsciiHero
             KeyboardUpdate(); FrameTimes(); PerfUpdate();
             if (rebuildPending) { rebuildPending = false; Rebuild(); }
             HandlePointers(dt);
-            if (InputHub.Key("Back")) { if (world) LeaveWorld(); else Application.Quit(); }
+            if (InputHub.Key("Back"))
+            {
+                if (world) { if (menuFromWorld) menuFromWorld = false; else if (invOpen) invOpen = false; else OpenBackpack(); }
+                else Application.Quit();
+            }
 
             if (world) WorldUpdate(dt);
             else
@@ -924,7 +946,8 @@ namespace AsciiHero
                 if (q == p) continue;
                 if (q.owner == "cam") return true;
                 if (q.id == stickId && Time.unscaledTime - q.t0 < 0.4f && (q.pos - q.start).magnitude < 0.35f * StickCm())
-                { q.owner = "cam"; stickId = int.MinValue; stick = Vector2.zero; stickRun = 0; return true; }
+                { q.owner = "cam"; stickId = int.MinValue; stick = Vector2.zero; stickRun = 0; stickRunArmed = false; return true; }
+                if (q.owner == "rt" && Time.unscaledTime - q.t0 < 0.4f && (q.pos - q.start).magnitude < 0.35f * StickCm()) { q.owner = "cam"; return true; }
             }
             return false;
         }
@@ -937,12 +960,15 @@ namespace AsciiHero
             {
                 if (!p.began) continue;
                 // floating stick: its centre appears under the finger anywhere in the left part of the screen
-                if (world && InCircle(atkRect, p.pos)) { p.owner = "atk"; DoAttack(); }
-                else if (world && InCircle(defRect, p.pos)) p.owner = "def";
-                else if (world && InCircle(dashRect, p.pos)) { p.owner = "dash"; DoDash(); }
-                else if (world && !InUi(p.pos) && PinchPartner(p)) p.owner = "cam";
-                else if (world && stickId == int.MinValue && !InUi(p.pos) && p.pos.x < Screen.width * 0.45f && p.pos.y > Screen.height * 0.22f)
-                { p.owner = "stick"; stickId = p.id; stickCenter = ClampStickCenter(p.pos); }
+                if (world && (invOpen || menuFromWorld || perfRun)) p.owner = "ui";
+                else if (world && PinchPartner(p)) p.owner = "cam";
+                else if (world && p.pos.x < Screen.width * 0.5f && stickId == int.MinValue)
+                {   // the stick: invisible, its centre where the finger came down; a tap just before (close by) means run
+                    p.owner = "stick"; stickId = p.id; stickCenter = p.pos;
+                    stickRunArmed = Time.unscaledTime - lastLeftTapT < 0.38f && (p.pos - lastLeftTapPos).magnitude < 1.5f * StickCm();
+                    lastLeftTapT = -9;
+                }
+                else if (world) p.owner = "rt";      // a gesture: tap, hold or swipe (decided below)
                 else if (!world && !inMenu && tab == 0 && setDev && InField(p.pos)) p.owner = "ui";      // a number box: a tap opens the keyboard
                 else if (!world && !inMenu && tab == 0 && bodyList.Contains(p.pos))
                 {   // body sliders: a finger on a track drags its value, anywhere else in the list scrolls it
@@ -965,8 +991,24 @@ namespace AsciiHero
             foreach (var p in InputHub.ended)
             {
                 if (p.owner == "ui" && (p.pos - p.start).magnitude < 40 * k) taps.Add(p.pos);
-                if (p.id == stickId) { stickId = int.MinValue; stick = Vector2.zero; stickRun = 0; }
+                if (world && (p.owner == "stick" || p.owner == "rt"))
+                {
+                    bool tap = Time.unscaledTime - p.t0 < 0.25f && (p.pos - p.start).magnitude < 0.35f * StickCm();
+                    if (tap && OnHero(p.start)) OpenBackpack();
+                    else if (tap && p.owner == "stick") { lastLeftTapT = Time.unscaledTime; lastLeftTapPos = p.pos; }
+                    else if (tap) DoAttack();
+                }
+                if (p.id == stickId) { stickId = int.MinValue; stick = Vector2.zero; stickRun = 0; stickRunArmed = false; }
             }
+            // right-hand gestures: moved far enough soon enough - a swipe (dash that way); kept still - a hold (block)
+            if (world)
+                foreach (var p in InputHub.active.Values)
+                {
+                    if (p.owner != "rt") continue;
+                    float el = Time.unscaledTime - p.t0; Vector2 mv = p.pos - p.start;
+                    if (mv.magnitude > 0.55f * StickCm()) { p.owner = "rt:done"; if (el < 0.45f) DoDash(mv); }
+                    else if (el > 0.22f) p.owner = "rt:hold";
+                }
             // slider
             bool dragging = false;
             foreach (var p in InputHub.active.Values)
@@ -986,11 +1028,10 @@ namespace AsciiHero
             // stick
             Pointer sp; if (stickId != int.MinValue && InputHub.active.TryGetValue(stickId, out sp))
             {
-                Vector2 d = sp.pos - stickCenter; float max = stickR * 0.78f;
-                // run: finger pulled past the ring (starts 0.25 cm beyond it, full at 0.7 cm)
-                float cm = StickCm();
-                stickRun = Mathf.Clamp01((d.magnitude - max - 0.25f * cm) / (0.45f * cm));
-                if (d.magnitude > max) d = d.normalized * max;
+                Vector2 d = sp.pos - stickCenter; float max = Mathf.Max(stickR, 62 * k) * 0.78f;
+                // the centre follows a finger that goes past the edge, so turning back answers at once
+                if (d.magnitude > max) { stickCenter += d.normalized * (d.magnitude - max); d = d.normalized * max; }
+                stickRun = stickRunArmed ? 1 : 0;
                 stick = d / max;
             }
             // camera
@@ -1050,12 +1091,13 @@ namespace AsciiHero
         float dashT = 9, dashCd, dashMist, dashLen = 2; readonly Vector4[] dashObst = new Vector4[8], dashBox = new Vector4[4]; Vector3 dashFrom, dashDir; Vector2? moveDir; bool dashShifted;
         Rect atkRect, defRect, dashRect;
         void DoAttack() { if (world && player != null && dashT >= DASH_T) player.StartAttack(); }
-        void DoDash()
+        void DoDash(Vector2? swipe = null)
         {
             if (!world || player == null || dashCd > 0 || !(limbs[3] || limbs[4])) return;
             if (player.IdleBusy) { player.PokeIdle(); return; }      // sitting: he gets up first
             // moving: where the stick points; standing: where the hero looks
             Vector3 d = moveDir.HasValue ? new Vector3(moveDir.Value.x, 0, moveDir.Value.y) : new Vector3(Mathf.Sin(player.heading), 0, Mathf.Cos(player.heading));
+            if (swipe.HasValue && swipe.Value.sqrMagnitude > 1e-4f) { var w = ScreenToWorldDir(swipe.Value); d = new Vector3(w.x, 0, w.y); }      // a swipe: where the finger went
             dashDir = d.normalized; dashT = 0; dashFrom = pos; dashMist = 0; player.StartLeap(); player.PokeIdle();
             // the shadow passes straight through trees, rocks and furniture; it only has to come out on free ground:
             // if the end of the dash is inside something it goes on until it is clear (or, failing that, stops short)
@@ -1186,19 +1228,17 @@ namespace AsciiHero
             float runIn = Mathf.Max(stickRun, InputHub.Key("Run") ? 1f : 0f);
             if (mag > 0.85f || (mag > 0 && runIn > 0)) mag = 1 + runIn;
             Vector2? dir = null;
-            if (mag > 0)
-            {
-                float ux = ix / l, uy = iy / l, cs = Mathf.Cos(isoYaw), sn = Mathf.Sin(isoYaw);
-                // web direction, mirrored on X
-                dir = new Vector2(-(ux * cs + uy * sn), -ux * sn + uy * cs);
-            }
+            if (mag > 0) dir = ScreenToWorldDir(new Vector2(ix, iy));
+            // aim: in a fight (a cut, a block or a blow in the last few seconds) the hero faces the nearest creature
+            // within 5 m; out of the fight or out of reach he moves freely
             Vector2? lockPos = null;
-            if (lockOn) { var lp = lockFixed ?? (loc == tavern ? bartenderChar.go.transform.position : loc.spawn); lockPos = new Vector2(lp.x, lp.z); }
+            bool inCombat = player.combatT > 0 || player.Attacking || player.guardHeld;
+            if (inCombat) { var tg = NearestEntity(AIM_R); if (tg.HasValue) lockPos = tg; }
             moveDir = dir;
-            bool guardPtr = false; foreach (var ap in InputHub.active.Values) if (ap.owner == "def") guardPtr = true;
+            bool guardPtr = false; foreach (var ap in InputHub.active.Values) if (ap.owner == "rt:hold") guardPtr = true;
             player.guardHeld = guardPtr || InputHub.Key("Guard");
-            bool atkPtr = false; foreach (var ap in InputHub.active.Values) if (ap.owner == "atk") atkPtr = true;
-            player.atkHeld = atkPtr || InputHub.Key("AttackHeld");
+            bool atkPtr = false;
+            player.atkHeld = InputHub.Key("AttackHeld");
             if (dir.HasValue || guardPtr || atkPtr || InputHub.Key("Attack") || InputHub.Key("Guard") || InputHub.Key("Dash")) player.PokeIdle();
             if (player.IdleBusy) { dir = null; mag = 0; }          // getting up from the ground first
             if (InputHub.Key("Attack")) DoAttack();
@@ -1213,6 +1253,17 @@ namespace AsciiHero
             if (player.idleYawW > 0) { Vector3 co = Mirror(new Vector3(Mathf.Sin(isoYaw), 0, Mathf.Cos(isoYaw))); idleYaw = Mathf.DeltaAngle(player.heading * Mathf.Rad2Deg, Mathf.Atan2(co.x, co.z) * Mathf.Rad2Deg) * Mathf.Deg2Rad * player.idleYawW; }   // waving: turned to the camera
             hero.go.transform.rotation = Quaternion.Euler(0, (player.heading - player.spinYaw + idleYaw) * Mathf.Rad2Deg, 0);      // the full-turn sweep spins the whole figure
             loc.Update(tNow); Pickups(); UpdateDummies(dt, tNow); UpdateDebris(dt); UpdateDanger(tNow);
+            // the lake: every step in the water sends out a ring (standing still, now and then a small one)
+            if (loc == field)
+            {
+                float sp = player.Velocity.magnitude; rippleT -= dt;
+                if (Field.LakeK(pos.x, pos.z) < 0.97f && rippleT <= 0)
+                {
+                    ripples[rippleIx] = new Vector4(pos.x, pos.z, tNow, sp > 0.3f ? 0.75f + 0.12f * Mathf.Min(sp, 4f) : 0.4f); rippleIx = (rippleIx + 1) % ripples.Length;
+                    rippleT = sp > 0.3f ? Mathf.Lerp(0.45f, 0.24f, Mathf.Clamp01(sp / 4f)) : 1.3f + Random.value;
+                }
+                Shader.SetGlobalVectorArray("_WaterRip", ripples);
+            }
             if (respawnT > 0) { respawnT -= dt; if (respawnT <= 0) { RestoreBody(); pos = loc.spawn; player.ResetSim(); } }
             // grass: the hero and a point trailing behind him push the blades aside
             heroTrail = Vector3.Lerp(heroTrail, pos, Mathf.Min(1, dt * 2.2f));
@@ -1264,6 +1315,49 @@ namespace AsciiHero
             camTgt = Vector3.Lerp(camTgt, new Vector3(pos.x, 0.6f, pos.z), Mathf.Min(1, dt * 5));
             sceneCam.transform.position = camTgt + off; sceneCam.transform.LookAt(camTgt);
             sceneCam.fieldOfView = 30 * (1 - 0.014f * heart);
+        }
+
+        /// a direction on the screen (x right, y down) as a direction on the ground (web direction, mirrored on X)
+        Vector2 ScreenToWorldDir(Vector2 v)
+        {
+            float l = v.magnitude; if (l < 1e-5f) return Vector2.zero;
+            float ux = v.x / l, uy = v.y / l, cs = Mathf.Cos(isoYaw), sn = Mathf.Sin(isoYaw);
+            return new Vector2(-(ux * cs + uy * sn), -ux * sn + uy * cs);
+        }
+        /// the nearest creature (training dummies, the bartender) within r metres, or null
+        Vector2? NearestEntity(float r)
+        {
+            Vector2? best = null; float bd = r;
+            if (loc == field)
+                foreach (var d in dummies)
+                {
+                    if (d.root == null || d.dead > 0) continue;
+                    float dd = new Vector2(d.p.x - pos.x, d.p.z - pos.z).magnitude; if (dd < bd) { bd = dd; best = new Vector2(d.p.x, d.p.z); }
+                }
+            if (loc == tavern && bartenderChar != null)
+            {
+                var bp = bartenderChar.go.transform.position; float dd = new Vector2(bp.x - pos.x, bp.z - pos.z).magnitude;
+                if (dd < bd) { bd = dd; best = new Vector2(bp.x, bp.z); }
+            }
+            return best;
+        }
+        /// is this point of the screen (GUI coordinates) on the hero?
+        bool OnHero(Vector2 g)
+        {
+            if (!world || hero == null || sceneCam == null) return false;
+            float W = Screen.width, H = Screen.height;
+            Vector3 a = sceneCam.WorldToViewportPoint(pos), b = sceneCam.WorldToViewportPoint(pos + Vector3.up * (cfg.height / 100f));
+            if (a.z <= 0 || b.z <= 0) return false;
+            Vector2 fa = new Vector2(a.x * W, (1 - a.y) * H), fb = new Vector2(b.x * W, (1 - b.y) * H);
+            float hgt = Mathf.Abs(fa.y - fb.y), half = Mathf.Max(hgt * 0.32f, 0.45f * StickCm()), m = 0.3f * StickCm();
+            return g.x > fa.x - half && g.x < fa.x + half && g.y > Mathf.Min(fa.y, fb.y) - m && g.y < Mathf.Max(fa.y, fb.y) + m;
+        }
+        void OpenBackpack()
+        {
+            if (!world || perfRun) return;
+            invOpen = true; menuFromWorld = false;
+            stickId = int.MinValue; stick = Vector2.zero; stickRun = 0; stickRunArmed = false;
+            foreach (var q in InputHub.active.Values) q.owner = "ui";
         }
 
         void ActionButton(Rect r, string text, bool on)
@@ -1439,8 +1533,9 @@ namespace AsciiHero
             }
             if (world) DrawDanger(W, H);
             if (inMenu && !world) { MenuUI(W, H); ConsoleUI(W, H, false); FinishGui(); return; }
+            if (world && menuFromWorld) { MenuUI(W, H); ConsoleUI(W, H, false); FinishGui(); accG += Ms(tG); return; }
             if (!world) EditorUI(W, H, vr, L, T); else WorldUI(W, H, L, T);
-            if (toastT > 0 && !string.IsNullOrEmpty(toast))
+            if (toastT > 0 && !string.IsNullOrEmpty(toast) && (!world || invOpen))
             {
                 float a = Mathf.Clamp01(toastT / 0.4f); var r = new Rect(vr.center.x - 150 * k, H * 0.18f, 300 * k, 46 * k);
                 Fill(r, new Color(0, 0, 0, 0.7f * a)); var old = GUI.color; GUI.color = new Color(1, 1, 1, a); GUI.Label(r, toast, sToast); GUI.color = old;
@@ -1610,40 +1705,215 @@ namespace AsciiHero
             if (Button(new Rect(x0 + (bw3 + 6 * k) * 2, bottom, bw3, 32 * k), "ПОЛЕ ▶", true)) EnterWorld(true);
         }
 
+        // the world: no interface on the screen at all (the controls are invisible); a tap on the hero opens the backpack
         void WorldUI(float W, float H, float L, float T)
         {
-            GUI.Label(new Rect(L, T, 360 * k, 22 * k), loc == field ? "ТЕСТОВОЕ ПОЛЕ" : "«ПЬЯНЫЙ ДРАКОН»", sTitle);
-            GUI.Label(new Rect(L, T + 20 * k, 360 * k, 14 * k), (loc == field ? "трава · кучи брони · " : "трактир · ") + VERSION, sSmall);
-            int si = cfg.sex == 'f' ? 1 : 0;
-            GUI.Label(new Rect(L, T + 38 * k, 420 * k, 50 * k), "<b>" + SEXNAME[si] + "</b> · " + cfg.height + " см\nСтик — шаг, палец за край — бег\nЦелостность: " + hp + "% · " + animLabel, sBadge);
-            float R = safe.xMax - 10 * k;
-            if (Button(new Rect(R - 96 * k, T, 96 * k, 28 * k), "← ГЕРОЙ")) { LeaveWorld(); return; }
-            if (Button(new Rect(R - 200 * k, T + 32 * k, 200 * k, 26 * k), ascii.surfaceGlyphs ? "Aa: НА МОДЕЛЯХ" : "Aa: СЕТКОЙ", ascii.surfaceGlyphs)) ToggleGlyphMode();
-            if (Button(new Rect(R - 304 * k, T, 96 * k, 28 * k), "УРОН −10%")) Damage(10);
-            if (Button(new Rect(R - 200 * k, T, 96 * k, 28 * k), "ЦЕЛЬ", lockOn))
-            {
-                lockOn = !lockOn; lockFixed = null;
-                if (lockOn && loc == tavern && Vector3.Distance(bartenderChar.go.transform.position, pos) > 10)
-                    lockFixed = new Vector3(pos.x + Mathf.Sin(player.heading) * 20, 0, pos.z + Mathf.Cos(player.heading) * 20);
-                ShowToast(lockOn ? "Фиксация на цели: трактирщик\nСтик — стрейф 8 направлений" : "Свободное движение");
-            }
-            // joystick
             stickR = 62 * k;
-            if (stickId == int.MinValue) stickCenter = ClampStickCenter(new Vector2(0, Screen.height));   // resting place: lowest spot that still leaves room to run
-            var old = GUI.color;
-            GUI.color = new Color(0.93f, 0.74f, 0.33f, 0.55f);
-            GUI.DrawTexture(new Rect(stickCenter.x - stickR, stickCenter.y - stickR, stickR * 2, stickR * 2), texRing);
-            GUI.color = new Color(0.93f, 0.74f, 0.33f, stickId != int.MinValue ? 0.85f : 0.55f);
-            var kc = stickCenter + stick * stickR * 0.78f; float kr = stickR * 0.42f;
-            GUI.DrawTexture(new Rect(kc.x - kr, kc.y - kr, kr * 2, kr * 2), texDisc);
-            GUI.color = old;
-            // action buttons, bottom right: attack (big), guard to its left, dash above
-            float bx = safe.xMax - 22 * k, by = safe.yMax - 22 * k, ra = 46 * k, rb = 34 * k;
-            atkRect = new Rect(bx - ra * 2, by - ra * 2, ra * 2, ra * 2);
-            defRect = new Rect(bx - ra * 2 - 14 * k - rb * 2, by - rb * 2, rb * 2, rb * 2);
-            dashRect = new Rect(bx - ra - rb, by - ra * 2 - 14 * k - rb * 2, rb * 2, rb * 2);
-            bool defOn = player != null && player.guardHeld, atkOn = player != null && player.Attacking, dashOn = dashCd > 0;
-            ActionButton(atkRect, "АТАКА", atkOn); ActionButton(defRect, "БЛОК", defOn); ActionButton(dashRect, "РЫВОК", dashOn);
+            if (invOpen) BackpackUI(W, H);
+        }
+
+        // ---------- backpack ----------
+        static readonly string[] DOLL = {
+            "    .---.    ",
+            "    |o o|    ",
+            "    '-^-'    ",
+            "  .--|=|--.  ",
+            " / /|###|\\ \\ ",
+            "/ / |###| \\ \\",
+            "|_| |###| |_|",
+            "    |_|_|    ",
+            "    /   \\    ",
+            "   / / \\ \\   ",
+            "  / /   \\ \\  ",
+            " /_/     \\_\\ " };
+        // which part each character belongs to (the doll faces us: his right arm is on our left)
+        static readonly string[] DOLL_M = {
+            "    hhhhh    ",
+            "    hhhhh    ",
+            "    hhhhh    ",
+            "  rrrtttlll  ",
+            " rrrtttttlll ",
+            "rrr ttttt lll",
+            "rrr ttttt lll",
+            "    ttttt    ",
+            "    R   L    ",
+            "   RRR LLL   ",
+            "  RRR   LLL  ",
+            " RRR     LLL " };
+        static string ArmorColour(string a)
+        {
+            switch (a) { case "cloth": return "#d6c59c"; case "leather": return "#b8834c"; case "chain": return "#a9b1bd"; case "plate": return "#c6cfdb"; case "robe": return "#7080e0"; default: return "#9a8fb0"; }
+        }
+        string ArmorName() { foreach (var a in Character.ARMORS) if (a[0] == cfg.armor) return a[1]; return "—"; }
+        string WeaponName() { foreach (var w in Character.WEAPONS) if (w[0] == cfg.weapon) return w[1]; return "—"; }
+        void BackpackUI(float W, float H)
+        {
+            Fill(new Rect(0, 0, W, H), new Color(0.01f, 0.01f, 0.02f, 0.82f));
+            var gold = new Color(0.93f, 0.74f, 0.33f); var line = new Color(0.32f, 0.3f, 0.26f, 1);
+            // the game's own buttons: on the left, in the middle
+            float bw = 150 * k, bh = 38 * k, gap = 10 * k, bx = safe.x + 14 * k, by = H / 2 - (4 * bh + 3 * gap) / 2;
+            if (Button(new Rect(bx, by, bw, bh), "СОХРАНИТЬ")) { saveMode = 1; menuPage = 3; menuFromWorld = true; saveInfoDirty = true; }
+            if (Button(new Rect(bx, by + (bh + gap), bw, bh), "ЗАГРУЗИТЬ")) { saveMode = 2; menuPage = 3; menuFromWorld = true; saveInfoDirty = true; }
+            if (Button(new Rect(bx, by + 2 * (bh + gap), bw, bh), "НАСТРОЙКИ")) { menuPage = 1; menuFromWorld = true; }
+            if (Button(new Rect(bx, by + 3 * (bh + gap), bw, bh), "ВЫЙТИ")) { invOpen = false; LeaveWorld(); inMenu = true; menuPage = 0; return; }
+            float R = safe.xMax - 12 * k, T = safe.y + 10 * k;
+            if (Button(new Rect(R - 110 * k, T, 110 * k, 28 * k), "ЗАКРЫТЬ")) { invOpen = false; return; }
+            if (setDev && Button(new Rect(R - 226 * k, T, 110 * k, 28 * k), "УРОН −10%")) Damage(10);
+            float px0 = bx + bw + 16 * k, pw = R - px0, top = T + 36 * k, ph = safe.yMax - 10 * k - top;
+            float lw = pw * 0.54f;
+            var lp = new Rect(px0, top, lw, ph); var rp = new Rect(px0 + lw + 10 * k, top, pw - lw - 10 * k, ph);
+            foreach (var pr in new[] { lp, rp }) { Fill(pr, new Color(0.07f, 0.07f, 0.09f, 0.96f)); Frame(pr, line, Mathf.Max(1, k)); uiRects.Add(pr); }
+
+            // --- left: the hero, what he wears, what is left of him
+            GUI.Label(new Rect(lp.x + 10 * k, lp.y + 6 * k, lp.width - 20 * k, 22 * k), "СНАРЯЖЕНИЕ", sTitle);
+            int fs = Mathf.Max(7, Mathf.RoundToInt(Mathf.Min(13 * k, (lp.height - 44 * k) / (DOLL.Length * 1.2f))));
+            if (sDoll == null || sDoll.fontSize != fs)
+            {
+                sDoll = new GUIStyle(sMono) { richText = true, alignment = TextAnchor.UpperLeft, fontSize = fs, wordWrap = false };
+                sDoll.normal.textColor = Color.white;
+            }
+            var sb = new System.Text.StringBuilder(); string ac = ArmorColour(cfg.armor);
+            for (int li = 0; li < DOLL.Length; li++)
+            {
+                string row = DOLL[li], msk = DOLL_M[li]; string cur = null;
+                for (int ci = 0; ci < row.Length; ci++)
+                {
+                    char m = ci < msk.Length ? msk[ci] : ' ', c = row[ci];
+                    int limb = m == 'h' ? 0 : m == 'l' ? 1 : m == 'r' ? 2 : m == 'L' ? 3 : m == 'R' ? 4 : -1;
+                    bool have = limb < 0 || limbs[limb];
+                    string colr = c == ' ' ? null : have ? ac : "#6a2424";
+                    if (!have && c != ' ') c = '.';
+                    if (colr != cur) { if (cur != null) sb.Append("</color>"); if (colr != null) sb.Append("<color=").Append(colr).Append('>'); cur = colr; }
+                    sb.Append(c);
+                }
+                if (cur != null) sb.Append("</color>");
+                if (li < DOLL.Length - 1) sb.Append('\n');
+            }
+            float dw = lp.width * 0.4f;
+            GUI.Label(new Rect(lp.x + 12 * k, lp.y + 34 * k, dw, lp.height - 40 * k), sb.ToString(), sDoll);
+            // the pieces, one per row: where, what, in what state
+            float sx = lp.x + dw + 14 * k, sw = lp.xMax - sx - 10 * k, sy = lp.y + 34 * k, rh = Mathf.Min(24 * k, (lp.height - 74 * k) / 7f);
+            string armor = ArmorName();
+            void Slot(string where, string what, string state, bool ok)
+            {
+                GUI.Label(new Rect(sx, sy, sw * 0.38f, rh), where, sBadge);
+                GUI.Label(new Rect(sx + sw * 0.38f, sy, sw * 0.62f, rh), what + (state != null ? "  <color=" + (ok ? "#8fd18f" : "#e06060") + ">" + state + "</color>" : ""), sBadge);
+                Fill(new Rect(sx, sy + rh - 1, sw, Mathf.Max(1, k * 0.5f)), new Color(0.25f, 0.24f, 0.22f, 0.6f));
+                sy += rh;
+            }
+            Slot("Голова", armor, limbs[0] ? "цела" : "оторвана", limbs[0]);
+            Slot("Торс", armor, "цел", true);
+            Slot("Правая рука", armor, limbs[2] ? "цела" : "оторвана", limbs[2]);
+            Slot("Левая рука", armor, limbs[1] ? "цела" : "оторвана", limbs[1]);
+            Slot("Правая нога", armor, limbs[4] ? "цела" : "оторвана", limbs[4]);
+            Slot("Левая нога", armor, limbs[3] ? "цела" : "оторвана", limbs[3]);
+            Slot("Оружие", WeaponName(), null, true);
+            // integrity
+            sy += 8 * k;
+            GUI.Label(new Rect(sx, sy, sw, 18 * k), "Целостность доспеха: " + hp + " %", sBadge);
+            var bar = new Rect(sx, sy + 20 * k, sw, 8 * k);
+            Fill(bar, new Color(0.15f, 0.14f, 0.13f, 1)); Fill(new Rect(bar.x, bar.y, bar.width * hp / 100f, bar.height), hp > 50 ? gold : new Color(0.85f, 0.25f, 0.2f));
+
+            // --- right: the backpack itself, a grid of cells
+            const int GC = 6, GR = 4;
+            GUI.Label(new Rect(rp.x + 10 * k, rp.y + 6 * k, rp.width - 20 * k, 22 * k), "РЮКЗАК", sTitle);
+            GUI.Label(new Rect(rp.x + 10 * k, rp.y + 8 * k, rp.width - 20 * k, 18 * k), inventory.Count + " / " + (GC * GR), sRight);
+            float cell = Mathf.Min((rp.width - 20 * k) / GC, (rp.height - 64 * k) / GR), gx = rp.x + (rp.width - cell * GC) / 2, gy = rp.y + 34 * k;
+            for (int r = 0; r < GR; r++)
+                for (int c = 0; c < GC; c++)
+                {
+                    var cr = new Rect(gx + c * cell + 2 * k, gy + r * cell + 2 * k, cell - 4 * k, cell - 4 * k);
+                    Fill(cr, new Color(0.11f, 0.11f, 0.13f, 1)); Frame(cr, line, Mathf.Max(1, k));
+                    int ii = r * GC + c; if (ii < inventory.Count) GUI.Label(cr, inventory[ii], sSmall);
+                }
+            if (inventory.Count == 0) GUI.Label(new Rect(rp.x + 10 * k, gy + GR * cell + 6 * k, rp.width - 20 * k, 18 * k), "Пусто: найденные вещи будут лежать здесь", sSmall);
+        }
+
+        // ---------- saves ----------
+        [System.Serializable] class SaveData
+        {
+            public string version, date, loc, sex, armor, weapon; public float x, z, heading, height; public int hp, build;
+            public bool[] limbs; public float[] body; public string[] items;
+        }
+        static string SavePath(int i) { return System.IO.Path.Combine(Application.persistentDataPath, "save" + (i + 1) + ".json"); }
+        void RefreshSaveInfo()
+        {
+            saveInfoDirty = false;
+            for (int i = 0; i < SAVE_SLOTS; i++)
+            {
+                saveHas[i] = false; saveInfo[i] = "пусто";
+                try
+                {
+                    if (!System.IO.File.Exists(SavePath(i))) continue;
+                    var d = JsonUtility.FromJson<SaveData>(System.IO.File.ReadAllText(SavePath(i)));
+                    if (d == null) continue;
+                    saveHas[i] = true;
+                    saveInfo[i] = d.date + " · " + (d.loc == "tavern" ? "трактир" : "тестовое поле") + " · " + (d.sex == "f" ? "женщина" : "мужчина") + ", " + d.height.ToString("0") + " см · целостность " + d.hp + " %";
+                }
+                catch (System.Exception e) { saveInfo[i] = "не читается (" + e.GetType().Name + ")"; }
+            }
+        }
+        void SaveGame(int i)
+        {
+            bool tav = loc != null && loc == tavern;
+            var d = new SaveData
+            {
+                version = VERSION, date = System.DateTime.Now.ToString("dd.MM.yyyy HH:mm"), loc = tav ? "tavern" : "field",
+                x = loc != null ? pos.x : 0, z = loc != null ? pos.z : 1.5f, heading = player != null ? player.heading : Mathf.PI, hp = hp,
+                limbs = (bool[])limbs.Clone(), sex = cfg.sex.ToString(), build = cfg.build, height = cfg.height, armor = cfg.armor, weapon = cfg.weapon,
+                body = cfg.body != null ? (float[])cfg.body.Clone() : null, items = inventory.ToArray()
+            };
+            try { System.IO.File.WriteAllText(SavePath(i), JsonUtility.ToJson(d)); ShowToast("Сохранено: ячейка " + (i + 1)); Debug.Log("Игра сохранена: " + SavePath(i)); }
+            catch (System.Exception e) { ShowToast("Не удалось сохранить"); Debug.LogException(e); }
+            saveInfoDirty = true;
+        }
+        void LoadGame(int i)
+        {
+            SaveData d;
+            try { d = JsonUtility.FromJson<SaveData>(System.IO.File.ReadAllText(SavePath(i))); }
+            catch (System.Exception e) { ShowToast("Не удалось загрузить"); Debug.LogException(e); return; }
+            if (d == null) return;
+            cfg.sex = d.sex == "f" ? 'f' : 'm'; cfg.build = Mathf.Clamp(d.build, 0, 3); cfg.height = Mathf.Clamp(d.height, Body.DevMin(0), Body.DevMax(0));
+            foreach (var a in Character.ARMORS) if (a[0] == d.armor) cfg.armor = d.armor;
+            foreach (var w in Character.WEAPONS) if (w[0] == d.weapon) cfg.weapon = d.weapon;
+            cfg.body = d.body != null && d.body.Length == Body.N ? (float[])d.body.Clone() : null;
+            if (cfg.body == null) ResetBody();
+            cfg.body[Body.Ix("height")] = cfg.height;
+            SaveCfg();
+            for (int l = 0; l < 5; l++) limbs[l] = d.limbs == null || l >= d.limbs.Length || d.limbs[l];
+            hp = Mathf.Clamp(d.hp, 0, 100); if (hp <= 0) { hp = 100; for (int l = 0; l < 5; l++) limbs[l] = true; }
+            inventory.Clear(); if (d.items != null) inventory.AddRange(d.items);
+            invOpen = false; menuFromWorld = false; inMenu = false; respawnT = 0; dashT = 99; presetIx = -1;
+            Rebuild();
+            EnterWorld(d.loc != "tavern");
+            pos = new Vector3(d.x, 0, d.z); heroTrail = pos; player.heading = d.heading; player.ResetSim();
+            hero.go.transform.position = pos; hero.go.transform.rotation = Quaternion.Euler(0, d.heading * Mathf.Rad2Deg, 0);
+            camTgt = new Vector3(pos.x, 0.6f, pos.z);
+            ShowToast("Загружено: ячейка " + (i + 1));
+        }
+        void SavesUI(float cx, float top, float bottom)
+        {
+            if (saveInfoDirty) RefreshSaveInfo();
+            float pw = Mathf.Min(620 * k, Screen.width - 40 * k), x0 = cx - pw / 2, y0 = top + 56 * k;
+            GUI.Label(new Rect(x0, y0, pw, 22 * k), saveMode == 1 ? "СОХРАНИТЬ ИГРУ" : saveMode == 2 ? "ЗАГРУЗИТЬ ИГРУ" : "СОХРАНЕНИЯ", sTitle);
+            if (Button(new Rect(x0 + pw - 100 * k, y0 - 3 * k, 100 * k, 24 * k), "НАЗАД")) { menuPage = 0; menuFromWorld = false; return; }
+            float rh = Mathf.Min(54 * k, (bottom - y0 - 40 * k) / SAVE_SLOTS - 6 * k);
+            for (int i = 0; i < SAVE_SLOTS; i++)
+            {
+                var r = new Rect(x0, y0 + 32 * k + i * (rh + 6 * k), pw, rh);
+                Fill(r, new Color(0.08f, 0.08f, 0.1f, 0.95f)); Frame(r, new Color(0.32f, 0.3f, 0.26f, 1), Mathf.Max(1, k));
+                float bwid = 120 * k, nb = (saveMode == 0 ? 2 : 1);
+                GUI.Label(new Rect(r.x + 10 * k, r.y + 4 * k, r.width - nb * (bwid + 8 * k) - 20 * k, 20 * k), "Ячейка " + (i + 1), sName);
+                GUI.Label(new Rect(r.x + 10 * k, r.y + 24 * k, r.width - nb * (bwid + 8 * k) - 20 * k, rh - 26 * k), saveInfo[i], sDesc);
+                float bx2 = r.xMax - 8 * k - bwid, bby = r.y + (rh - 30 * k) / 2;
+                if (saveMode != 1)
+                {
+                    if (saveHas[i]) { if (Button(new Rect(bx2, bby, bwid, 30 * k), "ЗАГРУЗИТЬ")) { LoadGame(i); return; } }
+                    else GUI.Label(new Rect(bx2, bby, bwid, 30 * k), "—", sBtn);
+                    bx2 -= bwid + 8 * k;
+                }
+                if (saveMode != 2 && Button(new Rect(bx2, bby, bwid, 30 * k), saveHas[i] ? "ПЕРЕЗАПИСАТЬ" : "СОХРАНИТЬ")) SaveGame(i);
+            }
         }
     }
 }
