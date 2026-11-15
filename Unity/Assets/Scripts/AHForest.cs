@@ -133,7 +133,8 @@ namespace AsciiHero
             void Tree(Vector2 p, float s)
             {
                 float t = Rnd(); string nm = t < 0.4f ? PINE[R.Next(PINE.Length)] : t < 0.75f ? OAK[R.Next(OAK.Length)] : BIRCH[R.Next(BIRCH.Length)];
-                NatureLib.Place(nm, mats, T, new Vector3(p.x, -0.02f, p.y), Rr(0, 360), s, seeMat);
+                var tg = NatureLib.Place(nm, mats, T, new Vector3(p.x, -0.02f, p.y), Rr(0, 360), s, seeMat);
+                var cr = tg.transform.Find("Crown"); if (cr != null) crowns.Add(cr.gameObject);
                 colliders.Add(Collider2.Circle(p.x, p.y, 0.32f * s)); treeAt.Add(p);
                 occluders.Add(new Vector4(p.x, p.y, 1.6f * s, 5.5f * s));
             }
@@ -210,7 +211,7 @@ namespace AsciiHero
             // ---- grass: thinner than in the field, none on the path, in the water or under the trunks ----
             {
                 var pts = new List<Vector3>(); var seeds = new List<float>();
-                for (int i = 0; i < 2 * HX * 2 * HZ * 60; i++)
+                for (int i = 0; i < 2 * HX * 2 * HZ * 38; i++)
                 {
                     float x = Rr(-HX - 1.5f, HX), z = Rr(-HZ, HZ + 1.5f);
                     if (LakeK(x, z) < 1.06f || PathD(x, z) < 0.75f) continue;

@@ -46,17 +46,19 @@ Shader "AsciiHero/WaterRefl"
                 float sz = abs(sl.a) * 12.0;
                 if (sz > 1e-3 && sz < i.vz - 0.06) discard;
                 // the waves and the rings shake the mirror a little
-                float t = _AsciiTime; float2 off = (float2(WNoise(i.pw.xz * 3.1 + t * 0.4), WNoise(i.pw.xz * 3.4 - t * 0.33 + 7.0)) - 0.5) * 0.006;
+                float t = _AsciiTime; float2 off = (float2(WNoise(i.pw.xz * 3.1 + t * 0.4), WNoise(i.pw.xz * 3.4 - t * 0.33 + 7.0)) - 0.5) * 0.006; float rg = 0;
                 [unroll] for (int k = 0; k < 8; k++)
                 {
                     float4 r = _WaterRip[k]; float age = t - r.z;
                     if (r.w <= 0.0 || age < 0.0 || age > 3.5) continue;
                     float2 dv = i.pw.xz - r.xy; float d = length(dv), rad = 0.1 + 0.55 * age * (1.0 - 0.07 * age);
                     float x = (d - rad) / (0.045 + 0.02 * age), e = exp(-x * x) * r.w * exp(-0.85 * age);
-                    off += dv / max(d, 1e-3) * e * 0.008;
+                    rg += e;
                 }
+                // the rings do not shift the mirror (that smeared the coloured reflection along them - rainbow rings): the
+                // mirror fades where a ring passes, so the ring shows white over the water
                 float3 c = SAMPLE_TEXTURE2D(_WaterReflTex, sampler_WaterReflTex, suv + off).rgb;
-                return half4(c * 0.62, 1);
+                return half4(c * 0.62 * (1.0 - saturate(rg * 2.5)), 1);
             }
             ENDHLSL
         }

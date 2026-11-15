@@ -67,11 +67,96 @@ namespace AsciiHero
             for (int i = 0; i < parts.Count; i++)
             {
                 string key = parts[i].mat; string rk; if (recolour != null && recolour.TryGetValue(key, out rk)) key = rk;
+                int kind = LeafKind(name);
+                if (key == "LEAF" && kind >= 0)
+                {
+                    // the leaves are characters, not a model: a cloud of them over the crown's surface; a tree's crown still
+                    // throws its shadow (the model drawn only into the shadow map)
+                    var crown = new GameObject("Crown"); crown.transform.SetParent(h.transform, false);
+                    var lc = new GameObject("Leaves"); lc.layer = GlyphLayer.LAYER; lc.transform.SetParent(crown.transform, false);
+                    lc.AddComponent<MeshFilter>().sharedMesh = LeafMesh(name, i, scale, kind);
+                    var lr = lc.AddComponent<MeshRenderer>(); lr.sharedMaterial = LeafMat(kind, recolour);
+                    lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; lr.receiveShadows = false;
+                    if (shadows && kind <= 2)
+                    {
+                        var sh = MeshGen.Obj(MeshOf(name, i, scale), mats[key], crown.transform, Vector3.zero, Quaternion.identity, true, "CrownShadow");
+                        sh.GetComponent<MeshRenderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.ShadowsOnly;
+                    }
+                    continue;
+                }
                 var mat = matFor != null ? matFor(key) : null; if (mat == null) mat = mats[key];
                 MeshGen.Obj(MeshOf(name, i, scale), mat, h.transform, Vector3.zero, Quaternion.identity, shadows, name + "_" + key);
             }
             return h;
         }
+        // ---- leaves as characters ----
+        /// 0 broadleaf tree (oak, willow), 1 birch, 2 pine, 3 bush, 4 fern; -1: the model's green stays a model (moss, lily)
+        static int LeafKind(string n)
+        {
+            if (n.StartsWith("oak") || n == "willow") return 0;
+            if (n.StartsWith("birch")) return 1;
+            if (n.StartsWith("pine")) return 2;
+            if (n.StartsWith("bush")) return 3;
+            if (n.StartsWith("fern")) return 4;
+            return -1;
+        }
+        static readonly int[] LEAF_CAP = { 620, 560, 640, 110, 34 };
+        static readonly float[] LEAF_SIZE = { 1.05f, 0.95f, 1.0f, 0.9f, 0.75f };
+        static readonly Color[,] LEAF_COL = {
+            { new Color(0.09f, 0.27f, 0.11f), new Color(0.38f, 0.60f, 0.22f) },     // oak
+            { new Color(0.16f, 0.32f, 0.10f), new Color(0.62f, 0.72f, 0.28f) },     // birch: lighter, yellower
+            { new Color(0.05f, 0.20f, 0.13f), new Color(0.20f, 0.44f, 0.28f) },     // pine: dark, bluish
+            { new Color(0.08f, 0.26f, 0.12f), new Color(0.30f, 0.56f, 0.24f) },     // bush
+            { new Color(0.10f, 0.32f, 0.12f), new Color(0.40f, 0.68f, 0.28f) } };   // fern
+        static readonly Dictionary<string, Mesh> leafCache = new Dictionary<string, Mesh>();
+        static readonly Dictionary<int, Material> leafMats = new Dictionary<int, Material>();
+        static Material LeafMat(int kind, Dictionary<string, string> recolour)
+        {
+            Material m; if (leafMats.TryGetValue(kind, out m) && m != null) return m;
+            var sh = Shader.Find("AsciiHero/Leaves"); if (sh == null) { Debug.LogError("AsciiHero/Leaves shader not found"); return null; }
+            m = new Material(sh); m.SetColor("_GrassA", LEAF_COL[kind, 0]); m.SetColor("_GrassB", LEAF_COL[kind, 1]); m.SetFloat("_GrassH", LEAF_SIZE[kind]);
+            leafMats[kind] = m; return m;
+        }
+        /// points scattered over the crown's surface (by area, the faces turned down mostly left out: the camera looks from
+        /// above), at most LEAF_CAP per model; one glyph quad each
+        static Mesh LeafMesh(string name, int part, float scale, int kind)
+        {
+            float sq = Mathf.Round(scale * 20f) / 20f; string key = name + "/" + part + "/" + sq;
+            Mesh m; if (leafCache.TryGetValue(key, out m) && m != null) return m;
+            var p = M[name][part]; int nt = p.t.Length / 3;
+            var area = new float[nt]; var nrm = new Vector3[nt]; float tot = 0, y0 = 1e9f, y1 = -1e9f;
+            foreach (var v in p.v) { y0 = Mathf.Min(y0, v.y); y1 = Mathf.Max(y1, v.y); }
+            for (int t = 0; t < nt; t++)
+            {
+                Vector3 A = p.v[p.t[t * 3]], B = p.v[p.t[t * 3 + 1]], C = p.v[p.t[t * 3 + 2]];
+                var c = Vector3.Cross(B - A, C - A); float ar = c.magnitude * 0.5f; nrm[t] = ar > 1e-8f ? c / (2 * ar) : Vector3.up;
+                if (nrm[t].y < -0.55f) ar *= 0.15f;
+                area[t] = ar; tot += ar;
+            }
+            int n = Mathf.Clamp(Mathf.RoundToInt(tot * sq * sq * 14f), 8, LEAF_CAP[kind]);
+            var R = new System.Random(name.GetHashCode() ^ part * 7919);
+            var cum = new float[nt]; float acc = 0; for (int t = 0; t < nt; t++) { acc += area[t]; cum[t] = acc; }
+            var verts = new List<Vector3>(n * 4); var corners = new List<Vector2>(n * 4); var seeds = new List<Vector2>(n * 4); var nr = new List<Vector2>(n * 4); var tris = new List<int>(n * 6);
+            Vector2[] CR = { new Vector2(-0.5f, -0.5f), new Vector2(0.5f, -0.5f), new Vector2(0.5f, 0.5f), new Vector2(-0.5f, 0.5f) };
+            for (int k = 0; k < n; k++)
+            {
+                float u = (float)R.NextDouble() * acc; int lo = 0, hi = nt - 1;
+                while (lo < hi) { int mid = (lo + hi) / 2; if (cum[mid] < u) lo = mid + 1; else hi = mid; }
+                float r1 = (float)R.NextDouble(), r2 = (float)R.NextDouble(); if (r1 + r2 > 1) { r1 = 1 - r1; r2 = 1 - r2; }
+                Vector3 A = p.v[p.t[lo * 3]], B = p.v[p.t[lo * 3 + 1]], C = p.v[p.t[lo * 3 + 2]];
+                var q = (A + (B - A) * r1 + (C - A) * r2 + nrm[lo] * 0.04f) * sq;
+                float hk = (q.y / sq - y0) / Mathf.Max(0.05f, y1 - y0), sd = (float)R.NextDouble();
+                int o = verts.Count;
+                for (int c = 0; c < 4; c++) { verts.Add(q); corners.Add(CR[c]); seeds.Add(new Vector2(sd, hk)); nr.Add(new Vector2(nrm[lo].y, 0)); }
+                tris.Add(o); tris.Add(o + 2); tris.Add(o + 1); tris.Add(o); tris.Add(o + 3); tris.Add(o + 2);
+            }
+            m = new Mesh { name = "leaves_" + name };
+            m.SetVertices(verts); m.SetUVs(0, corners); m.SetUVs(1, seeds); m.SetUVs(2, nr); m.SetTriangles(tris, 0);
+            m.RecalculateBounds(); var b = m.bounds; b.Expand(0.8f); m.bounds = b;
+            GlyphLayer.count += n;
+            leafCache[key] = m; return m;
+        }
+
         /// the model's size (x, y, z) at scale 1
         public static Vector3 Size(string name)
         {

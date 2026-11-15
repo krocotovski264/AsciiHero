@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.50 · Unity";
+        public const string VERSION = "beta 0.51 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -682,6 +682,7 @@ namespace AsciiHero
                         ShowToast(n == field ? "Поляна" : n == forest ? "Лес" : "Пещера");
                         break;
                     }
+            if (forest != null) forest.ShowCrowns(loc != forest);       // inside the forest: no crowns over the hero (and far less to draw)
             foreach (var n in outdoor)
             {
                 bool on = n == loc || RectDist(Core(n), p2) < 14f;

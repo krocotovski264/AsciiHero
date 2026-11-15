@@ -41,6 +41,7 @@ namespace AsciiHero
             foreach (var r in list)
             {
                 if (r.gameObject.layer == LAYER || r.transform.Find("Glyphs") != null) continue;
+                if (r.shadowCastingMode == UnityEngine.Rendering.ShadowCastingMode.ShadowsOnly) continue;      // (only throws a shadow)
                 var mat = r.sharedMaterial; if (mat == null || !mat.HasProperty("_AsciiRow")) continue;
                 var smr = r as SkinnedMeshRenderer;
                 Mesh src = smr != null ? smr.sharedMesh : (r.GetComponent<MeshFilter>() != null ? r.GetComponent<MeshFilter>().sharedMesh : null);

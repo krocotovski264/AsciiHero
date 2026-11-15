@@ -89,6 +89,9 @@ namespace AsciiHero
         public float moonK = 1, heroLightK = 1.6f, exposure = 1.3f;
         /// the armour lying about (piles); regenerated in new places every time the hero comes to the world
         public readonly List<ArmourPile> piles = new List<ArmourPile>();
+        /// the trees' crowns (leaf clouds and their shadows): the forest hides them while the hero is inside it
+        public readonly List<GameObject> crowns = new List<GameObject>(); bool crownsOn = true;
+        public void ShowCrowns(bool on) { if (on == crownsOn) return; crownsOn = on; foreach (var c in crowns) if (c != null) c.SetActive(on); }
         /// tall things the hero can be hidden behind (x, z, radius, height): they show through around him (see-through)
         public readonly List<Vector4> occluders = new List<Vector4>();
         protected float seeFadeL;
