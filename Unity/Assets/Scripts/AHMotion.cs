@@ -168,7 +168,7 @@ namespace AsciiHero
             if (dir.HasValue)
             {
                 // mag 0..1: stick inside the ring (turn on the spot -> stroll -> brisk walk); 1..2: finger pulled past the ring (run)
-                float walk = mag < 0.22f ? 0 : 0.75f + 0.65f * Mathf.Clamp01((mag - 0.22f) / 0.78f);
+                float walk = mag < 0.22f ? 0 : 0.6f + 0.45f * Mathf.Clamp01((mag - 0.22f) / 0.78f);     // (the walk cycle's own pace is 0.7 m/s)
                 spd = mag <= 1 ? walk : 1.4f + (maxSpeed - 1.4f) * Mathf.Clamp01(mag - 1);
                 // sprint: holding the run for a moment builds into an all-out sprint (and it drops at once when the run is released)
                 float vNow = Mathf.Sqrt(S.vx * S.vx + S.vz * S.vz);
@@ -403,7 +403,7 @@ namespace AsciiHero
             for (int i = 0; i < L.len; i++) { int f = a + i, p = a + (i + L.len - 1) % L.len; if (CON[p * 2] < 0.5f && CON[f * 2] >= 0.5f) { L.off = i; break; } }   // phase 0 = left foot lands
             return L;
         }
-        static void PrepLoops() { if (LIdle != null) return; LIdle = Prep(10493, 10583); LIdleF = Prep(10583, 10663); LWalk = Prep(2490, 2522); LRun = Prep(7851, 7872); }
+        static void PrepLoops() { if (LIdle != null) return; LIdle = Prep(10493, 10583); LIdleF = Prep(10583, 10663); LWalk = Prep(2, 41); LRun = Prep(7851, 7872); }
         Quaternion[] lq, q2, q3; float phase, idlePh, wWalk, wRun;
         readonly float[] c2 = new float[2], c3 = new float[2], cTmp = new float[2];
         void SampleLoop(Loop L, float ph, Quaternion[] oq, ref Vector3 oro, float[] ocon)

@@ -10,6 +10,9 @@ SPEC = []  # (file, start, end)
 # locomotion: a studio-quality set (30 fps, one actor per file): walking with side steps and steps back, running
 # (much of it sideways, good for strafing in a fight), sprinting. Exactly 9945 frames, so everything after it keeps
 # its frame index.
+# a set of styled locomotion in front (neutral style: walking and running forwards, backwards and sideways, standing),
+# then the larger set; its walk is shortened by as much, so the frame indices after the block stay as they were
+STYLE = ['FW', 'FR', 'BW', 'BR', 'SW', 'SR', 'ID', 'Rushed_FR']
 LOCO = [('walk1_subject1.bvh', 60, 4660), ('run1_subject2.bvh', 60, 3260)]
 def _sprint_window(n_need):
     try: c = np.load('/tmp/lf_sprint1_subject2.npz')
@@ -19,7 +22,24 @@ def _sprint_window(n_need):
 H = 10, 20, 30
 rows = {k: [] for k in ('Q', 'RO', 'RM', 'CON', 'F')}; ranges = []; valid = []; tags = []
 total = 0
-_used = sum(b - a for _, a, b in LOCO); _need = 9945 - _used; _sa = _sprint_window(_need); LOCO.append(('sprint1_subject2.bvh', _sa, _sa + _need))
+import sys as _sys; import styles as s100
+for k in STYLE:
+    c = s100.clip(k); n = c['n']; yaw = c['yaw']; traj = c['traj']; LOC = c['LOC']; dt = c['dt']
+    RO = c['RO'].copy(); hy = c['hipsY']; RO[:, 1] = hy - np.percentile(hy, 95) + 0.01
+    vel = np.gradient(LOC, dt, axis=0); F = np.zeros((n, 27))
+    for f in range(n):
+        F[f, 0:3] = LOC[f, 0]; F[f, 3:6] = LOC[f, 1]; F[f, 6:9] = vel[f, 0]; F[f, 9:12] = vel[f, 1]; F[f, 12:15] = [c['lat'][f], 0, c['fwd'][f]]
+        for kk, h in enumerate(H):
+            g = min(f + h, n - 1); d = traj[g] - traj[f]; cy, sy = np.cos(-yaw[f]), np.sin(-yaw[f])
+            F[f, 15 + 2 * kk:17 + 2 * kk] = [cy * d[0] + sy * d[1], -sy * d[0] + cy * d[1]]
+            dy = yaw[g] - yaw[f]; F[f, 21 + 2 * kk:23 + 2 * kk] = [np.sin(dy), np.cos(dy)]
+    rows['Q'].append(c['Q']); rows['RO'].append(RO); rows['F'].append(F)
+    rows['RM'].append(np.stack([c['fwd'], c['lat'], c['yawr']], 1)); rows['CON'].append(c['con'])
+    v = np.ones(n, dtype=bool); v[-31:] = False; v[:2] = False
+    valid.append(v); ranges.append([total, total + n, 'style/' + k]); total += n
+print('styled frames', total)
+LOCO[0] = ('walk1_subject1.bvh', 60, 60 + 4600 - total)
+_used = total + sum(b - a for _, a, b in LOCO); _need = 9945 - _used; _sa = _sprint_window(_need); LOCO.append(('sprint1_subject2.bvh', _sa, _sa + _need))
 import ground as lafan
 for fn, a, b in LOCO:
     cache = '/tmp/lf_' + fn[:-4] + '.npz'

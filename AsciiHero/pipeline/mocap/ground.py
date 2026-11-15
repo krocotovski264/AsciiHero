@@ -12,7 +12,12 @@ def slerpM(A, B, t): return Slerp([0, 1], Rot.from_matrix(np.stack([A, B])))(t).
 def process(fname, a=0, b=None):
     J, data, ft = R.parse_bvh(D + fname)
     b = len(data) if b is None else min(b, len(data))
-    P, E = R.fk_bvh(J, data[a:b]); nf = b - a
+    P, E = R.fk_bvh(J, data[a:b])
+    return from_positions(P, ft, fname)
+def from_positions(P, ft, fname=''):
+    """the same retarget from world joint positions (Hips, Spine1, Neck, Head, Left/Right Arm, ForeArm, Hand, UpLeg, Leg,
+    Foot, Toe; any unit, Y up)"""
+    nf = len(P['Hips'])
     Ls = np.linalg.norm(P['LeftLeg'] - P['LeftUpLeg'], axis=1).mean() + np.linalg.norm(P['LeftFoot'] - P['LeftLeg'], axis=1).mean()
     Lt = np.linalg.norm(H('lowerleg01.L') - H('upperleg01.L')) + np.linalg.norm(H('foot.L') - H('lowerleg01.L'))
     sc = Lt / Ls; P = {k: v * sc for k, v in P.items()}
