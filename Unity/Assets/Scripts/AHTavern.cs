@@ -67,7 +67,56 @@ namespace AsciiHero
         /// the most of his normal pace he can go here (1 = no limit)
         public virtual float SpeedK(float x, float z) { return 1; } public virtual float WaterY => 0.04f;            // the height of the water surface (the mirror's plane)
         public void SetActive(bool on) { root.SetActive(on); }
+        public bool Active => root != null && root.activeSelf;
+
+        // ---- the open world: the outdoor locations stand side by side in one world (the field at the origin, the forest
+        // west of it, the cave north of the forest); each keeps its own coordinates and is moved to its 'origin' ----
+        public Vector3 origin;
+        public string id = "";
+        /// the location's ground in world coordinates (x range, z range), with the strips it shares with its neighbours
+        public Rect WorldRect => new Rect(bounds.xMin + origin.x, bounds.yMin + origin.z, bounds.width, bounds.height);
+        public void PlaceAt(Vector3 o) { origin = o; root.transform.position = o; }
+        public Vector2 L(Vector2 w) { return new Vector2(w.x - origin.x, w.y - origin.z); }
+        public Vector2 CollideW(Vector2 w, float r) { var q = Collide(L(w), r); return new Vector2(q.x + origin.x, q.y + origin.z); }
+        /// only the colliders (no clamping to the bounds): a neighbour's trees and rocks near the seam
+        public Vector2 CollideNoClampW(Vector2 w, float r) { var q = CollideRaw(L(w), r); return new Vector2(q.x + origin.x, q.y + origin.z); }
+        public bool InWaterW(Vector3 w) { return InWater(w.x - origin.x, w.z - origin.z); }
+        public float WaterSinkW(Vector3 w) { return WaterSink(w.x - origin.x, w.z - origin.z); }
+        public float SpeedKW(Vector3 w) { return SpeedK(w.x - origin.x, w.z - origin.z); }
+        public Vector3 SpawnW => spawn + origin;
+        /// the light of the place: ambient (sky, horizon, ground), the moon's share, the hero's lantern, exposure
+        public Color ambSky = new Color(0.3f, 0.35f, 0.45f), ambEq = new Color(0.2f, 0.22f, 0.22f), ambGround = new Color(0.08f, 0.1f, 0.06f);
+        public float moonK = 1, heroLightK = 1.6f, exposure = 1.3f;
+        /// the armour lying about (piles); regenerated in new places every time the hero comes to the world
+        public readonly List<ArmourPile> piles = new List<ArmourPile>();
+        /// tall things the hero can be hidden behind (x, z, radius, height): they show through around him (see-through)
+        public readonly List<Vector4> occluders = new List<Vector4>();
+        protected float seeFadeL;
+        /// default see-through: is a tree crown (an occluder) between the camera and the hero?
+        protected void OccluderSeeThrough(Vector3 camOff)
+        {
+            bool hidden = false; var c2 = new Vector2(camOff.x, camOff.z); float hz = c2.magnitude;
+            if (hz > 1e-3f)
+            {
+                c2 /= hz; float tanP = camOff.y / hz;
+                foreach (var o in occluders)
+                {
+                    var d = new Vector2(o.x - focus.x, o.y - focus.z); float along = Vector2.Dot(d, c2), across = Mathf.Abs(d.x * c2.y - d.y * c2.x);
+                    if (along > -0.3f && along < 5f && across < o.z + 0.6f && o.w > 0.6f + along * tanP) { hidden = true; break; }
+                }
+            }
+            seeFadeL = Mathf.MoveTowards(seeFadeL, hidden ? 1f : 0f, Time.deltaTime * (hidden ? 1.6f : 2.2f));
+            var w = focus + origin;
+            Shader.SetGlobalVector("_SeeHero", new Vector4(w.x, w.y + 1.0f, w.z, 0.2f));
+            Shader.SetGlobalFloat("_SeeFade", Mathf.SmoothStep(0f, 1f, seeFadeL));
+        }
         public Vector2 Collide(Vector2 p, float r)
+        {
+            p = CollideRaw(p, r);
+            p.x = Mathf.Clamp(p.x, bounds.xMin, bounds.xMax); p.y = Mathf.Clamp(p.y, bounds.yMin, bounds.yMax);
+            return p;
+        }
+        public Vector2 CollideRaw(Vector2 p, float r)
         {
             for (int it = 0; it < 2; it++)
                 foreach (var c in colliders)
@@ -93,7 +142,6 @@ namespace AsciiHero
                         }
                     }
                 }
-            p.x = Mathf.Clamp(p.x, bounds.xMin, bounds.xMax); p.y = Mathf.Clamp(p.y, bounds.yMin, bounds.yMax);
             return p;
         }
     }

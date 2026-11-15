@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.49 · Unity";
+        public const string VERSION = "beta 0.50 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -43,7 +43,7 @@ namespace AsciiHero
         Camera display, sceneCam; AsciiRenderer ascii;
         Mats mats, actorMats;
         Character hero; MotionActor player;
-        bool world; Tavern tavern; Field field; Cave cave; Location loc; Light moonLight; Character bartenderChar; MotionActor bartender;
+        bool world; Tavern tavern; Field field; Cave cave; Forest forest; Location loc; readonly List<Location> outdoor = new List<Location>(); float doorCd; Light moonLight; Character bartenderChar; MotionActor bartender;
         // integrity instead of a health bar: five limbs (head, armL, armR, legL, legR), each worth 20 %
         readonly Vector4[] pushPts = new Vector4[4]; static readonly Vector4 FAR = new Vector4(9999, 0, 9999, 0);
         int hp = 100; readonly bool[] limbs = { true, true, true, true, true }; float respawnT; Vector3 heroTrail;
@@ -335,7 +335,7 @@ namespace AsciiHero
                 }
             }
             var hv = player.Velocity;
-            if (loc.InWater(pos.x, pos.z) && sp > 2.3f && heroSink < 0.12f)
+            if (loc.InWaterW(pos) && sp > 2.3f && heroSink < 0.12f)
             {
                 splashT -= dt;
                 if (splashT <= 0)
@@ -572,10 +572,10 @@ namespace AsciiHero
         void RestoreBody() { hp = 100; for (int l = 0; l < 5; l++) limbs[l] = true; if (player != null) player.SetLimbs(limbs); }
         void Pickups()
         {
-            if (field == null || loc != field || hp <= 0) return;
-            foreach (var p in field.piles)
+            if (loc == null || hp <= 0) return;
+            foreach (var p in loc.piles)
             {
-                if ((new Vector2(pos.x - p.pos.x, pos.z - p.pos.z)).magnitude > 0.95f) continue;
+                if ((new Vector2(pos.x - p.pos.x - loc.origin.x, pos.z - p.pos.z - loc.origin.z)).magnitude > 0.95f) continue;
                 string got = "";
                 for (int l = 0; l < 5; l++)
                     if (!limbs[l] && p.Take(l)) { limbs[l] = true; hp = Mathf.Min(100, hp + 20); got += (got.Length > 0 ? ", " : "") + Character.LIMB_NAME[l]; }
@@ -616,7 +616,7 @@ namespace AsciiHero
         void UpdateWaterMirror()
         {
             int nb = 0, nt = 0;
-            if (loc != null && loc.HasWater && hero != null && (loc != field || (new Vector2(pos.x - Field.LAKE.x, pos.z - Field.LAKE.z)).magnitude < 9f))
+            if (loc != null && loc.HasWater && hero != null)
             {
                 var hb = hero.human; float s = cfg.height / 180f;
                 for (int i = 0; i < WB_BONES.Length; i++)
@@ -630,22 +630,112 @@ namespace AsciiHero
                 }
                 nb = WB_BONES.Length;
             }
-            if (loc == field && field != null)
-                foreach (var t in field.trees)
-                {
-                    if (nt >= waterTrees.Length) break;
-                    if (Field.LakeK(t.x, t.y) > 4f) continue;          // too far from the lake to show in it
-                    waterTrees[nt++] = t;
-                }
             Shader.SetGlobalVectorArray("_WaterBody", waterBody); Shader.SetGlobalFloat("_WaterBodyN", nb);
             Shader.SetGlobalVectorArray("_WaterTrees", waterTrees); Shader.SetGlobalFloat("_WaterTreeN", nt);
         }
-        void SetupField()
+        // ---- the open world: field (at the origin), forest west of it, cave north of the forest; all built at once, the
+        // ones the hero is near are switched on, crossing a seam changes the current location and blends its light ----
+        static readonly Vector3 FOREST_O = new Vector3(-20, 0, 0), CAVE_O = new Vector3(-20, 0, -18);
+        void SetupOutdoor()
         {
             if (worldLightsRoot == null) SetupWorldLights();
-            field = Field.Build(mats);
-            GlyphLayer.Build(field.root);
-            Debug.Log("Поле построено, символов на сцене: " + GlyphLayer.count);
+            if (field == null) { field = Field.Build(mats); GlyphLayer.Build(field.root); }
+            if (forest == null) { forest = Forest.Build(mats, 20261116); GlyphLayer.Build(forest.root); forest.PlaceAt(FOREST_O); }
+            if (cave == null)
+            {
+                cave = Cave.Build(mats); GlyphLayer.Build(cave.root); cave.PlaceAt(CAVE_O);
+                cave.addRipple = (x, z, a) => AddRipple(x + CAVE_O.x, z + CAVE_O.z, a);
+            }
+            outdoor.Clear(); outdoor.Add(field); outdoor.Add(forest); outdoor.Add(cave);
+            Debug.Log("Мир построен (поляна, лес, пещера), символов на сцене: " + GlyphLayer.count);
+        }
+        void SetupField() { SetupOutdoor(); }
+        void SetupCave() { SetupOutdoor(); }
+        /// each outdoor location's own ground in world coordinates (without the strips shared with its neighbours)
+        Rect Core(Location l)
+        {
+            if (l == field) return Rect.MinMaxRect(-10, -10, 11.5f, 10);
+            if (l == forest) return Rect.MinMaxRect(FOREST_O.x - 10, FOREST_O.z - 10, FOREST_O.x + 10, FOREST_O.z + 10);
+            if (l == cave) return Rect.MinMaxRect(CAVE_O.x - 10, CAVE_O.z - 8, CAVE_O.x + 10, CAVE_O.z + 8);
+            return l.WorldRect;
+        }
+        static float RectDist(Rect r, Vector2 p) { float dx = Mathf.Max(r.xMin - p.x, 0, p.x - r.xMax), dz = Mathf.Max(r.yMin - p.y, 0, p.y - r.yMax); return Mathf.Sqrt(dx * dx + dz * dz); }
+        /// collide with the current location, and with the trees and rocks of a neighbour near the seam
+        Vector2 WCollide(Vector2 p, float r)
+        {
+            var q = loc.CollideW(p, r);
+            if (outdoor.Contains(loc))
+                foreach (var n in outdoor)
+                    if (n != loc && n.Active && RectDist(Core(n), q) < 2.5f) q = n.CollideNoClampW(q, r);
+            return q;
+        }
+        /// which location the hero is in, which ones are on, how the light blends across a seam
+        void UpdateOutdoor(bool force = false)
+        {
+            if (!outdoor.Contains(loc)) return;
+            var p2 = new Vector2(pos.x, pos.z);
+            if (!Core(loc).Contains(p2))
+                foreach (var n in outdoor)
+                    if (n != loc && Core(n).Contains(p2))
+                    {
+                        loc = n; force = true;
+                        ShowToast(n == field ? "Поляна" : n == forest ? "Лес" : "Пещера");
+                        break;
+                    }
+            foreach (var n in outdoor)
+            {
+                bool on = n == loc || RectDist(Core(n), p2) < 14f;
+                if (n.Active != on) n.SetActive(on);
+            }
+            // the light: each location weighs by how deep the hero is in it (a 4 m blend across each seam)
+            float wsum = 0; Color sky = Color.black, eq = Color.black, gnd = Color.black; float moon = 0, hl = 0, ex = 0;
+            foreach (var n in outdoor)
+            {
+                float d = RectDist(Core(n), p2), inside = Core(n).Contains(p2) ? Mathf.Min(Mathf.Min(p2.x - Core(n).xMin, Core(n).xMax - p2.x), Mathf.Min(p2.y - Core(n).yMin, Core(n).yMax - p2.y)) : -d;
+                float w = Mathf.SmoothStep(0, 1, Mathf.InverseLerp(-2f, 2f, inside));
+                if (w <= 0) continue;
+                wsum += w; sky += n.ambSky * w; eq += n.ambEq * w; gnd += n.ambGround * w; moon += n.moonK * w; hl += n.heroLightK * w; ex += n.exposure * w;
+            }
+            if (wsum > 0)
+            {
+                sky /= wsum; eq /= wsum; gnd /= wsum; moon /= wsum; hl /= wsum; ex /= wsum;
+                SetAmbient(sky, eq, gnd);
+                if (moonLight != null) { moonLight.intensity = 0.3f * moon; moonLight.enabled = moon > 0.02f; }
+                heroLight.intensity = hl; ascii.exposure = ex;
+            }
+        }
+        /// all the armour lies in new places every time the hero comes into the world (the places themselves stay)
+        void RespawnPiles()
+        {
+            var R = new System.Random(System.Environment.TickCount);
+            foreach (var l in outdoor)
+            {
+                var L = l;
+                NatureLib.RespawnPiles(L, mats, 4f, (x, z, r) =>
+                {
+                    foreach (var c in L.colliders)
+                        if (c.circle ? (new Vector2(x - c.x, z - c.z)).magnitude < c.r + r + 0.3f : (x > c.minx - r && x < c.maxx + r && z > c.minz - r && z < c.maxz + r)) return false;
+                    if (L.InWater(x, z) || L.SpeedK(x, z) < 0.9f) return false;
+                    var w = new Vector2(x + L.origin.x, z + L.origin.z);
+                    return Core(L).Contains(w) && RectDist(new Rect(Core(L).xMin + 1, Core(L).yMin + 1, Core(L).width - 2, Core(L).height - 2), w) <= 0;
+                }, R);
+            }
+        }
+        /// through the inn's door: the picture is "retyped" from the door outwards, the other place comes in behind it
+        void Reprint(System.Action go)
+        {
+            Vector2 uv = new Vector2(0.5f, 0.5f);
+            if (sceneCam != null) { var v = sceneCam.WorldToViewportPoint(pos + Vector3.up * 0.9f); uv = new Vector2(v.x, v.y); }
+            if (ascii != null) ascii.StartReprint(uv);
+            go();
+        }
+        void Doors(float dt)
+        {
+            if (doorCd > 0) { doorCd -= dt; return; }
+            if (loc == field && pos.x > Field.DOOR_X - 0.1f && Mathf.Abs(pos.z) < 1.1f)
+            { doorCd = 1.5f; Reprint(() => { EnterWorld(0, new Vector3(3.7f, 0, -2.6f)); player.heading = 0; ShowToast("Трактир «Пьяный дракон»"); }); }
+            else if (loc == tavern && (new Vector2(pos.x - 3.7f, pos.z + 3.6f)).magnitude < 0.75f)
+            { doorCd = 1.5f; Reprint(() => { EnterWorld(1, new Vector3(Field.DOOR_X - 1.4f, 0, 0)); player.heading = -Mathf.PI / 2; ShowToast("Поляна"); }); }
         }
         void SetupWorld()
         {
@@ -770,48 +860,47 @@ namespace AsciiHero
         // ---------- modes ----------
         void EnterWorld(bool toField = false) { EnterWorld(toField ? 1 : 0); }
         /// 0 the tavern, 1 the test field, 2 the cave
-        void EnterWorld(int where)
+        /// where: 0 tavern, 1 field, 2 cave, 3 forest; at: where the hero appears (world), else the location's spawn
+        void EnterWorld(int where) { EnterWorld(where, null); }
+        void EnterWorld(int where, Vector3? at)
         {
             SaveCfg();
             try
             {
-                if (where == 1) { if (field == null) SetupField(); }
-                else if (where == 2) { if (cave == null) SetupCave(); }
-                else if (tavern == null) SetupWorld();
+                if (where == 0) { if (tavern == null) SetupWorld(); }
+                else SetupOutdoor();
             }
             catch (System.Exception e) { Debug.LogException(e); return; }
-            world = true; loc = where == 1 ? (Location)field : where == 2 ? (Location)cave : tavern;
+            bool wasOut = world && outdoor.Contains(loc);
+            world = true; loc = where == 1 ? (Location)field : where == 2 ? (Location)cave : where == 3 ? (Location)forest : tavern;
             if (tavern != null) { tavern.SetActive(where == 0); bartenderChar.go.SetActive(where == 0); }
-            if (field != null) field.SetActive(where == 1);
-            if (cave != null) cave.SetActive(where == 2);
+            foreach (var l in outdoor) l.SetActive(false);
+            if (where != 0 && !wasOut) RespawnPiles();
             worldLightsRoot.SetActive(true); editorRoot.SetActive(false);
-            if (moonLight != null) moonLight.enabled = where != 2;          // underground: no moon
-            heroLight.intensity = where == 2 ? 1.05f : 1.6f;
-            pos = loc.spawn; heroTrail = pos; player.heading = Mathf.PI; player.ResetSim(); player.noLock = false;
+            pos = at ?? loc.SpawnW; heroTrail = pos; player.heading = Mathf.PI; player.ResetSim(); player.noLock = false;
             hero.go.transform.position = pos; hero.go.transform.rotation = Quaternion.Euler(0, 180, 0);
             camTgt = new Vector3(pos.x, 0.6f, pos.z);
             sceneCam.fieldOfView = 30; ascii.exposure = 1.3f; ascii.actorBoost = 1; Shader.SetGlobalFloat("_AsciiLod", ISO_LOD);
-            if (where == 1) SetAmbient(Mats.Hex(0x8fa4d8) * 0.55f, Mats.Hex(0x4a5a58) * 0.55f, Mats.Hex(0x1a2414) * 0.55f);
-            else if (where == 2) SetAmbient(Mats.Hex(0x40506a) * 0.16f, Mats.Hex(0x303840) * 0.14f, Mats.Hex(0x181410) * 0.12f);     // dark, a little cold: the lights do the rest
-            else SetAmbient(Mats.Hex(0x50465a) * 0.45f, Mats.Hex(0x342b32) * 0.45f, Mats.Hex(0x18100a) * 0.45f);
             SetShadowDistance(26);      // (the view reaches about 21 m from the camera; a shorter range keeps the shadow map sharp at half its old size)
-            ShowToast(where == 1 ? "Тестовое поле\nКучи брони возвращают оторванные части" : where == 2 ? "Пещеры\nЧетыре сектора: вход, грот, сырой зал, костница" : "Трактир «Пьяный дракон»");
-        }
-        void SetupCave()
-        {
-            if (worldLightsRoot == null) SetupWorldLights();
-            cave = Cave.Build(mats);
-            GlyphLayer.Build(cave.root);
-            cave.addRipple = AddRipple;
-            Debug.Log("Пещера построена, символов на сцене: " + GlyphLayer.count);
+            if (where == 0)
+            {
+                if (moonLight != null) { moonLight.enabled = true; moonLight.intensity = 0.3f; }
+                heroLight.intensity = 1.6f;
+                SetAmbient(Mats.Hex(0x50465a) * 0.45f, Mats.Hex(0x342b32) * 0.45f, Mats.Hex(0x18100a) * 0.45f);
+                if (at == null) ShowToast("Трактир «Пьяный дракон»");
+            }
+            else
+            {
+                UpdateOutdoor(true);
+                if (at == null) ShowToast(where == 1 ? "Поляна\nНа востоке трактир, на западе лес" : where == 2 ? "Пещеры\nВыход на юг, в лес" : "Лес\nНа севере вход в пещеру, на востоке поляна");
+            }
         }
         void AddRipple(float x, float z, float a) { ripples[rippleIx] = new Vector4(x, z, tNow, a); rippleIx = (rippleIx + 1) % ripples.Length; }
         void LeaveWorld()
         {
             world = false;
             if (tavern != null) { tavern.SetActive(false); bartenderChar.go.SetActive(false); }
-            if (field != null) field.SetActive(false);
-            if (cave != null) cave.SetActive(false);
+            foreach (var l in outdoor) l.SetActive(false);
             worldLightsRoot.SetActive(false); editorRoot.SetActive(true);
             Shader.SetGlobalVector("_AsciiHeroA", new Vector4(0, -99, 0, 0)); Shader.SetGlobalVector("_AsciiHeroB", new Vector4(0, -99, 0, 0)); Shader.SetGlobalVector("_AsciiHeroVel", Vector4.zero);
             for (int i = 0; i < 4; i++) pushPts[i] = FAR; Shader.SetGlobalVectorArray("_AsciiPush", pushPts);
@@ -1218,7 +1307,7 @@ namespace AsciiHero
                 int nc = 0, nbx = 0; Vector2 a0 = new Vector2(pos.x, pos.z), a1 = a0 + new Vector2(dashDir.x, dashDir.z) * (DASH_DIST + 1.5f);
                 foreach (var c in loc.colliders)
                 {
-                    Vector2 cc = c.circle ? new Vector2(c.x, c.z) : new Vector2((c.minx + c.maxx) / 2, (c.minz + c.maxz) / 2);
+                    Vector2 cc = (c.circle ? new Vector2(c.x, c.z) : new Vector2((c.minx + c.maxx) / 2, (c.minz + c.maxz) / 2)) + new Vector2(loc.origin.x, loc.origin.z);
                     float rr = c.circle ? c.r : 0.5f * new Vector2(c.maxx - c.minx, c.maxz - c.minz).magnitude;
                     Vector2 ab = a1 - a0; float tt = Mathf.Clamp01(Vector2.Dot(cc - a0, ab) / Mathf.Max(ab.sqrMagnitude, 1e-6f));
                     if ((a0 + ab * tt - cc).magnitude > rr + 1.6f) continue;
@@ -1228,7 +1317,7 @@ namespace AsciiHero
                 Shader.SetGlobalVectorArray("_DashObst", dashObst); Shader.SetGlobalVectorArray("_DashBox", dashBox);
                 Shader.SetGlobalFloat("_DashObstN", nc); Shader.SetGlobalFloat("_DashBoxN", nbx);
             }
-            System.Func<float, bool> free = l => { var q = new Vector2(pos.x + dashDir.x * l, pos.z + dashDir.z * l); return (loc.Collide(q, 0.27f) - q).sqrMagnitude < 1e-6f; };
+            System.Func<float, bool> free = l => { var q = new Vector2(pos.x + dashDir.x * l, pos.z + dashDir.z * l); return (WCollide(q, 0.27f) - q).sqrMagnitude < 1e-6f; };
             if (!free(dashLen)) { float l = dashLen; while (l < DASH_DIST + 1.5f && !free(l)) l += 0.1f; if (free(l)) dashLen = l; else { l = DASH_DIST; while (l > 0 && !free(l)) l -= 0.1f; dashLen = Mathf.Max(0, l); } }
             // the armour follows piece by piece, one after another, like a suit assembling itself. Every piece is pulled in
             // by its own spring: it accelerates gently, overshoots its place, swings back and only then settles; it tumbles
@@ -1257,7 +1346,7 @@ namespace AsciiHero
         Vector3 Around(Piece pc, Vector3 sh)
         {
             if (pc.rs.Count == 0 || pc.rs[0] == null) return sh;
-            Vector3 c = pc.rs[0].bounds.center + sh; var q = new Vector2(c.x, c.z); var q2 = loc.Collide(q, 0.16f);
+            Vector3 c = pc.rs[0].bounds.center + sh; var q = new Vector2(c.x, c.z); var q2 = WCollide(q, 0.16f);
             return sh + new Vector3(q2.x - q.x, 0, q2.y - q.y);
         }
         // the shadow's own body (the smoke-material glyphs of the hero) during the dash, see AsciiGlyph
@@ -1338,7 +1427,7 @@ namespace AsciiHero
             float l = Mathf.Sqrt(ix * ix + iy * iy), mag = Mathf.Min(1, l / 0.8f); if (mag < 0.12f) mag = 0;   // 80 % of the ring = full walk
             float runIn = Mathf.Max(stickRun, InputHub.Key("Run") ? 1f : 0f);
             if (mag > 0.85f || (mag > 0 && runIn > 0)) mag = 1 + runIn;
-            { float sk = loc.SpeedK(pos.x, pos.z); if (sk != 1 && mag > sk) mag = sk; }        // mud, deep water: a slow wade; shallows: a slower run
+            { float sk = loc.SpeedKW(pos); if (sk != 1 && mag > sk) mag = sk; }        // mud, deep water: a slow wade; shallows: a slower run
             Vector2? dir = null;
             if (mag > 0) dir = ScreenToWorldDir(new Vector2(ix, iy));
             // aim: in a fight (a cut, a block or a blow in the last few seconds) the hero faces the nearest creature
@@ -1355,17 +1444,18 @@ namespace AsciiHero
             if (player.IdleBusy) { dir = null; mag = 0; }          // getting up from the ground first
             if (InputHub.Key("Attack")) DoAttack();
             if (InputHub.Key("Dash")) DoDash();
-            var dd = player.Locomotion(dt, dir, mag, lockPos, new Vector2(pos.x, pos.z), p => loc.Collide(p, 0.27f));
-            var np = loc.Collide(new Vector2(pos.x + dd.x, pos.z + dd.y), 0.27f);
+            var dd = player.Locomotion(dt, dir, mag, lockPos, new Vector2(pos.x, pos.z), p => WCollide(p, 0.27f));
+            var np = WCollide(new Vector2(pos.x + dd.x, pos.z + dd.y), 0.27f);
             pos = new Vector3(np.x, 0, np.y);
             UpdateDash(dt);
             if (player.trail.Count > 0) { foreach (var q in player.trail) SpawnPuff(q, 0.03f, Vector3.zero, 0.3f); player.trail.Clear(); }
             // in the lake the hero sinks a little (up to 18 cm in the middle; the feet and shins are under the surface)
             {
-                float want = loc.WaterSink(pos.x, pos.z);
+                float want = loc.WaterSinkW(pos);
                 heroSink += (want - heroSink) * Mathf.Min(1, dt * 6);
             }
             hero.go.transform.position = pos + Vector3.down * heroSink;
+            UpdateOutdoor(); Doors(dt);
             float idleYaw = 0;
             if (player.idleYawW > 0) { Vector3 co = Mirror(new Vector3(Mathf.Sin(isoYaw), 0, Mathf.Cos(isoYaw))); idleYaw = Mathf.DeltaAngle(player.heading * Mathf.Rad2Deg, Mathf.Atan2(co.x, co.z) * Mathf.Rad2Deg) * Mathf.Deg2Rad * player.idleYawW; }   // waving: turned to the camera
             hero.go.transform.rotation = Quaternion.Euler(0, (player.heading - player.spinYaw + idleYaw) * Mathf.Rad2Deg, 0);      // the full-turn sweep spins the whole figure
@@ -1374,7 +1464,7 @@ namespace AsciiHero
             if (loc.HasWater)
             {
                 float sp = player.Velocity.magnitude; rippleT -= dt;
-                if (loc.InWater(pos.x, pos.z) && rippleT <= 0)
+                if (loc.InWaterW(pos) && rippleT <= 0)
                 {
                     ripples[rippleIx] = new Vector4(pos.x, pos.z, tNow, sp > 0.3f ? 1.15f + 0.15f * Mathf.Min(sp, 4f) : 0.7f); rippleIx = (rippleIx + 1) % ripples.Length;
                     rippleT = sp > 0.3f ? Mathf.Lerp(0.42f, 0.24f, Mathf.Clamp01(sp / 4f)) : 1.1f + Random.value;
@@ -1383,7 +1473,7 @@ namespace AsciiHero
                 UpdateSplash(dt, sp);
                 UpdateWaterMirror();
             }
-            if (respawnT > 0) { respawnT -= dt; if (respawnT <= 0) { RestoreBody(); pos = loc.spawn; player.ResetSim(); } }
+            if (respawnT > 0) { respawnT -= dt; if (respawnT <= 0) { RestoreBody(); pos = loc.SpawnW; player.ResetSim(); } }
             // grass: the hero and a point trailing behind him push the blades aside
             heroTrail = Vector3.Lerp(heroTrail, pos, Mathf.Min(1, dt * 2.2f));
             Shader.SetGlobalVector("_AsciiHeroVel", player != null ? (Vector4)player.Velocity : Vector4.zero);
@@ -1430,7 +1520,7 @@ namespace AsciiHero
             Shader.SetGlobalFloat("_AsciiLod", 1f);      // every character at every zoom (thinning them out when zoomed out read as characters vanishing)
             Vector3 off = Mirror(new Vector3(Mathf.Sin(isoYaw) * Mathf.Cos(isoPitch), Mathf.Sin(isoPitch), Mathf.Cos(isoYaw) * Mathf.Cos(isoPitch)) * (ISO_DIST / worldZoom));
             { var d = new Vector3(off.x, 0, off.z).normalized; heroLight.transform.position = new Vector3(pos.x + d.x * 1.3f - d.z * 0.5f, 2.3f, pos.z + d.z * 1.3f + d.x * 0.5f); }
-            loc.focus = pos; loc.Cutaway(off);
+            loc.focus = pos - loc.origin; loc.Cutaway(off);
             camTgt = Vector3.Lerp(camTgt, new Vector3(pos.x, 0.6f, pos.z), Mathf.Min(1, dt * 5));
             sceneCam.transform.position = camTgt + off; sceneCam.transform.LookAt(camTgt);
             sceneCam.fieldOfView = 30 * (1 - 0.014f * heart);
@@ -1872,11 +1962,12 @@ namespace AsciiHero
                 }
             }
             float bw2 = (cw - 6 * k) / 2;
-            float bw3 = (cw - 18 * k) / 4;
-            if (Button(new Rect(x0, bottom, bw3, 32 * k), "СЛУЧАЙНО")) Randomize();
-            if (Button(new Rect(x0 + bw3 + 6 * k, bottom, bw3, 32 * k), "ТРАКТИР ▶", true)) EnterWorld(0);
+            float bw3 = (cw - 24 * k) / 5;
+            if (Button(new Rect(x0, bottom, bw3, 32 * k), "СЛУЧ.")) Randomize();
+            if (Button(new Rect(x0 + bw3 + 6 * k, bottom, bw3, 32 * k), "БАР ▶", true)) EnterWorld(0);
             if (Button(new Rect(x0 + (bw3 + 6 * k) * 2, bottom, bw3, 32 * k), "ПОЛЕ ▶", true)) EnterWorld(1);
-            if (Button(new Rect(x0 + (bw3 + 6 * k) * 3, bottom, bw3, 32 * k), "ПЕЩЕРА ▶", true)) EnterWorld(2);
+            if (Button(new Rect(x0 + (bw3 + 6 * k) * 3, bottom, bw3, 32 * k), "ЛЕС ▶", true)) EnterWorld(3);
+            if (Button(new Rect(x0 + (bw3 + 6 * k) * 4, bottom, bw3, 32 * k), "ПЕЩЕРА ▶", true)) EnterWorld(2);
         }
 
         // the world: no interface on the screen at all (the controls are invisible); a tap on the hero opens the backpack
@@ -2055,17 +2146,17 @@ namespace AsciiHero
                     var d = JsonUtility.FromJson<SaveData>(System.IO.File.ReadAllText(SavePath(i)));
                     if (d == null) continue;
                     saveHas[i] = true;
-                    saveInfo[i] = d.date + " · " + (d.loc == "tavern" ? "трактир" : d.loc == "cave" ? "пещера" : "тестовое поле") + " · " + (d.sex == "f" ? "женщина" : "мужчина") + ", " + d.height.ToString("0") + " см · целостность " + d.hp + " %";
+                    saveInfo[i] = d.date + " · " + (d.loc == "tavern" ? "трактир" : d.loc == "cave" ? "пещера" : d.loc == "forest" ? "лес" : "поляна") + " · " + (d.sex == "f" ? "женщина" : "мужчина") + ", " + d.height.ToString("0") + " см · целостность " + d.hp + " %";
                 }
                 catch (System.Exception e) { saveInfo[i] = "не читается (" + e.GetType().Name + ")"; }
             }
         }
         void SaveGame(int i)
         {
-            bool tav = loc != null && loc == tavern, cv = loc != null && loc == cave;
+            bool tav = loc != null && loc == tavern, cv = loc != null && loc == cave, fo = loc != null && loc == forest;
             var d = new SaveData
             {
-                version = VERSION, date = System.DateTime.Now.ToString("dd.MM.yyyy HH:mm"), loc = tav ? "tavern" : cv ? "cave" : "field",
+                version = VERSION, date = System.DateTime.Now.ToString("dd.MM.yyyy HH:mm"), loc = tav ? "tavern" : cv ? "cave" : fo ? "forest" : "field",
                 x = loc != null ? pos.x : 0, z = loc != null ? pos.z : 1.5f, heading = player != null ? player.heading : Mathf.PI, hp = hp,
                 limbs = (bool[])limbs.Clone(), sex = cfg.sex.ToString(), build = cfg.build, height = cfg.height, armor = cfg.armor, weapon = cfg.weapon,
                 body = cfg.body != null ? (float[])cfg.body.Clone() : null, items = inventory.ToArray()
@@ -2092,7 +2183,7 @@ namespace AsciiHero
             inventory.Clear(); if (d.items != null) inventory.AddRange(d.items);
             invOpen = false; menuFromWorld = false; inMenu = false; respawnT = 0; dashT = 99; presetIx = -1;
             Rebuild();
-            EnterWorld(d.loc == "tavern" ? 0 : d.loc == "cave" ? 2 : 1);
+            EnterWorld(d.loc == "tavern" ? 0 : d.loc == "cave" ? 2 : d.loc == "forest" ? 3 : 1);
             pos = new Vector3(d.x, 0, d.z); heroTrail = pos; player.heading = d.heading; player.ResetSim();
             hero.go.transform.position = pos; hero.go.transform.rotation = Quaternion.Euler(0, d.heading * Mathf.Rad2Deg, 0);
             camTgt = new Vector3(pos.x, 0.6f, pos.z);

@@ -42,6 +42,17 @@ namespace AsciiHero
         /// of cameras into rtReflFull (0.8 of the output size); the water's surfaces show it (AsciiHero/WaterRefl)
         public bool reflections; public bool waterOn; public float waterY;
         Camera reflCam, reflGlyphCam; RenderTexture rtReflCol, rtReflFull;
+        /// "retyping": the last picture is kept and a front runs out from a point of the screen; behind it the new place,
+        /// on it a band of characters flicking through the alphabet, ahead of it the old picture (doors between places)
+        RenderTexture rtTrans; float transT = 9f; Vector2 transO;
+        public void StartReprint(Vector2 originUV)
+        {
+            if (final == null) return;
+            if (rtTrans == null || rtTrans.width != final.width || rtTrans.height != final.height)
+            { Free(ref rtTrans); rtTrans = RT(final.width, final.height, RenderTextureFormat.ARGB32, FilterMode.Point, 0, RenderTextureReadWrite.Default); }
+            var prev = RenderTexture.active; Graphics.Blit(final, rtTrans); RenderTexture.active = prev;
+            transT = -0.04f; transO = originUV;
+        }
         static readonly int REFL_PASS = Shader.PropertyToID("_AsciiReflPass");
         readonly Material asciiMat, blurMat, finalMat; readonly Texture2D atlas;
         readonly Camera cam, ndCam, glyphCam;
@@ -343,6 +354,15 @@ namespace AsciiHero
                 blurMat.SetVector("_Dir", new Vector4(0, 2.2f / bh)); Graphics.Blit(rtB1, rtB2, blurMat);
             }
             finalMat.SetTexture("_BloomTex", rtB2); finalMat.SetFloat("_Bloom", glow ? bloom : 0);
+            if (transT < 1.6f && rtTrans != null)
+            {
+                transT += Time.unscaledDeltaTime / 0.85f;
+                float asp = (float)W / Mathf.Max(1, H), md = 0;
+                foreach (var c in new[] { new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 1), new Vector2(1, 1) }) md = Mathf.Max(md, new Vector2((c.x - transO.x) * asp, c.y - transO.y).magnitude);
+                finalMat.SetTexture("_TransTex", rtTrans); finalMat.SetFloat("_TransT", transT);
+                finalMat.SetVector("_TransO", new Vector4(transO.x, transO.y, asp, md)); finalMat.SetVector("_TransGrid", new Vector4(cols, rows, 0, 0));
+            }
+            else finalMat.SetFloat("_TransT", 9f);
             Graphics.Blit(src, final, finalMat);
         }
     }

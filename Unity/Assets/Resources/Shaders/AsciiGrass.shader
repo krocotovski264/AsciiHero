@@ -3,6 +3,12 @@
 // (_AsciiHeroB), so the grass parts in front of the feet and closes again a moment later.
 Shader "AsciiHero/Grass"
 {
+    Properties
+    {
+        _GrassA ("colour A", Color) = (0.16, 0.50, 0.24, 1)
+        _GrassB ("colour B", Color) = (0.50, 0.78, 0.36, 1)
+        _GrassH ("height", Float) = 1
+    }
     SubShader
     {
         Tags { "RenderType"="Transparent" "Queue"="Transparent" "RenderPipeline"="UniversalPipeline" }
@@ -24,6 +30,7 @@ Shader "AsciiHero/Grass"
             SAMPLER(ascii_point_clamp_sampler); float _AsciiDepthLit;
             float4 _GlyphInk[224];   // per atlas glyph: the box its ink occupies inside the cell
             float _AsciiRows, _AsciiExposure, _AsciiLinear, _AsciiDepthRef, _AsciiTime;
+            float4 _GrassA, _GrassB; float _GrassH;       // per field of blades: its two colours and height (grass, wheat)
             float4 _AsciiPush[4];      // points of the body that press the grass: xyz, radius (0 = none)
             float _AsciiGrassThin;     // settings: the share of blades that is not drawn (0 = all)
             float4 _AsciiWind;         // wind: xy = direction (world xz), z = strength 0..1.5, w = unused
@@ -55,7 +62,7 @@ Shader "AsciiHero/Grass"
                 Varyings o;
                 float3 a = TransformObjectToWorld(i.positionOS.xyz);
                 float s = i.seed.x;
-                float h = 0.165 + 0.225 * s;          // (one and a half times the old blades)
+                float h = (0.165 + 0.225 * s) * _GrassH;          // (one and a half times the old blades)
                 // wind (main bending along the wind, detail flutter per blade, after Crysis and Ghost of Tsushima):
                 //   * the gust pattern travels downwind across the field, so waves of pressed-down grass roll over it, in
                 //     patches and bands rather than a regular sine, with calmer gaps between them;
@@ -95,7 +102,7 @@ Shader "AsciiHero/Grass"
                 lit = _AsciiLinear > 0.5 ? pow(max(lit, 0.0), 1.0 / 2.2) : max(lit, 0.0);
                 float lum = saturate(dot(lit, float3(0.299, 0.587, 0.114)) * 2.6 * _AsciiExposure);
                 float depthK = clamp(1.0 - (myZ - _AsciiDepthRef) * 0.09, 0.5, 1.2);
-                float3 green = lerp(float3(0.16, 0.50, 0.24), float3(0.50, 0.78, 0.36), frac(s * 13.7));
+                float3 green = lerp(_GrassA.rgb, _GrassB.rgb, frac(s * 13.7));
                 o.col = (green * (0.22 + 0.95 * lum) + lit * 0.5) * depthK * (1.0 - 0.35 * push);
                 o.col *= 1.0 + 0.5 * wave;       // a pressed-down band shows lighter (the blades turn their sides to the light)
                 // the quad covers only the part of the cell the stroke is in (an upright '|' is a third of its cell, a

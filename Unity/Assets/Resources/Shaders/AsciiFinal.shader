@@ -12,6 +12,8 @@ Shader "Hidden/AsciiHero/Final"
             #pragma fragment frag
             #include "UnityCG.cginc"
             sampler2D _MainTex, _BloomTex, _AsciiLitTex; float _Bloom, _Linear, _Outline; float4 _LitPx;
+            // retyping (a door between places): the old picture, how far the front has run, where from, the glyph grid
+            sampler2D _TransTex, _AsciiAtlas; float _TransT, _AsciiRows, _AsciiTime; float4 _TransO, _TransGrid;
             float4 frag (v2f_img i) : SV_Target
             {
                 float3 a = tex2D(_MainTex, i.uv).rgb, b = tex2D(_BloomTex, i.uv).rgb;
@@ -45,6 +47,26 @@ Shader "Hidden/AsciiHero/Final"
                 float3 c = bg + a + b * _Bloom * 1.6;
                 // values are display-referred; in a Linear project convert so the sRGB output shows them unchanged
                 if (_Linear > 0.5) c = pow(max(c, 0), 2.2);
+                if (_TransT < 1.6)
+                {
+                    float d = length((i.uv - _TransO.xy) * float2(_TransO.z, 1.0)) / max(_TransO.w, 1e-3);
+                    const float BAND = 0.17;
+                    float3 old = tex2D(_TransTex, i.uv).rgb;
+                    if (d > _TransT + BAND) c = old;
+                    else if (d > _TransT)
+                    {
+                        // the band: every cell flicks through characters, in the colour of what is there, a little green
+                        float2 cell = floor(i.uv * _TransGrid.xy), lc = frac(i.uv * _TransGrid.xy);
+                        float h = frac(sin(dot(cell + floor(_AsciiTime * 26.0) * float2(3.1, 7.7), float2(12.9898, 78.233))) * 43758.5453);
+                        float g = 2.0 + floor(h * 13.99), rows = max(_AsciiRows, 1.0);
+                        float mk = tex2D(_AsciiAtlas, float2((g + clamp(lc.x, 0.05, 0.95)) / 16.0, 1.0 - 3.0 / rows + clamp(lc.y, 0.05, 0.95) / rows)).r;
+                        float k = (d - _TransT) / BAND;
+                        float3 base = lerp(c, old, k);
+                        float lum = max(dot(base, float3(0.3, 0.5, 0.2)), 0.06);
+                        float3 tint = lerp(base / max(max(base.r, max(base.g, base.b)), 1e-3), float3(0.45, 1.0, 0.6), 0.55) * (0.25 + 1.6 * lum);
+                        c = lerp(base * 0.2, tint, saturate(mk * 1.8 - 0.3));
+                    }
+                }
                 return float4(c, 1);
             }
             ENDCG

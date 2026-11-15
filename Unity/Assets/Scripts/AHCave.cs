@@ -86,11 +86,17 @@ namespace AsciiHero
 
         public static Cave Build(Mats mats) { var C = new Cave(); C.Construct(mats); return C; }
 
+        /// the mouth in the near (south) wall: out into the forest
+        public const float MOUTH_X = 5f;
         void Construct(Mats mats)
         {
             root = new GameObject("Cave"); var T = root.transform; R = new System.Random(20261115);
-            spawn = new Vector3(6, 0, 5.4f);
-            bounds = Rect.MinMaxRect(-HX + 0.6f, -HZ + 0.6f, HX - 0.6f, HZ - 0.6f);
+            id = "cave";
+            ambSky = Mats.Hex(0x40506a) * 0.16f; ambEq = Mats.Hex(0x303840) * 0.14f; ambGround = Mats.Hex(0x181410) * 0.12f;    // dark, a little cold
+            moonK = 0; heroLightK = 1.05f; exposure = 1.3f;
+            spawn = new Vector3(MOUTH_X, 0, HZ - 2.0f);
+            // (the south edge is open where the mouth leads out into the forest)
+            bounds = Rect.MinMaxRect(-HX + 0.6f, -HZ + 0.6f, HX - 0.6f, HZ + 2.6f);
             glowEm = Mats.Hex(0x3fd8b8);
 
             // water: a deep pool and shallow ones in the wet hall, a puddle under the stalactites, one in the bone chamber
@@ -278,6 +284,7 @@ namespace AsciiHero
                 float x = Rr(x0, x1), z = Rr(z0, z1); var q = new Vector2(x, z);
                 if (WaterK(x, z) < 1.25f || MudK(x, z) < 1.1f) continue;
                 if ((q - new Vector2(spawn.x, spawn.z)).magnitude < 1.2f) continue;
+                if (Mathf.Abs(x - MOUTH_X) < 2.4f && z > HZ - 3.2f) continue;            // keep the way out free
                 bool ok = true;
                 foreach (var c in colliders) if (c.circle && (q - new Vector2(c.x, c.z)).magnitude < c.r + r + 0.15f) { ok = false; break; }
                 if (ok) return q;
@@ -286,7 +293,7 @@ namespace AsciiHero
         }
         /// a scanned mesh, its size baked into the vertices (the characters are laid out on the mesh as it is, so a
         /// scaled transform would stretch them apart); flipX mirrors it
-        static Mesh CaveMesh(string name, Vector3 scale, bool flipX = false)
+        public static Mesh CaveMesh(string name, Vector3 scale, bool flipX = false)
         {
             if (CM == null)
             {
@@ -408,6 +415,7 @@ namespace AsciiHero
                 rockSegs.Add(new RockSeg { a = new Vector2(r.x, 0.1f), b = new Vector2(r.y, 0.1f), t = 0.42f, h = Rr(2.1f, 2.6f) });
             // the crevices the side light comes through (Beam below starts in them)
             slots.Add(new Slot { a = new Vector3(12.5f, 2.1f, 4.65f), b = new Vector3(8.6f, 1.0f, 4.35f), r = 0.42f });
+            slots.Add(new Slot { a = new Vector3(MOUTH_X, 1.15f, HZ - 1.4f), b = new Vector3(MOUTH_X, 1.15f, HZ + 2.8f), r = 1.75f });     // the mouth
             slots.Add(new Slot { a = new Vector3(-12.6f, 2.3f, -2.95f), b = new Vector3(-8.7f, 1.1f, -2.75f), r = 0.38f });
             slots.Add(new Slot { a = new Vector3(-5.75f, 2.5f, -11.5f), b = new Vector3(-5.55f, 1.2f, -7.3f), r = 0.38f });
 
@@ -481,6 +489,7 @@ namespace AsciiHero
                 for (float t2 = 0; t2 <= L + 0.01f; t2 += 0.45f)
                 {
                     var q = a + dir * t2; float r = reach(q, inward);
+                    if (Air(new Vector3(q.x, 0.35f, q.y)) > 0.05f) continue;           // open here (the mouth)
                     colliders.Add(Collider2.Circle(q.x, q.y, Mathf.Max(0.35f, r + 0.12f)));
                     if (Rnd() < 0.18f) { var mp = q + inward * (r + 0.15f); if (WaterK(mp.x, mp.y) > 1.2f) Moss(T, mats, mp.x, mp.y, Rr(0.3f, 0.55f), 0.01f); }
                 }
@@ -682,7 +691,7 @@ namespace AsciiHero
             }
             // the walls start to show through, then thin out (a second or so), and fill in again when he leaves
             seeFade = Mathf.MoveTowards(seeFade, hidden ? 1f : 0f, Time.deltaTime * (hidden ? 1.6f : 2.2f));
-            Shader.SetGlobalVector("_SeeHero", new Vector4(focus.x, focus.y + 1.0f, focus.z, 0.2f));
+            Shader.SetGlobalVector("_SeeHero", new Vector4(focus.x + origin.x, focus.y + 1.0f, focus.z + origin.z, 0.2f));
             Shader.SetGlobalFloat("_SeeFade", Mathf.SmoothStep(0f, 1f, seeFade));
         }
     }

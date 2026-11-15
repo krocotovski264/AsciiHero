@@ -10,13 +10,15 @@ namespace AsciiHero
             GLOW = 10, EYE = 11, DARK = 12, RED = 13, ROBE = 14, ROBED = 15, STONE = 16, LEATHER2 = 17, HAIR2 = 18,
             PLANK = 19, BEAM = 20, PLASTER = 21, HEARTH = 22, FIRE = 23, MOON = 24, GLASS = 25, GLASS2 = 26, GLASS3 = 27, FLOOR = 28,
             SHADOW = 29, GROUND = 30, LEAF = 31, ROCK = 32, WATER = 33,
-            CAVEFLOOR = 34, WETROCK = 35, MUD = 36, MOSS = 37, BONE = 38, MUSH = 39, GLOWSHROOM = 40;
+            CAVEFLOOR = 34, WETROCK = 35, MUD = 36, MOSS = 37, BONE = 38, MUSH = 39, GLOWSHROOM = 40,
+            BARK = 41, BIRCH = 42, WHEAT = 43, FLOWERB = 44, FLOWERP = 45, HAY = 46, ROOF = 47, WINDOW = 48, FLOWERW = 49, ROAD = 50;
         // material id -> glyph ramp (same table as the web build)
         public static readonly int[] RAMP = {
             0, 1, 2, 2, 3, 4, 5, 6, 7, 8, 9, 9, 10, 2, 2, 2, 11, 3, 1,
             7, 7, 2, 11, 9, 9, 6, 6, 6, 11,
             13, 11, 1, 11, 11,
-            11, 11, 10, 1, 2, 4, 9 };
+            11, 11, 10, 1, 2, 4, 9,
+            7, 7, 1, 9, 9, 11, 2, 2, 9, 11 };
     }
 
     public class MatDef
@@ -72,6 +74,16 @@ namespace AsciiHero
             { "MUSH", new MatDef(MatId.MUSH, 0x8a5e3c, 0.9f, 0) },
             { "GLOWSHROOM", new MatDef(MatId.GLOWSHROOM, 0x5ff0d0, 0.5f, 0, 0x3fd8b8) },     // the lake (its characters come from the water shader)
             { "STONE", new MatDef(MatId.STONE, 0xffffff, 0.95f, 0, 0, true) },
+            { "BARK", new MatDef(MatId.BARK, 0x4a3424, 1, 0, 0, true) },
+            { "BIRCH", new MatDef(MatId.BIRCH, 0xc8c8bc, 1, 0, 0, true) },
+            { "WHEAT", new MatDef(MatId.WHEAT, 0xc8a24a, 1, 0, 0, true, true) },
+            { "FLOWERB", new MatDef(MatId.FLOWERB, 0x3a6ad8, 1, 0, 0x0a1430, true, true) },
+            { "FLOWERP", new MatDef(MatId.FLOWERP, 0xd84a8a, 1, 0, 0x200814, true, true) },
+            { "FLOWERW", new MatDef(MatId.FLOWERW, 0xeeeee0, 1, 0, 0x181818, true, true) },
+            { "HAY", new MatDef(MatId.HAY, 0xb08a3a, 1, 0, 0, true) },
+            { "ROOF", new MatDef(MatId.ROOF, 0x4a3a40, 1, 0, 0, true) },
+            { "WINDOW", new MatDef(MatId.WINDOW, 0xffb860, 1, 0, 0xffa040) },          // warm light in the windows at night
+            { "ROAD", new MatDef(MatId.ROAD, 0x3a2e22, 1, 0, 0, true) },
         };
 
         public static Color Hex(uint c) { return new Color(((c >> 16) & 255) / 255f, ((c >> 8) & 255) / 255f, (c & 255) / 255f, 1); }
@@ -99,9 +111,9 @@ namespace AsciiHero
                 m.SetFloat("_AsciiActor", actor ? 1 : 0);
                 bool big = kv.Key == "FLOOR" || kv.Key == "PLASTER" || kv.Key == "PLANK" || kv.Key == "HEARTH" || kv.Key == "STONE" || kv.Key == "BEAM";
                 m.SetFloat("_GlyphSmoke", kv.Key == "SHADOW" ? 1 : 0);
-                m.SetFloat("_Cloth", actor && (kv.Key == "ROBE" || kv.Key == "ROBED") ? 1 : kv.Key == "LEAF" ? 2 : 0);      // 2: leaves, swaying in the wind
-                m.SetFloat("_AsciiFlat", kv.Key == "GROUND" || kv.Key == "FLOOR" || kv.Key == "WATER" || kv.Key == "CAVEFLOOR" || kv.Key == "MUD" ? 1 : 0);        // floors and walls get no outline
-                if (kv.Key == "GROUND" || kv.Key == "CAVEFLOOR" || kv.Key == "MUD") m.SetVector("_GlyphCell", new Vector4(0.11f, 0.18f, 0, 0)); else
+                m.SetFloat("_Cloth", actor && (kv.Key == "ROBE" || kv.Key == "ROBED") ? 1 : kv.Key == "LEAF" || kv.Key == "WHEAT" || kv.Key == "FLOWERB" || kv.Key == "FLOWERP" || kv.Key == "FLOWERW" ? 2 : 0);      // 2: leaves, swaying in the wind
+                m.SetFloat("_AsciiFlat", kv.Key == "GROUND" || kv.Key == "FLOOR" || kv.Key == "WATER" || kv.Key == "CAVEFLOOR" || kv.Key == "MUD" || kv.Key == "ROAD" ? 1 : 0);        // floors and walls get no outline
+                if (kv.Key == "GROUND" || kv.Key == "CAVEFLOOR" || kv.Key == "MUD" || kv.Key == "ROAD") m.SetVector("_GlyphCell", new Vector4(0.11f, 0.18f, 0, 0)); else
                 if (kv.Key == "WETROCK") m.SetVector("_GlyphCell", new Vector4(0.07f, 0.115f, 0, 0)); else
                 if (kv.Key == "BONE") m.SetVector("_GlyphCell", new Vector4(0.022f, 0.036f, 0, 0)); else       // thin real bones: finer characters
                 m.SetVector("_GlyphCell", actor ? new Vector4(0.0135f, 0.0222f, 0, 0) : big ? new Vector4(0.06f, 0.1f, 0, 0) : new Vector4(0.034f, 0.056f, 0, 0));

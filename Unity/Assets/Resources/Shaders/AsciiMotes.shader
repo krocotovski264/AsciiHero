@@ -5,6 +5,8 @@
 //  _MoteMode 2 - drops falling from the ceiling: each falls from _MoteParams.y to its point and is gone; one drop per
 //                _MoteParams.z seconds per point, the phase from seed.x (the game makes the ring on the water at the
 //                same moment)
+//  _MoteMode 4 - falling leaves: each drifts down from the top of its column (local y 0..1) swaying side to side,
+//                turning (, ` ' ~), and starts again from the top
 //  _MoteMode 3 - the shaft of a beam: faint streaks along the beam (/ | \ - by its direction on the screen), brightest
 //                on its axis, shimmering slowly as if dust drifted through it
 Shader "AsciiHero/Motes"
@@ -61,6 +63,15 @@ Shader "AsciiHero/Motes"
                     float ph = frac(t / (2.2 + 2.0 * frac(s * 4.3)) + s * 9.7);
                     bright = pow(saturate(sin(ph * 3.14159)), 6.0) * 0.9 + 0.08;
                     row = 9.0; gi = bright > 0.5 ? 2.0 : 1.0;          // * .
+                }
+                else if (_MoteMode > 3.5)
+                {   // a falling leaf
+                    float P = 7.0 + 6.0 * frac(s * 3.7), ph = frac(t / P + k);
+                    lp.y = 1.0 - ph;
+                    float sw = sin(t * (1.1 + frac(s * 5.3)) + s * 17.0);
+                    lp.x += sw * 0.35 + ph * 0.6 * (frac(s * 2.9) - 0.5); lp.z += cos(t * 0.9 + s * 9.0) * 0.25;
+                    bright = smoothstep(0.0, 0.08, ph) * smoothstep(1.0, 0.92, ph) * (0.6 + 0.4 * frac(s * 7.7));
+                    row = 1.0; gi = sw > 0.5 ? 4.0 : sw > -0.2 ? 3.0 : sw > -0.7 ? 2.0 : 6.0;      // , ' ` ~
                 }
                 else if (_MoteMode > 2.5)
                 {   // the shaft of a beam

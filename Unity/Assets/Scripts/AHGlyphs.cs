@@ -31,6 +31,7 @@ namespace AsciiHero
         static readonly int[] BAYER8 = {
             0, 32, 8, 40, 2, 34, 10, 42, 48, 16, 56, 24, 50, 18, 58, 26, 12, 44, 4, 36, 14, 46, 6, 38, 60, 28, 52, 20, 62, 30, 54, 22,
             3, 35, 11, 43, 1, 33, 9, 41, 51, 19, 59, 27, 49, 17, 57, 25, 15, 47, 7, 39, 13, 45, 5, 37, 63, 31, 55, 23, 61, 29, 53, 21 };
+        static readonly Dictionary<string, Mesh> SAMPLED = new Dictionary<string, Mesh>();
         public static readonly Dictionary<Renderer, Renderer> pairs = new Dictionary<Renderer, Renderer>();
         public static List<Renderer> Build(GameObject root, int[] limbOfBone = null)
         {
@@ -46,7 +47,12 @@ namespace AsciiHero
                 if (src == null) continue;
                 var gm = GlyphMaterial(mat.GetFloat("_AsciiRow"), mat.GetVector("_GlyphCell"), mat.GetFloat("_AsciiActor"), mat.HasProperty("_GlyphSmoke") ? mat.GetFloat("_GlyphSmoke") : 0, mat.HasProperty("_Cloth") ? mat.GetFloat("_Cloth") : 0, mat.HasProperty("_SeeThrough") ? mat.GetFloat("_SeeThrough") : 0);
                 if (gm == null) return made;
-                int[] cum; var mesh = Sample(src, mat.GetVector("_GlyphCell"), smr != null, limbOfBone, out cum);
+                int[] cum = null; Mesh mesh;
+                // the same static mesh with the same cell (trees, wheat, flowers placed many times): its characters are
+                // laid out once and shared
+                string ckey = smr == null && limbOfBone == null && mat.GetFloat("_AsciiActor") < 0.5f ? src.GetInstanceID() + ":" + mat.GetVector("_GlyphCell") : null;
+                if (ckey != null && SAMPLED.TryGetValue(ckey, out mesh)) { }
+                else { mesh = Sample(src, mat.GetVector("_GlyphCell"), smr != null, limbOfBone, out cum); if (ckey != null && mesh != null) SAMPLED[ckey] = mesh; }
                 if (mesh == null) continue;
                 bool actorMesh = mat.GetFloat("_AsciiActor") > 0.5f;
                 var go = new GameObject("Glyphs"); go.layer = LAYER;
@@ -212,11 +218,13 @@ namespace AsciiHero
 
         /// Grass. The blades are split into tiles of 4 x 4 m, each its own mesh, so the tiles outside the view are not
         /// sent to the GPU at all (as one mesh, every blade of the field ran the vertex shader every frame).
-        public static GameObject MakeGrass(List<Vector3> pts, List<float> seedList, Transform parent)
+        public static GameObject MakeGrass(List<Vector3> pts, List<float> seedList, Transform parent) { return MakeGrass(pts, seedList, parent, new Color(0.16f, 0.50f, 0.24f), new Color(0.50f, 0.78f, 0.36f), 1f); }
+        /// (the same for a field of wheat: other colours, taller blades)
+        public static GameObject MakeGrass(List<Vector3> pts, List<float> seedList, Transform parent, Color ca, Color cb, float height)
         {
             var sh = Shader.Find("AsciiHero/Grass"); if (sh == null) { Debug.LogError("AsciiHero/Grass shader not found"); return null; }
             var root = new GameObject("Grass"); root.layer = LAYER; root.transform.SetParent(parent, false);
-            var mat = new Material(sh);
+            var mat = new Material(sh); mat.SetColor("_GrassA", ca); mat.SetColor("_GrassB", cb); mat.SetFloat("_GrassH", height);
             const float TILE = 4f; var tiles = new Dictionary<long, List<int>>();
             for (int i = 0; i < pts.Count; i++)
             {
