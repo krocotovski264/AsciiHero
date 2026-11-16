@@ -299,7 +299,15 @@ namespace AsciiHero
             glyphCam.fieldOfView = cam.fieldOfView; glyphCam.nearClipPlane = cam.nearClipPlane; glyphCam.farClipPlane = cam.farClipPlane;
             glyphCam.aspect = cam.aspect;
             glyphCam.transform.localPosition = Vector3.zero; glyphCam.transform.localRotation = Quaternion.identity;
+            // a sideways shift of the picture (the editor: the hero in the middle of the part not under the panel, the
+            // picture still filling the screen behind the panel)
+            foreach (var c in new[] { cam, ndCam, glyphCam })
+            {
+                c.ResetProjectionMatrix();
+                if (shiftX != 0) { var pm = c.projectionMatrix; pm.m02 += shiftX; c.projectionMatrix = pm; }
+            }
         }
+        public float shiftX;
 
         /// Once after the targets are built: does the alpha of the lit colour really hold the depth on this device?
         /// (It does when URP draws straight into the target; if some pass in between rewrote the alpha, every sample

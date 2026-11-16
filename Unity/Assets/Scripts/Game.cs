@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.65 · Unity";
+        public const string VERSION = "beta 0.66 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -1092,10 +1092,14 @@ namespace AsciiHero
         }
         void MenuUI(float W, float H)
         {
-            if (!world) MenuLandscape(W, H);
             // (in the world the settings lie on their cloud of smoke over the game, no square behind them)
             float cx = W / 2, top = safe.y + 30 * k, bottom = safe.yMax - 10 * k;
-            if (menuPage != 0) { Smoke(new Rect(cx - 300 * k, top + 30 * k, 600 * k, bottom - top - 30 * k), false, 0, 0.95f); smokeFlat = true; }       // (the pages lie on a cloud of smoke, their buttons part of it)
+            if (menuPage != 0)
+            {   // the pages lie on a cloud of smoke, their buttons part of it; 'back' is a puff of its own, left of the cloud
+                Smoke(new Rect(cx - 300 * k, top + 30 * k, 600 * k, bottom - top - 30 * k), false, 0, 0.95f);
+                if (Button(new Rect(cx - 300 * k - 120 * k, top + 46 * k, 104 * k, 30 * k), "< НАЗАД")) { menuPage = 0; menuFromWorld = false; return; }
+                smokeFlat = true;
+            }
             GUI.Label(new Rect(cx - 250 * k, top, 500 * k, 50 * k), "ASCII HERO", sBig);
             if (menuPage == 0)
             {
@@ -1114,12 +1118,12 @@ namespace AsciiHero
             {
                 GUI.Label(new Rect(x0, y0, pw, 22 * k), "РАЗРАБОТЧИКИ", sTitle);
                 for (int i = 0; i < DEVELOPERS.Length; i++) GUI.Label(new Rect(x0, y0 + (28 + 24 * i) * k, pw, 22 * k), DEVELOPERS[i], sBadge);
-                if (Button(new Rect(cx - 70 * k, bottom - 36 * k, 140 * k, 30 * k), "НАЗАД")) menuPage = 0;
+
                 return;
             }
             y0 = top + 46 * k;
             GUI.Label(new Rect(x0, y0, pw, 22 * k), "НАСТРОЙКИ", sTitle);
-            if (Button(new Rect(x0 + pw - 100 * k, y0 - 3 * k, 100 * k, 24 * k), "НАЗАД")) { menuPage = 0; menuFromWorld = false; }
+
             float rh = Mathf.Min(25 * k, (bottom - 34 * k - (y0 + 26 * k)) / 11f), y1 = y0 + 26 * k; int row = 0; bool changed = false;
             void Row(string name, string value, System.Action dec, System.Action inc)
             {
@@ -1892,7 +1896,7 @@ namespace AsciiHero
             if (!ready || ascii == null) return;
             k = Mathf.Max(0.5f, Mathf.Min(Screen.height / 390f, Screen.width / 844f));
             safe = Screen.safeArea; safe.y = Screen.height - safe.yMax;   // to GUI coordinates
-            var vr = ViewRect();
+            var vr = ViewRect(); float W0 = Screen.width;
             float dp = Screen.dpi > 0 ? Mathf.Clamp(Screen.dpi / 160f, 1f, 4f) : Mathf.Max(1f, k);
             float wcss = vr.width / dp;
             float cell = Mathf.Max(4f / dp, world ? Mathf.Min(1.7f, wcss / 540f) : Mathf.Min(2.0f, wcss / 310f));
@@ -1913,7 +1917,10 @@ namespace AsciiHero
                 var wl = loc != null && outdoor.Contains(loc) ? waterSeen : loc;
                 ascii.waterOn = world && wl != null && wl.HasWater; if (wl != null) ascii.waterY = wl.WaterY;
             }
-            ascii.SetSize(Mathf.RoundToInt(vr.width), Mathf.RoundToInt(vr.height), cell * dp);
+            // (the editor: the picture fills the whole screen, shifted so the hero stands in the middle of the part left of the panel)
+            ascii.shiftX = world ? 0 : (W0 - vr.width) / W0;
+            var rr0 = world ? vr : new Rect(0, 0, W0, vr.height);
+            ascii.SetSize(Mathf.RoundToInt(rr0.width), Mathf.RoundToInt(rr0.height), cell * dp);
             ascii.SetEnabled(!(inMenu && !world) || perfRun);         // (behind the main menu the landscape is drawn instead: the scene is not rendered at all)
             // the backpack's projection of the hero: its own small ASCII render of the figure in the studio
             if (projAscii != null)
@@ -1945,6 +1952,7 @@ namespace AsciiHero
             }
             if (player != null && player.driver != null) player.Animate(tNow, Mathf.Min(0.1f, Time.deltaTime));
             if (world && invOpen) MirrorPose();
+            SmokeLayerPrepare();
             HideHeroBehindPocket(world && invOpen && pocketT > 0.3f && pocketClose < 0.3f);
         }
 
@@ -2018,23 +2026,88 @@ namespace AsciiHero
             return false;
         }
         // ---- the interface in the hero's shadow-smoke (Hidden/AsciiHero/SmokeBox) ----
-        Material smokeMat;
-        /// a piece of smoke round r: a button, a panel; on = lit violet; burst 0..1 = just pressed
+        // The smoke is one layer for the whole interface: every piece drawn this frame (a button, a panel, the pocket's
+        // clouds) is listed; next frame they are all drawn together - pass 1 (a quarter of the screen) works out the
+        // distance to the edge of all of them at once, so pieces that touch run into one another; pass 2 draws the smoke
+        // from it under the interface's text.
+        struct SPiece { public Vector4 a, b; }
+        readonly List<SPiece> spCur = new List<SPiece>(), spDraw = new List<SPiece>();
+        RenderTexture smokeRT; Material sdfMat, compMat; bool smokeReady;
+        readonly Vector4[] ssA = new Vector4[48], ssB = new Vector4[48], sbl = new Vector4[224], sfl = new Vector4[128];
+        /// a piece of smoke: r its body, rad its corners, on lit violet, burst 0..1 just pressed, alpha its opacity
+        void AddPiece(Rect r, float rad, bool on, float burst, float alpha)
+        {
+            if (alpha <= 0.01f || spCur.Count >= 48) return;
+            spCur.Add(new SPiece { a = new Vector4(r.center.x, r.center.y, r.width * 0.5f, r.height * 0.5f), b = new Vector4(rad, on ? 1 : 0, burst, alpha) });
+        }
         bool smokeFlat;       // the buttons lie on a panel of smoke: no smoke of their own (only the burst of a press)
         void Smoke(Rect r, bool on = false, float burst = 0, float fill = 0.93f)
         {
             if (Event.current == null || Event.current.type != EventType.Repaint) return;
-            if (smokeFlat) { if (burst <= 0.01f) return; fill = 0; }
-            if (smokeMat == null) { var sh = Shader.Find("Hidden/AsciiHero/SmokeBox"); if (sh != null) smokeMat = new Material(sh); }
-            if (smokeMat == null) { Fill(r, new Color(0.02f, 0.015f, 0.03f, fill)); return; }
-            float sz = Mathf.Min(r.height * 0.5f, 28 * k), pad = sz * (2.2f + 6f * burst) + 4 * k;
-            var R = new Rect(r.x - pad, r.y - pad, r.width + 2 * pad, r.height + 2 * pad);
-            float cw = ascii != null && ascii.cols > 0 ? Screen.width / (float)ascii.cols : 6 * k, ch = ascii != null && ascii.rows > 0 ? Screen.height / (float)ascii.rows : 10 * k;
-            smokeMat.SetVector("_SBRect", new Vector4(R.width, R.height, r.width * 0.5f, r.height * 0.5f));
-            smokeMat.SetVector("_SBCell", new Vector4(cw, ch, Mathf.Max(0.6f, 0.5f * k), (r.x * 0.013f + r.y * 0.029f) % 50f));
-            smokeMat.SetFloat("_SBT", Time.unscaledTime); smokeMat.SetFloat("_SBOn", on ? 1 : 0); smokeMat.SetFloat("_SBBurst", burst);
-            smokeMat.SetFloat("_SBAlpha", GUI.color.a * uiAlpha * (smokeFlat ? burst : 1)); smokeMat.SetFloat("_SBFill", fill); smokeMat.SetFloat("_SBSz", 28 * k); smokeMat.SetFloat("_SBRad", Mathf.Max(r.width, r.height) > 300 * k && Mathf.Min(r.width, r.height) > 120 * k ? 40 * k : 1e6f);      // (a big panel: rounded corners, straight sides)
-            Graphics.DrawTexture(R, texWhite, smokeMat);
+            float a = GUI.color.a * uiAlpha;
+            if (smokeFlat) { if (burst <= 0.01f) return; a *= burst; }
+            float pad = 5 * k; var R = new Rect(r.x - pad, r.y - pad, r.width + 2 * pad, r.height + 2 * pad);
+            float rad = Mathf.Max(R.width, R.height) > 300 * k && Mathf.Min(R.width, R.height) > 120 * k ? 40 * k : 1e6f;       // (a big panel: rounded corners, straight sides)
+            AddPiece(R, rad, on, burst, a);
+        }
+        /// (LateUpdate) the pieces listed last frame: their billows and breaking-off puffs, and pass 1
+        void SmokeLayerPrepare()
+        {
+            smokeReady = false;
+            if (spDraw.Count == 0) return;
+            if (sdfMat == null) { var sh = Shader.Find("Hidden/AsciiHero/SmokeSDF"); if (sh != null) sdfMat = new Material(sh); }
+            if (compMat == null) { var sh = Shader.Find("Hidden/AsciiHero/SmokeComp"); if (sh != null) compMat = new Material(sh); }
+            if (sdfMat == null || compMat == null) return;
+            int W = Screen.width, H = Screen.height, w4 = Mathf.Max(8, W / 4), h4 = Mathf.Max(8, H / 4);
+            if (smokeRT == null || smokeRT.width != w4 || smokeRT.height != h4)
+            {
+                if (smokeRT != null) smokeRT.Release();
+                smokeRT = new RenderTexture(w4, h4, 0, SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGBHalf) ? RenderTextureFormat.ARGBHalf : RenderTextureFormat.ARGBFloat) { filterMode = FilterMode.Bilinear, name = "SmokeSDF" };
+                smokeRT.Create();
+            }
+            float t = Time.unscaledTime, SZ = 28 * k; int nb = 0, nf = 0;
+            for (int i = 0; i < spDraw.Count; i++)
+            {
+                var P = spDraw[i]; ssA[i] = P.a; ssB[i] = P.b;
+                float hx = P.a.z, hy = P.a.w, sz = Mathf.Min(hy, SZ + hy * 0.06f), seed = Hh(P.a.x * 0.013f + P.a.y * 0.029f) * 100f, burst = P.b.z;
+                float perim = 2 * Mathf.PI * Mathf.Sqrt((hx * hx + hy * hy) * 0.5f);
+                int n = Mathf.Clamp(Mathf.RoundToInt(perim / (sz * 2.2f)), 4, 26);
+                for (int j = 0; j < n && nb < sbl.Length; j++)
+                {
+                    float h1 = Hh(seed + j * 1.7f), h2 = Hh(seed * 1.3f + j * 3.1f);
+                    float an = (j + 0.35f * h1) / n * Mathf.PI * 2 + t * 0.05f * (h2 - 0.5f);
+                    float ph = Mathf.Repeat(t / (1.6f + 1.4f * h2) + h1, 1f), sw = Mathf.Sin(ph * Mathf.PI);
+                    sbl[nb++] = new Vector4(P.a.x + Mathf.Cos(an) * hx * 1.02f, P.a.y + Mathf.Sin(an) * hy * 1.02f, sz * (0.22f + 0.25f * sw), 0);
+                }
+                int nBase = Mathf.Clamp(Mathf.RoundToInt(perim / (sz * 7f)), 2, 8), nAll = nBase + (burst > 0.01f ? 8 : 0);
+                for (int q = 0; q < nAll && nf < sfl.Length; q++)
+                {
+                    bool extra = q >= nBase;
+                    float h1 = Hh(seed + 50 + q * 2.9f), h2 = Hh(seed * 0.7f + q * 7.1f), L = extra ? 0.45f + 0.3f * h2 : 1.6f + 1.2f * h2;
+                    float ph = Mathf.Repeat(t / L + h1, 1f), an = h2 * Mathf.PI * 2 + 0.3f * ph;
+                    var dir = new Vector2(Mathf.Cos(an), Mathf.Sin(an));
+                    float reach = sz * (extra ? 1.6f + 1.6f * h1 : 0.4f + 0.5f * h1) * (1 + 1.5f * burst);
+                    float rr = sz * (extra ? 0.3f : 0.2f + 0.12f * h2) * (1 - ph) * (extra ? burst : 1);
+                    if (rr < 0.5f) continue;
+                    sfl[nf++] = new Vector4(P.a.x + dir.x * (hx + sz * 0.2f + reach * ph), P.a.y + dir.y * (hy + sz * 0.2f + reach * ph), rr, ph);
+                }
+            }
+            sdfMat.SetVectorArray("_SSA", ssA); sdfMat.SetVectorArray("_SSB", ssB); sdfMat.SetVectorArray("_SBL", sbl); sdfMat.SetVectorArray("_SFL", sfl);
+            sdfMat.SetFloat("_SSN", spDraw.Count); sdfMat.SetFloat("_SBN", nb); sdfMat.SetFloat("_SFN", nf);
+            sdfMat.SetFloat("_SST", t); sdfMat.SetFloat("_SSMerge", 16 * k); sdfMat.SetFloat("_SSSz", SZ);
+            sdfMat.SetVector("_SSScreen", new Vector4(W, H, 0, 0));
+            var prev = RenderTexture.active; Graphics.Blit(null, smokeRT, sdfMat); RenderTexture.active = prev;
+            smokeReady = true;
+        }
+        /// (OnGUI, before the interface's text) pass 2
+        void SmokeLayerDraw()
+        {
+            if (!smokeReady || smokeRT == null || compMat == null) return;
+            float W = Screen.width, H = Screen.height;
+            float cw = ascii != null && ascii.cols > 0 ? W / ascii.cols : 6 * k, ch = ascii != null && ascii.rows > 0 ? H / ascii.rows : 10 * k;
+            compMat.SetVector("_SCScreen", new Vector4(W, H, cw, ch)); compMat.SetFloat("_SCT", Time.unscaledTime);
+            compMat.SetFloat("_SCLine", Mathf.Max(0.6f, 0.5f * k)); compMat.SetFloat("_SCSz", 28 * k);
+            Graphics.DrawTexture(new Rect(0, 0, W, H), smokeRT, compMat);
         }
         // a tapped button first bursts its smoke, and only then does what it does (0.3 s later)
         Rect btnPending; float btnPendingT = -9; const float BTN_DELAY = 0.45f;
@@ -2080,9 +2153,11 @@ namespace AsciiHero
             if (!ascii.plain)
             {
                 RenderTexture.active = null;   // the interface always goes to the screen
-                if (ascii.final != null) GUI.DrawTexture(vr, ascii.final, ScaleMode.StretchToFill, false);
+                if (ascii.final != null) GUI.DrawTexture(world ? vr : new Rect(0, 0, W, vr.height), ascii.final, ScaleMode.StretchToFill, false);
                 else GUI.Label(new Rect(vr.x + 20 * k, vr.center.y, vr.width - 40 * k, 30 * k), "Кадр ASCII ещё не готов", sSmall);
             }
+            if (inMenu && !world) MenuLandscape(W, H);
+            SmokeLayerDraw();           // (all the interface's smoke at once, under its text)
             float L = safe.x + 12 * k, T = safe.y + 8 * k;
             if (perfRun)
             {   // the test: only the picture and a line of progress
@@ -2102,7 +2177,7 @@ namespace AsciiHero
             ConsoleUI(W, H, false);
             FinishGui(); accG += Ms(tG);
         }
-        void FinishGui() { taps.Clear(); uiRectsPrev.Clear(); uiRectsPrev.AddRange(uiRects); }
+        void FinishGui() { taps.Clear(); uiRectsPrev.Clear(); uiRectsPrev.AddRange(uiRects); spDraw.Clear(); spDraw.AddRange(spCur); spCur.Clear(); }
 
         // ---------- loading screen and on-screen log ----------
         void LoadingScreen(float W, float H)
@@ -2172,8 +2247,7 @@ namespace AsciiHero
 
             // panel
             float px = vr.xMax, pw = W - px, right = safe.xMax;
-            var panel = new Rect(px, 0, pw, H); { bool f0 = smokeFlat; smokeFlat = false; Smoke(new Rect(px - 22 * k, -60 * k, pw + 120 * k, H + 120 * k), false, 0, 0.97f); smokeFlat = f0; }
-            smokeFlat = true;           // (from here on the panel's buttons are part of its smoke)
+            var panel = new Rect(px, 0, pw, H);           // (no panel of its own: each button and the list of sliders are their own smoke, running together where they meet)
             uiRects.Add(panel);
             float x0 = px + 10 * k, cw = right - x0 - 10 * k, y = safe.y + 8 * k;
             string[] tabs = { "ТЕЛО", "БРОНЯ", "ОРУЖИЕ" };
@@ -2205,6 +2279,7 @@ namespace AsciiHero
                 if (cfg.body == null) ResetBody();
                 // the list of sliders, scrolled by dragging
                 bodyList = new Rect(x0, y, cw, bottom - 6 * k - y); uiRects.Add(bodyList);
+                Smoke(new Rect(bodyList.x - 6 * k, bodyList.y - 4 * k, bodyList.width + 18 * k, bodyList.height + 8 * k));        // (the sliders lie in a cloud of their own, with room round them)
                 float rowH = 40 * k, headH = 22 * k, yy = 0; int grp = -1;
                 GUI.BeginGroup(bodyList);
                 for (int ix = 0; ix < Body.N; ix++)
@@ -2604,17 +2679,14 @@ namespace AsciiHero
             // the smoke
             if (pocketMat == null) { var sh = Shader.Find("Hidden/AsciiHero/Pocket"); if (sh != null) pocketMat = new Material(sh); }
             float cellW = ascii != null && ascii.cols > 0 ? W / ascii.cols : 8 * k, cellH = ascii != null && ascii.rows > 0 ? H / ascii.rows : 14 * k;
-            if (pocketMat != null)
-            {
-                float m = c2.z * 0.9f;
-                var R = Rect.MinMaxRect(Mathf.Max(0, Mathf.Min(c1.x - c1.z * c1.w, c2.x - c2.z * c2.w) - m), Mathf.Max(0, Mathf.Min(c1.y - c1.z, c2.y - c2.z) - m),
-                                        Mathf.Min(W, Mathf.Max(c1.x + c1.z * c1.w, c2.x + c2.z * c2.w) + m), Mathf.Min(H, Mathf.Max(c1.y + c1.z, c2.y + c2.z) + m));
-                pocketMat.SetFloat("_PT", pocketT); pocketMat.SetFloat("_PClose", pocketClose < 0 ? 0 : pocketClose);
-                pocketMat.SetVector("_PRect", new Vector4(R.x, R.y, R.width, R.height));
-                pocketMat.SetVector("_PC1", c1); pocketMat.SetVector("_PC2", c2);
-                PocketPuffs(c1, c2); pocketMat.SetVectorArray("_PRim", pRim); pocketMat.SetVectorArray("_PFly", pFly);
-                pocketMat.SetVector("_PCell", new Vector4(cellW, cellH, Mathf.Max(0.6f, 0.45f * k), 0));      // (a thin outline)
-                Graphics.DrawTexture(R, texWhite, pocketMat);
+            {   // the two clouds: pieces of the interface's smoke (they run into each other and into the buttons beside them)
+                float cl = pocketClose < 0 ? 0 : pocketClose;
+                float g = Mathf.SmoothStep(0, 1, pocketT / 0.35f) * (1 + 0.06f * Mathf.Sin(Mathf.Clamp01(pocketT / 0.7f) * Mathf.PI)), sc = Mathf.Max(g, 0.02f) * (1 + 0.3f * cl);
+                foreach (var c in new[] { c1, c2 })
+                {
+                    float hy = c.z * sc * 0.97f, hx = c.z * c.w * sc * 0.97f;
+                    AddPiece(new Rect(c.x - hx, c.y - hy, 2 * hx, 2 * hy), hy, false, 0, 1 - cl);
+                }
             }
             // what lies on it fades in after the smoke has gathered, and goes first when it closes
             float ua = Mathf.SmoothStep(0, 1, (pocketT - 0.35f) / 0.65f);
@@ -2803,9 +2875,8 @@ namespace AsciiHero
         void SavesUI(float cx, float top, float bottom)
         {
             if (saveInfoDirty) RefreshSaveInfo();
-            float pw = Mathf.Min(620 * k, Screen.width - 40 * k), x0 = cx - pw / 2, y0 = top + 56 * k;
+            float pw = Mathf.Min(540 * k, Screen.width - 40 * k), x0 = cx - pw / 2, y0 = top + 56 * k;      // (inside the page's cloud)
             GUI.Label(new Rect(x0, y0, pw, 22 * k), saveMode == 1 ? "СОХРАНИТЬ ИГРУ" : saveMode == 2 ? "ЗАГРУЗИТЬ ИГРУ" : "СОХРАНЕНИЯ", sTitle);
-            if (Button(new Rect(x0 + pw - 100 * k, y0 - 3 * k, 100 * k, 24 * k), "НАЗАД")) { menuPage = 0; menuFromWorld = false; return; }
             float rh = Mathf.Min(54 * k, (bottom - y0 - 40 * k) / SAVE_SLOTS - 6 * k);
             for (int i = 0; i < SAVE_SLOTS; i++)
             {
