@@ -21,6 +21,7 @@ namespace AsciiHero
         float Rr(float a, float b) { return a + (b - a) * Rnd(); }
 
         public override bool HasWater => true;
+        public override List<Bounds> MirrorWater() { return new List<Bounds> { new Bounds(new Vector3(LAKE.x + origin.x, WATER_Y, LAKE.z + origin.z), new Vector3(LAKE_RX * 2.4f, 0.2f, LAKE_RZ * 2.4f)) }; }
         public override bool WaterIn(Rect w) { return w.Overlaps(new Rect(LAKE.x + origin.x - LAKE_RX * 1.2f, LAKE.z + origin.z - LAKE_RZ * 1.2f, LAKE_RX * 2.4f, LAKE_RZ * 2.4f)); }
         public override float WaterY => WATER_Y;
         public static float LakeK(float x, float z)

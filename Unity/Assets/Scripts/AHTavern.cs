@@ -64,6 +64,8 @@ namespace AsciiHero
         /// is any of its water within this piece of the world's ground (x, z)? (the mirror is drawn only then: it renders
         /// the scene a second time)
         public virtual bool WaterIn(Rect world) { return HasWater; }
+        /// the boxes (world) of the water worth a mirror (lakes; not puddles or swamp murk); null = all of it, anywhere
+        public virtual List<Bounds> MirrorWater() { return null; }
         public virtual bool InWater(float x, float z) { return false; }
         /// how deep the hero sinks here (m)
         public virtual float WaterSink(float x, float z) { return Mathf.Min(Depth(x, z), WaterDepth.WAIST); }

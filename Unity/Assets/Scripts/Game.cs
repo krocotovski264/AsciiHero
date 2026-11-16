@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.59 · Unity";
+        public const string VERSION = "beta 0.60 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -43,7 +43,7 @@ namespace AsciiHero
         Camera display, sceneCam; AsciiRenderer ascii;
         Mats mats, actorMats;
         Character hero; MotionActor player;
-        bool world; Tavern tavern; Field field; Cave cave; Forest forest; Location loc; readonly List<Location> outdoor = new List<Location>(); readonly List<Mockup> mockups = new List<Mockup>(); Rect lastView = new Rect(-1e5f, -1e5f, 2e5f, 2e5f); Location waterSeen; float doorCd, leafClear; Light moonLight; Character bartenderChar; MotionActor bartender;
+        bool world; Tavern tavern; Field field; Cave cave; Forest forest; Location loc; readonly List<Location> outdoor = new List<Location>(); readonly List<Mockup> mockups = new List<Mockup>(); Rect lastView = new Rect(-1e5f, -1e5f, 2e5f, 2e5f); Location waterSeen; readonly Plane[] mirPlanes = new Plane[6]; float doorCd, leafClear; Light moonLight; Character bartenderChar; MotionActor bartender;
         // integrity instead of a health bar: five limbs (head, armL, armR, legL, legR), each worth 20 %
         readonly Vector4[] pushPts = new Vector4[4]; static readonly Vector4 FAR = new Vector4(9999, 0, 9999, 0);
         int hp = 100; readonly bool[] limbs = { true, true, true, true, true }; float respawnT; Vector3 heroTrail;
@@ -643,7 +643,7 @@ namespace AsciiHero
         void SetupOutdoor()
         {
             long tB = System.Diagnostics.Stopwatch.GetTimestamp(); bool fresh = field == null || mockups.Count == 0;
-            try { SetupOutdoorInner(); } finally { if (fresh) { worldBuildMs = (float)Ms(tB); Debug.Log("Мир построен за " + (worldBuildMs / 1000f).ToString("0.0") + " с"); } }
+            try { SetupOutdoorInner(); } finally { if (fresh) { worldBuildMs = (float)Ms(tB); System.GC.Collect(); Debug.Log("Мир построен за " + (worldBuildMs / 1000f).ToString("0.0") + " с"); } }      // (the building's scraps cleared at once, not over the next frames)
         }
         void SetupOutdoorInner()
         {
@@ -768,8 +768,17 @@ namespace AsciiHero
                 viewRect = Rect.MinMaxRect(x0 - 3, z0 - 3, x1 + 3, z1 + 3);
             }
             lastView = viewRect;
+            // the mirror: only for a lake in the camera's view (puddles and swamp murk keep their own sheen without it)
             waterSeen = null;
-            foreach (var n in outdoor) if ((n == loc || Core(n).Overlaps(viewRect)) && n.HasWater && n.WaterIn(viewRect)) { waterSeen = n; if (n == loc) break; }
+            if (sceneCam != null) GeometryUtility.CalculateFrustumPlanes(sceneCam, mirPlanes);
+            foreach (var n in outdoor)
+            {
+                if (!(n == loc || Core(n).Overlaps(viewRect)) || !n.HasWater) continue;
+                var mw = n.MirrorWater(); bool seen = false;
+                if (mw == null) seen = n.WaterIn(viewRect);
+                else foreach (var b in mw) if (sceneCam == null || GeometryUtility.TestPlanesAABB(mirPlanes, b)) { seen = true; break; }
+                if (seen) { waterSeen = n; if (n == loc) break; }
+            }
             foreach (var n in outdoor)
             {
                 bool on = n == loc || Core(n).Overlaps(viewRect);          // (only what can come into view: each location switched on costs its shadows and its characters)
@@ -1151,7 +1160,9 @@ namespace AsciiHero
             perfLocs.Clear(); perfRows.Clear();
             foreach (var l in outdoor) perfLocs.Add(l);
             perfLocs.Add(null);         // (null: the tavern, built when it is reached)
-            perfPhase = 1; perfLocIx = 0; perfWalk = true; perfHeavy = null; perfHeavyMs = 0;
+            // part 0: a quick round of every place first, not measured - the first time anything is shown the device
+            // prepares its shaders and uploads its meshes (that cost 0.2 s a frame in the first place measured)
+            perfPhase = 0; perfLocIx = 0; perfWalk = true; perfHeavy = null; perfHeavyMs = 0;
             PerfGo(perfLocs[0]);
         }
         int pMiss, pHitch; float perfBaseGpu;
@@ -1188,6 +1199,15 @@ namespace AsciiHero
                 if (fFtFrame) { pMain += ftBuf[0].cpuMainThreadFrameTime; pRender += ftBuf[0].cpuRenderThreadFrameTime; pGpu += ftBuf[0].gpuFrameTime; pFt++; }
             }
             else { accU = accA = accG = 0; }
+            if (perfPhase == 0)
+            {   // the warm-up round: 0.8 s in each place
+                if (perfT < 0.8f) return;
+                perfLocIx++;
+                if (perfLocIx < perfLocs.Count) { var nx = perfLocs[perfLocIx] ?? tavern; PerfGo(nx); PerfReset(); return; }
+                System.GC.Collect();
+                Debug.Log("ТЕСТ · прогрев: все места показаны по разу (шейдеры и сетки подготовлены), замеры начинаются");
+                perfPhase = 1; perfLocIx = 0; PerfGo(perfLocs[0]); PerfReset(); return;
+            }
             if (perfT < (perfPhase == 1 ? PERF_T1 : PERF_T2) || pN == 0) return;
             float ms = (float)(pSum / pN), miss = 100f * pMiss / pN;
             if (perfPhase == 1)
@@ -1586,7 +1606,7 @@ namespace AsciiHero
         void WorldUpdate(float dt)
         {
             float ix = stick.x, iy = stick.y;
-            if (perfRun && perfWalk) { float a = perfT * Mathf.PI * 2 / (perfPhase == 1 ? PERF_T1 : PERF_T2); ix = Mathf.Cos(a) * 0.62f; iy = Mathf.Sin(a) * 0.62f; }      // (the test: he walks a small circle)
+            if (perfRun && perfWalk) { float a = perfT * Mathf.PI * 2 / (perfPhase <= 1 ? PERF_T1 : PERF_T2); ix = Mathf.Cos(a) * 0.62f; iy = Mathf.Sin(a) * 0.62f; }      // (the test: he walks a small circle)
             if (InputHub.Key("W")) iy = -1; if (InputHub.Key("S")) iy = 1;
             if (InputHub.Key("A")) ix = -1; if (InputHub.Key("D")) ix = 1;
             float l = Mathf.Sqrt(ix * ix + iy * iy), mag = Mathf.Min(1, l / 0.8f); if (mag < 0.12f) mag = 0;   // 80 % of the ring = full walk
@@ -2005,7 +2025,7 @@ namespace AsciiHero
             float L = safe.x + 12 * k, T = safe.y + 8 * k;
             if (perfRun)
             {   // the test: only the picture and a line of progress
-                if (!perfNoGui) GUI.Label(new Rect(L, T, 600 * k, 22 * k), (perfPhase == 1 ? "Тест нагрузки: биом " + (perfLocIx + 1) + " из " + perfLocs.Count + " · " + LocTitle(loc) : "Тест нагрузки: " + LocTitle(loc) + " · " + (perfIx + 1) + " из " + PERF.Length + " · " + PERF[perfIx]), sTitle);
+                if (!perfNoGui) GUI.Label(new Rect(L, T, 600 * k, 22 * k), (perfPhase == 0 ? "Тест нагрузки: прогрев " + (perfLocIx + 1) + " из " + perfLocs.Count : perfPhase == 1 ? "Тест нагрузки: биом " + (perfLocIx + 1) + " из " + perfLocs.Count + " · " + LocTitle(loc) : "Тест нагрузки: " + LocTitle(loc) + " · " + (perfIx + 1) + " из " + PERF.Length + " · " + PERF[perfIx]), sTitle);
                 FinishGui(); accG += Ms(tG); return;
             }
             if (world) DrawDanger(W, H);

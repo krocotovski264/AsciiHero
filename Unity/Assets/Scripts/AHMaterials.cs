@@ -145,13 +145,17 @@ namespace AsciiHero
         /// a copy with coarser characters (cells 2.4 times as big, near the ground's): for big things - houses, towers, cliffs - whose
         /// surfaces would otherwise carry hundreds of thousands of characters each
         readonly Dictionary<Material, Material> bigs = new Dictionary<Material, Material>();
-        public Material Big(Material src)
+        public Material Big(Material src) { return Coarse(src, 2.4f, bigs); }
+        /// (trees: trunks and branches, logs and stumps - 1.6 times as big)
+        readonly Dictionary<Material, Material> mids = new Dictionary<Material, Material>();
+        public Material Mid(Material src) { return Coarse(src, 1.6f, mids); }
+        Material Coarse(Material src, float f, Dictionary<Material, Material> cache)
         {
             if (src == null || !src.HasProperty("_GlyphCell")) return src; Material m;
-            if (bigs.TryGetValue(src, out m) && m != null) return m;
-            m = new Material(src) { name = src.name + "_big" }; var c = src.GetVector("_GlyphCell");
-            m.SetVector("_GlyphCell", new Vector4(Mathf.Max(c.x, 0.034f) * 2.4f, Mathf.Max(c.y, 0.056f) * 2.4f, c.z, c.w));
-            bigs[src] = m; return m;
+            if (cache.TryGetValue(src, out m) && m != null) return m;
+            m = new Material(src) { name = src.name + "_x" + f }; var c = src.GetVector("_GlyphCell");
+            m.SetVector("_GlyphCell", new Vector4(Mathf.Max(c.x, 0.034f) * f, Mathf.Max(c.y, 0.056f) * f, c.z, c.w));
+            cache[src] = m; return m;
         }
         public static float AsciiIdValue(int id, bool actor) { return (id + 1 + (actor ? 128 : 0)) / 255f; }
         /// a copy with its own texture (tavern props)

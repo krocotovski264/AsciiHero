@@ -37,6 +37,12 @@ namespace AsciiHero
         }
         float WaterK(float x, float z) { float k = 9; foreach (var p in pools) k = Mathf.Min(k, PoolK(p, x, z)); return k; }
         public override bool HasWater => pools.Count > 0;
+        public override List<Bounds> MirrorWater()
+        {
+            var l = new List<Bounds>();
+            foreach (var p in pools) if (p.kind == 0 || p.kind == 4) { float r = Mathf.Max(p.rx, p.rz) * 1.15f; l.Add(new Bounds(new Vector3(p.c.x + origin.x, WY, p.c.y + origin.z), new Vector3(2 * r, 0.2f, 2 * r))); }
+            return l;
+        }
         public override bool WaterIn(Rect w)
         {
             foreach (var p in pools) { float r = Mathf.Max(p.rx, p.rz) * 1.15f; if (w.Overlaps(new Rect(p.c.x + origin.x - r, p.c.y + origin.z - r, 2 * r, 2 * r))) return true; }
