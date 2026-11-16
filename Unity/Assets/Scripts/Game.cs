@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.60 · Unity";
+        public const string VERSION = "beta 0.61 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -1251,7 +1251,7 @@ namespace AsciiHero
             int ok60 = 0, ok30 = 0;
             foreach (var r in perfRows)
             {
-                bool a60 = r.ms <= 16.9f && r.miss < 15, a30 = r.ms <= 33.5f; if (a60) ok60++; if (a30) ok30++;
+                bool a60 = r.ms <= 17.2f && r.miss < 5, a30 = r.ms <= 33.5f;      // (60: the mean within a hair of 1/60 s, hardly a frame missed) if (a60) ok60++; if (a30) ok30++;
                 sb.Append("\n  ").Append(a60 ? "[60] " : a30 ? "[30] " : "[<30] ").Append(r.name).Append(": ").Append(r.ms.ToString("0.0")).Append(" мс, ").Append((1000f / r.ms).ToString("0")).Append(" к/с, худший ").Append(r.worst.ToString("0"))
                   .Append(" мс, >1/60: ").Append(r.miss.ToString("0")).Append(" %").Append(r.gpu >= 0 ? ", GPU " + r.gpu.ToString("0.0") + " мс" : "").Append(", символов ").Append(r.glyphs);
             }

@@ -61,6 +61,13 @@ namespace AsciiHero
             return d;
         }
         public override bool HasWater => true;
+        /// the mirror only over the deep pool (the puddles and the stream keep their own sheen)
+        public override List<Bounds> MirrorWater()
+        {
+            var l = new List<Bounds>();
+            foreach (var p in pools) if (p.depth > 0.1f) { float r = Mathf.Max(p.rx, p.rz) * 1.15f; l.Add(new Bounds(new Vector3(p.c.x + origin.x, WATER_Y, p.c.y + origin.z), new Vector3(2 * r, 0.2f, 2 * r))); }
+            return l;
+        }
         public override bool InWater(float x, float z) { return WaterK(x, z) < 0.97f; }
         public override float WaterSink(float x, float z)
         {
