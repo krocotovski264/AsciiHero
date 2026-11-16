@@ -2391,6 +2391,8 @@ namespace AsciiHero
             return sb.ToString();
         }
         GUIStyle sMapS, sNoteS, sNoteT;
+        GUIStyle sRichS;
+        GUIStyle sRich() { if (sRichS == null || sRichS.fontSize != sSmall.fontSize) sRichS = new GUIStyle(sSmall) { richText = true }; return sRichS; }
         GUIStyle MapStyle(int fs) { if (sMapS == null || sMapS.fontSize != fs) { sMapS = new GUIStyle(sMono) { richText = true, alignment = TextAnchor.MiddleCenter, fontSize = fs, wordWrap = false }; sMapS.normal.textColor = Color.white; } return sMapS; }
         void DrawMap(Rect r, bool big)
         {
