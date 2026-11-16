@@ -15,6 +15,45 @@ namespace AsciiHero
 {
     public class Cave : Location
     {
+        /// the hill over the cave: a rough rock roof over the whole of it, so from outside (the forest) the inside is not
+        /// seen; the game takes it away while the hero is inside
+        public GameObject roof;
+        void Roof(Transform T, Mats mats)
+        {
+            const float STEP = 0.5f; float x0 = -HX - 0.8f, x1 = HX + 0.8f, z0 = -HZ - 0.8f, z1 = HZ + 0.9f;
+            int nx = Mathf.CeilToInt((x1 - x0) / STEP) + 1, nz = Mathf.CeilToInt((z1 - z0) / STEP) + 1;
+            float ox = Rr(0, 100), oz = Rr(0, 100);
+            var vs = new List<Vector3>(); var ts = new List<int>();
+            for (int j = 0; j < nz; j++)
+                for (int i = 0; i < nx; i++)
+                {
+                    float x = x0 + i * STEP, z = z0 + j * STEP;
+                    float e = Mathf.Min(Mathf.Min(x - x0, x1 - x), Mathf.Min(z - z0, z1 - z));                 // distance in from the edge
+                    float n = Mathf.PerlinNoise(x * 0.18f + ox, z * 0.18f + oz) * 0.65f + Mathf.PerlinNoise(x * 0.55f + ox, z * 0.55f + oz) * 0.35f;
+                    float h = 2.7f + Mathf.SmoothStep(0, 1, e / 3.5f) * (0.9f + 1.6f * n) + 0.25f * Mathf.PerlinNoise(x * 1.7f, z * 1.7f);
+                    vs.Add(new Vector3(x, h, z));
+                }
+            for (int j = 0; j + 1 < nz; j++)
+                for (int i = 0; i + 1 < nx; i++)
+                {
+                    int a0 = j * nx + i, a1 = a0 + 1, b0 = a0 + nx, b1 = b0 + 1;
+                    ts.Add(a0); ts.Add(b0); ts.Add(a1); ts.Add(a1); ts.Add(b0); ts.Add(b1);
+                }
+            var m = new Mesh { name = "caveroof", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 }; m.SetVertices(vs); m.SetTriangles(ts, 0);
+            m.RecalculateNormals(); var nn = m.normals; if (nn.Length > 0 && nn[nn.Length / 2].y < 0) { for (int q = 0; q < ts.Count; q += 3) { int t2 = ts[q + 1]; ts[q + 1] = ts[q + 2]; ts[q + 2] = t2; } m.SetTriangles(ts, 0); m.RecalculateNormals(); }
+            m.uv = new Vector2[vs.Count]; m.RecalculateBounds(); MeshGen.AddGlyphUV(m, false);
+            roof = new GameObject("Roof"); roof.transform.SetParent(T, false);
+            var mat = new Material(mats["WETROCK"]) { name = "CaveRoof" }; mat.SetColor("_Color", Mats.Hex(0x3c3a40)); mat.SetVector("_GlyphCell", new Vector4(0.12f, 0.2f, 0, 0));
+            var go = MeshGen.Obj(m, mat, roof.transform, Vector3.zero, Quaternion.identity, false, "RoofRock");
+            // moss and ferns on top of the hill
+            for (int k = 0; k < 18; k++)
+            {
+                float x = Rr(-HX + 1, HX - 1), z = Rr(-HZ + 1, HZ - 1); int i = Mathf.RoundToInt((x - x0) / STEP), j = Mathf.RoundToInt((z - z0) / STEP);
+                float y = vs[Mathf.Clamp(j, 0, nz - 1) * nx + Mathf.Clamp(i, 0, nx - 1)].y;
+                if (Rnd() < 0.5f) NatureLib.Place(Rnd() < 0.5f ? "fern1" : "fern3", mats, roof.transform, new Vector3(x, y - 0.05f, z), Rr(0, 360), Rr(0.8f, 1.2f), null, false);
+                else NatureLib.Place("mrock3", mats, roof.transform, new Vector3(x, y - 0.2f, z), Rr(0, 360), Rr(0.8f, 1.3f), null, false);
+            }
+        }
         const float HX = 10, HZ = 8, WATER_Y = 0.04f, MUD_Y = 0.015f;
         System.Random R; float Rnd() { return (float)R.NextDouble(); }
         float Rr(float a, float b) { return a + (b - a) * Rnd(); }
@@ -171,6 +210,7 @@ namespace AsciiHero
             // ---- walls: carved out of one volume of rock (see BuildRock) ----
             var rock = new Material(mats["WETROCK"]) { name = "CaveWall" }; rock.SetFloat("_SeeThrough", 1); rock.SetFloat("_Cull", 0); rock.SetVector("_GlyphCell", new Vector4(0.12f, 0.2f, 0, 0));      // (the rock is big: coarser characters, half as many)
             BuildRock(T, mats, rock);
+            Roof(T, mats);
 
             // ---- the grotto: stalagmites, stalactites, sharp rocks, moss ----
             for (int i = 0; i < 16; i++)

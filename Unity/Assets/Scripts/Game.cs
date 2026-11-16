@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.63 · Unity";
+        public const string VERSION = "beta 0.64 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -768,6 +768,8 @@ namespace AsciiHero
                 viewRect = Rect.MinMaxRect(x0 - 3, z0 - 3, x1 + 3, z1 + 3);
             }
             lastView = viewRect;
+            // the cave's roof hides its inside from outside; inside the hero sees it open
+            if (cave != null && cave.roof != null) { bool show = loc != cave; if (cave.roof.activeSelf != show) cave.roof.SetActive(show); }
             // the mirror: only for a lake in the camera's view (puddles and swamp murk keep their own sheen without it)
             waterSeen = null;
             if (sceneCam != null) GeometryUtility.CalculateFrustumPlanes(sceneCam, mirPlanes);
@@ -1061,10 +1063,22 @@ namespace AsciiHero
             float f = RES[setRes] / 100f; int tw = Mathf.RoundToInt((land ? big : small) * f), th = Mathf.RoundToInt((land ? small : big) * f);
             if (Mathf.Abs(Screen.width - tw) > 2 || Mathf.Abs(Screen.height - th) > 2) Screen.SetResolution(tw, th, FullScreenMode.FullScreenWindow);
         }
+        Material landMat;
+        /// the main menu's background: a night landscape in characters (Hidden/AsciiHero/Landscape), alive
+        void MenuLandscape(float W, float H)
+        {
+            if (landMat == null) { var sh = Shader.Find("Hidden/AsciiHero/Landscape"); if (sh != null) landMat = new Material(sh); }
+            if (landMat == null) { Fill(new Rect(0, 0, W, H), new Color(0.01f, 0.01f, 0.02f, 1)); return; }
+            float cw = Mathf.Max(5, 7.5f * k), ch = cw * 1.65f;
+            landMat.SetVector("_LScreen", new Vector4(W, H, cw, ch)); landMat.SetFloat("_LT", Time.unscaledTime);
+            Graphics.DrawTexture(new Rect(0, 0, W, H), texWhite, landMat);
+        }
         void MenuUI(float W, float H)
         {
-            Fill(new Rect(0, 0, W, H), new Color(0.01f, 0.01f, 0.02f, menuPage == 0 ? 0.45f : 0.7f));
+            if (!world) MenuLandscape(W, H);
+            else Fill(new Rect(0, 0, W, H), new Color(0.01f, 0.01f, 0.02f, 0.7f));
             float cx = W / 2, top = safe.y + 30 * k, bottom = safe.yMax - 10 * k;
+            if (menuPage != 0) Smoke(new Rect(cx - 250 * k, top + 40 * k, 500 * k, bottom - top - 50 * k), false, 0, 0.9f);       // (the pages lie on a cloud of smoke)
             GUI.Label(new Rect(cx - 250 * k, top, 500 * k, 50 * k), "ASCII HERO", sBig);
             if (menuPage == 0)
             {
@@ -1073,8 +1087,8 @@ namespace AsciiHero
                 if (Button(new Rect(cx - bw / 2, y + bh + 12 * k, bw, bh), "СОХРАНЕНИЯ")) { menuPage = 3; saveMode = 0; saveInfoDirty = true; }
                 if (Button(new Rect(cx - bw / 2, y + 2 * (bh + 12 * k), bw, bh), "НАСТРОЙКИ")) menuPage = 1;
                 if (Button(new Rect(cx - bw / 2, y + 3 * (bh + 12 * k), bw, bh), "ВЫХОД")) Application.Quit();
-                if (Button(new Rect(safe.x + 10 * k, bottom - 22 * k, 104 * k, 22 * k), "Разработчики")) menuPage = 2;
-                GUI.Label(new Rect(safe.xMax - 210 * k, bottom - 22 * k, 200 * k, 22 * k), VERSION, sRight);
+                if (Button(new Rect(safe.xMax - 124 * k, bottom - 26 * k, 114 * k, 24 * k), "Разработчики")) menuPage = 2;
+                GUI.Label(new Rect(safe.x + 10 * k, bottom - 22 * k, 200 * k, 22 * k), VERSION, sSmall);
                 return;
             }
             float pw = 460 * k, x0 = cx - pw / 2, y0 = top + 56 * k;
@@ -1883,6 +1897,7 @@ namespace AsciiHero
                 ascii.waterOn = world && wl != null && wl.HasWater; if (wl != null) ascii.waterY = wl.WaterY;
             }
             ascii.SetSize(Mathf.RoundToInt(vr.width), Mathf.RoundToInt(vr.height), cell * dp);
+            ascii.SetEnabled(!(inMenu && !world) || perfRun);         // (behind the main menu the landscape is drawn instead: the scene is not rendered at all)
             // the backpack's projection of the hero: its own small ASCII render of the figure in the studio
             if (projAscii != null)
             {
@@ -1985,21 +2000,41 @@ namespace AsciiHero
             for (int i = 0; i < taps.Count; i++) if (r.Contains(taps[i])) { taps.RemoveAt(i); return true; }
             return false;
         }
+        // ---- the interface in the hero's shadow-smoke (Hidden/AsciiHero/SmokeBox) ----
+        Material smokeMat;
+        /// a piece of smoke round r: a button, a panel; on = lit violet; burst 0..1 = just pressed
+        void Smoke(Rect r, bool on = false, float burst = 0, float fill = 0.93f)
+        {
+            if (Event.current == null || Event.current.type != EventType.Repaint) return;
+            if (smokeMat == null) { var sh = Shader.Find("Hidden/AsciiHero/SmokeBox"); if (sh != null) smokeMat = new Material(sh); }
+            if (smokeMat == null) { Fill(r, new Color(0.02f, 0.015f, 0.03f, fill)); return; }
+            float pad = Mathf.Min(r.height * 0.9f, 34 * k) * (1 + burst);
+            var R = new Rect(r.x - pad, r.y - pad, r.width + 2 * pad, r.height + 2 * pad);
+            float cw = ascii != null && ascii.cols > 0 ? Screen.width / (float)ascii.cols : 6 * k, ch = ascii != null && ascii.rows > 0 ? Screen.height / (float)ascii.rows : 10 * k;
+            smokeMat.SetVector("_SBRect", new Vector4(R.width, R.height, r.width * 0.5f, r.height * 0.5f));
+            smokeMat.SetVector("_SBCell", new Vector4(cw, ch, Mathf.Max(0.6f, 0.5f * k), (r.x * 0.013f + r.y * 0.029f) % 50f));
+            smokeMat.SetFloat("_SBT", Time.unscaledTime); smokeMat.SetFloat("_SBOn", on ? 1 : 0); smokeMat.SetFloat("_SBBurst", burst);
+            smokeMat.SetFloat("_SBAlpha", GUI.color.a * uiAlpha); smokeMat.SetFloat("_SBFill", fill);
+            Graphics.DrawTexture(R, texWhite, smokeMat);
+        }
+        // a tapped button first bursts its smoke, and only then does what it does (0.3 s later)
+        Rect btnPending; float btnPendingT = -9; const float BTN_DELAY = 0.45f;
+        static bool SameRect(Rect a, Rect b) { return Mathf.Abs(a.x - b.x) < 2 && Mathf.Abs(a.y - b.y) < 2 && Mathf.Abs(a.width - b.width) < 2; }
         bool Button(Rect r, string text, bool on = false, GUIStyle st = null)
         {
             uiRects.Add(r);
-            var gold = new Color(0.93f, 0.74f, 0.33f);
-            Fill(r, on ? gold : new Color(0.12f, 0.12f, 0.15f, 0.92f));
-            Frame(r, on ? gold : new Color(0.32f, 0.3f, 0.26f, 1), Mathf.Max(1, k));
+            float since = Time.unscaledTime - btnPendingT; bool mine = since < 1.2f && SameRect(btnPending, r);
+            Smoke(r, on, mine ? Mathf.Clamp01(1 - since / 0.5f) : 0);
             GUI.Label(r, text, st ?? (on ? sBtnOn : sBtn));
-            return Tapped(r);
+            if (Tapped(r)) { btnPending = r; btnPendingT = Time.unscaledTime; return false; }
+            if (mine && since >= BTN_DELAY && since < 1.2f) { btnPendingT = -9; return true; }
+            return false;
         }
         bool Option(Rect r, string id, string name, string desc, bool on)
         {
             uiRects.Add(r);
             var gold = new Color(0.93f, 0.74f, 0.33f);
-            Fill(r, on ? new Color(0.25f, 0.2f, 0.1f, 0.95f) : new Color(0.1f, 0.1f, 0.13f, 0.92f));
-            Frame(r, on ? gold : new Color(0.25f, 0.24f, 0.22f), Mathf.Max(1, k));
+            Smoke(r, on);
             float iw = 46 * k;
             string ico; ICON.TryGetValue(id, out ico);
             GUI.Label(new Rect(r.x + 2 * k, r.y, iw, r.height), ico ?? "", sMono);
@@ -2041,7 +2076,7 @@ namespace AsciiHero
             if (toastT > 0 && !string.IsNullOrEmpty(toast) && (!world || invOpen))
             {
                 float a = Mathf.Clamp01(toastT / 0.4f); var r = new Rect(vr.center.x - 150 * k, H * 0.18f, 300 * k, 46 * k);
-                Fill(r, new Color(0, 0, 0, 0.7f * a)); var old = GUI.color; GUI.color = new Color(1, 1, 1, a); GUI.Label(r, toast, sToast); GUI.color = old;
+                var old = GUI.color; GUI.color = new Color(1, 1, 1, a); Smoke(r); GUI.Label(r, toast, sToast); GUI.color = old;
             }
             if (setShowFps) GUI.Label(new Rect(vr.xMax - 330 * k, H - 18 * k - (H - safe.yMax), 320 * k, 16 * k), fpsText, sRight);
             ConsoleUI(W, H, false);
@@ -2117,7 +2152,7 @@ namespace AsciiHero
 
             // panel
             float px = vr.xMax, pw = W - px, right = safe.xMax;
-            var panel = new Rect(px, 0, pw, H); Fill(panel, new Color(0.055f, 0.055f, 0.07f, 0.97f)); Fill(new Rect(px, 0, Mathf.Max(1, k), H), new Color(0.3f, 0.26f, 0.18f));
+            var panel = new Rect(px, 0, pw, H); Smoke(new Rect(px + 14 * k, 14 * k, pw - 10 * k, H - 28 * k), false, 0, 0.96f);
             uiRects.Add(panel);
             float x0 = px + 10 * k, cw = right - x0 - 10 * k, y = safe.y + 8 * k;
             string[] tabs = { "ТЕЛО", "БРОНЯ", "ОРУЖИЕ" };
@@ -2252,16 +2287,18 @@ namespace AsciiHero
         // (pocketExp 0..1). Each cloud: centre x, y, radius, how much wider than tall.
         void PocketClouds(float W, float H, out Vector4 c1, out Vector4 c2)
         {
+            float col = PocketBtnR(H) * 2 + 22 * k;           // (the column of the game's buttons on the left)
             float r2 = Mathf.Min(H * 0.47f, Mathf.Sqrt(0.6f * W * H / (Mathf.PI * (1 + 0.62f * 0.62f)))), r1 = r2 * 0.62f;
-            float overlap = r1 * 0.45f, total = 2 * r1 + 2 * r2 - overlap;
-            if (total > W * 0.96f) { float f = W * 0.96f / total; r1 *= f; r2 *= f; overlap *= f; total *= f; }
-            float x0 = W / 2 - total / 2, cy = H / 2;
+            float overlap = r1 * 0.45f, total = 2 * r1 + 2 * r2 - overlap, avail = W * 0.96f - col;
+            if (total > avail) { float f = avail / total; r1 *= f; r2 *= f; overlap *= f; total *= f; }
+            float x0 = col + (W - col) / 2 - total / 2, cy = H / 2;
             var a = new Vector4(x0 + r1, cy + r2 * 0.12f, r1, 1); var b = new Vector4(x0 + 2 * r1 - overlap + r2, cy, r2, 1);
             float e = Mathf.SmoothStep(0, 1, pocketExp);
             if (e > 0)
             {
-                float rm = H * 0.46f, st = Mathf.Min(2.0f, W * 0.46f / rm);
-                var m = new Vector4(W / 2, H / 2, rm, st);
+                float col = PocketBtnR(H) * 2 + 22 * k;
+                float rm = H * 0.46f, st = Mathf.Min(2.0f, (W - col) * 0.46f / rm);
+                var m = new Vector4(col + (W - col) / 2, H / 2, rm, st);
                 a = Vector4.Lerp(a, m, e); b = Vector4.Lerp(b, m, e);
             }
             c1 = a; c2 = b;
@@ -2270,7 +2307,9 @@ namespace AsciiHero
         bool InPocket(Vector2 p)
         {
             Vector4 a, b; PocketClouds(Screen.width, Screen.height, out a, out b);
-            return InCloud(p, a, 1.05f) || InCloud(p, b, 1.05f);
+            if (InCloud(p, a, 1.05f) || InCloud(p, b, 1.05f)) return true;
+            for (int i = 0; i < 4; i++) { var r = PocketBtn(Screen.width, Screen.height, i); if ((p - r.center).magnitude < r.width * 0.6f) return true; }
+            return false;
         }
         Rect PocketProjRect(float W, float H)
         {
@@ -2289,10 +2328,20 @@ namespace AsciiHero
         /// the one wide cloud's working area (the opened map or note)
         Rect PocketBigRect(float W, float H)
         {
-            float rm = H * 0.46f, st = Mathf.Min(2.0f, W * 0.46f / rm);
-            float w = 2 * rm * st * 0.72f, h = 2 * rm * 0.74f; return new Rect(W / 2 - w / 2, H / 2 - h / 2, w, h);
+            float col = PocketBtnR(H) * 2 + 22 * k;
+            float rm = H * 0.46f, st = Mathf.Min(2.0f, (W - col) * 0.46f / rm), cx = col + (W - col) / 2;
+            float w = 2 * rm * st * 0.72f, h = 2 * rm * 0.74f; return new Rect(cx - w / 2, H / 2 - h / 2, w, h);
         }
-        float pocketScroll; Material keyMat;
+        float pocketScroll; Material keyMat; int pocketSlideFrom = 1;
+        float PocketBtnR(float H) { return Mathf.Min(H * 0.085f, 64 * k); }
+        /// the game's buttons: spheres of smoke in a column on the left of the pocket
+        Rect PocketBtn(float W, float H, int i)
+        {
+            float r = PocketBtnR(H), gap = Mathf.Min(16 * k, (H - 8 * r) / 5), y0 = H / 2 - (4 * 2 * r + 3 * gap) / 2;
+            float g = Mathf.SmoothStep(0, 1, pocketT / 0.35f) * (pocketClose >= 0 ? 1 - pocketClose : 1), rr = r * Mathf.Max(0.05f, g);
+            float cx = safe.x + 12 * k + r, cy = y0 + r + i * (2 * r + gap);
+            return new Rect(cx - rr, cy - rr, 2 * rr, 2 * rr);
+        }
         // the right cloud's pages, turned by a swipe: 0 the backpack, 1 the map, 2 the notes; what is opened wide (0 none,
         // 1 the map, 2 a note), and how far the clouds have run together
         int pocketPage, pocketBig, pocketBigShown, pocketNote; float pocketExp, pocketPageT = 1, noteScroll; int pocketSwipe;
@@ -2340,75 +2389,155 @@ namespace AsciiHero
 "<b>?? день.</b>\nТемно. Руки не мои. Если кто-то найдёт это: не снимай шлем с мёртвых. Они" },
         };
 
-        /// the world, as an ASCII map in the orientation of the screen (up is north, right is west - as the camera sees
-        /// it): each place in its own characters and colour, the hero an @
-        string MapText(int cols, int rows, out Rect world)
+        // ---- the map: the world rasterised once (3 points a metre) into a texture of colours and classes, drawn in
+        // characters by Hidden/AsciiHero/Map; it can be dragged and pinched (zoomed); the hero is an arrow ----
+        Texture2D mapTex; Rect mapWorld; const float MAP_PPM = 3f; Material mapMat;
+        Vector2 mapCenter; float mapMpp = -1; bool mapFollow = true;
+        static Color32 C32(uint c) { return new Color32((byte)(c >> 16), (byte)(c >> 8), (byte)c, 255); }
+        static string KindOf(Location l) { var m = l as Mockup; return m != null ? m.kind : l.id; }
+        static uint GroundCol(string id)
+        {
+            switch (id)
+            {
+                case "field": return 0x3a6a2c; case "forest": return 0x2a5428; case "cave": return 0x4a4850; case "swamp": return 0x4a5628; case "toxic": return 0x3a3428;
+                case "bright": return 0xa8a090; case "grim": return 0x5a544e; case "wastes": return 0xb89a68; case "crystal": return 0x3a3448; case "autumn": return 0x8a5a24; case "snow": return 0xe8eef4;
+                default: return 0x404040;
+            }
+        }
+        static uint WaterCol(string id) { return id == "swamp" ? 0x5a6a2au : id == "toxic" ? 0x7aff3au : id == "crystal" ? 0x8a6ad0u : id == "grim" ? 0x6a6078u : 0x4a7ad0u; }
+        void BuildMapTex()
         {
             float x0 = 1e9f, x1 = -1e9f, z0 = 1e9f, z1 = -1e9f;
             foreach (var l in outdoor) { var r = Core(l); x0 = Mathf.Min(x0, r.xMin); x1 = Mathf.Max(x1, r.xMax); z0 = Mathf.Min(z0, r.yMin); z1 = Mathf.Max(z1, r.yMax); }
-            x1 = Mathf.Max(x1, Field.INN.x + 4);
-            world = Rect.MinMaxRect(x0, z0, x1, z1);
-            var sb = new System.Text.StringBuilder(cols * rows * 24);
-            bool inTavern = loc == tavern;
-            for (int r = 0; r < rows; r++)
-            {
-                string lastCol = null;
-                for (int c = 0; c < cols; c++)
+            x1 = Mathf.Max(x1, Field.INN.x + 4); x0 -= 2; z0 -= 2; x1 += 2; z1 += 2;
+            mapWorld = Rect.MinMaxRect(x0, z0, x1, z1);
+            int W = Mathf.CeilToInt(mapWorld.width * MAP_PPM), H = Mathf.CeilToInt(mapWorld.height * MAP_PPM);
+            var px = new Color32[W * H];
+            void Set(int i, int j, uint col, int cls) { if (i < 0 || j < 0 || i >= W || j >= H) return; var c = C32(col); c.a = (byte)Mathf.Clamp(cls * 16, 0, 255); px[j * W + i] = c; }
+            int PX(float x) { return Mathf.FloorToInt((x - x0) * MAP_PPM); } int PZ(float z) { return Mathf.FloorToInt((z - z0) * MAP_PPM); }
+            void Disc(float x, float z, float r, uint col, int cls) { int i0 = PX(x - r), i1 = PX(x + r), j0 = PZ(z - r), j1 = PZ(z + r); for (int j = j0; j <= j1; j++) for (int i = i0; i <= i1; i++) { float wx = x0 + (i + 0.5f) / MAP_PPM - x, wz = z0 + (j + 0.5f) / MAP_PPM - z; if (wx * wx + wz * wz <= r * r) Set(i, j, col, cls); } }
+            void Box(float ax, float az, float bx, float bz, uint col, int cls) { for (int j = PZ(az); j <= PZ(bz); j++) for (int i = PX(ax); i <= PX(bx); i++) Set(i, j, col, cls); }
+            // ground, grass and water, place by place
+            for (int j = 0; j < H; j++)
+                for (int i = 0; i < W; i++)
                 {
-                    float x = x1 - (c + 0.5f) / cols * (x1 - x0), z = z0 + (r + 0.5f) / rows * (z1 - z0);
-                    string ch = " ", col = "000000";
-                    Location at = null; foreach (var l in outdoor) if (Core(l).Contains(new Vector2(x, z))) { at = l; break; }
-                    float h = Hh(c * 7.3f + r * 13.1f);
-                    if (x > Field.INN.x - 3.2f && x < Field.INN.x + 3.6f && Mathf.Abs(z) < 3.4f) { ch = "H"; col = "e8b443"; }
-                    else if (at != null)
-                    {
-                        string id = at is Mockup ? ((Mockup)at).kind : at.id;
-                        switch (id)
-                        {
-                            case "field": ch = h < 0.5f ? "\"" : h < 0.8f ? "'" : ","; col = "7fc070"; break;
-                            case "forest": ch = h < 0.6f ? "T" : "t"; col = "3e9a48"; break;
-                            case "cave": ch = h < 0.5f ? "#" : "="; col = "8a8a96"; break;
-                            case "swamp": ch = h < 0.6f ? "~" : "-"; col = "7a8a40"; break;
-                            case "toxic": ch = h < 0.5f ? "%" : "~"; col = "8aff4a"; break;
-                            case "bright": ch = h < 0.6f ? "#" : "="; col = "e8e0c8"; break;
-                            case "grim": ch = h < 0.6f ? "#" : ":"; col = "7a706a"; break;
-                            case "wastes": ch = h < 0.6f ? "." : ","; col = "c8a868"; break;
-                            case "crystal": ch = h < 0.5f ? "*" : "'"; col = "b07aff"; break;
-                            case "autumn": ch = h < 0.6f ? "Y" : "y"; col = "e07a2a"; break;
-                            case "snow": ch = h < 0.6f ? "^" : "."; col = "e8f0ff"; break;
-                        }
-                    }
-                    // the hero
-                    if (!inTavern && Mathf.Abs(x - pos.x) < (x1 - x0) / cols * 0.6f && Mathf.Abs(z - pos.z) < (z1 - z0) / rows * 0.6f) { ch = "@"; col = Time.unscaledTime % 0.8f < 0.55f ? "ffffff" : "c060ff"; }
-                    if (inTavern && ch == "H") { ch = "@"; col = Time.unscaledTime % 0.8f < 0.55f ? "ffffff" : "c060ff"; inTavern = false; }
-                    if (ch == "<") ch = "&lt;";
-                    if (col != lastCol) { if (lastCol != null) sb.Append("</color>"); sb.Append("<color=#").Append(col).Append('>'); lastCol = col; }
-                    sb.Append(ch);
+                    float x = x0 + (i + 0.5f) / MAP_PPM, z = z0 + (j + 0.5f) / MAP_PPM; var p2 = new Vector2(x, z);
+                    Location at = null; foreach (var l in outdoor) if (Core(l).Contains(p2)) { at = l; break; }
+                    if (at == null) { if (x > Field.INN.x - 4 && x < Field.INN.x + 4 && Mathf.Abs(z) < 4) Set(i, j, GroundCol("field"), 1); continue; }
+                    string id = KindOf(at);
+                    if (at.HasWater && at.InWater(x - at.origin.x, z - at.origin.z)) { Set(i, j, WaterCol(id), 3); continue; }
+                    bool grassy = id == "field" || id == "forest" || id == "swamp" || id == "autumn" || id == "toxic";
+                    float n = Mathf.PerlinNoise(x * 0.7f, z * 0.7f);
+                    Set(i, j, GroundCol(id), grassy && n > 0.42f ? 2 : 1);
                 }
-                if (lastCol != null) sb.Append("</color>");
-                if (r < rows - 1) sb.Append('\n');
+            // what stands on it: paths, trees, bushes, rocks, buildings, cliffs, crystals (by the names of the pieces)
+            foreach (var l in outdoor)
+            {
+                string id = KindOf(l);
+                foreach (var c in l.colliders)
+                {   // what blocks the way: rock, unless a thing below says what it is
+                    if (c.circle) Disc(c.x + l.origin.x, c.z + l.origin.z, Mathf.Max(0.3f, c.r), id == "snow" ? 0x9aa4b0u : 0x6a6670u, 9);
+                    else Box(c.minx + l.origin.x, c.minz + l.origin.z, c.maxx + l.origin.x, c.maxz + l.origin.z, 0x6a6670, 9);
+                }
+                foreach (Transform ch in l.root.transform)
+                {
+                    string nm = ch.name;
+                    if (nm == "Ground" || nm == "Grass" || nm == "Motes" || nm == "Mist" || nm == "Lamp" || nm == "Pool" || nm == "Lake" || nm == "Roof" || nm == "Rock" || nm.StartsWith("Glyph")) continue;
+                    // the piece's footprint: its meshes' bounds in the world (works while the location is switched off)
+                    Bounds b = new Bounds(); bool any = false;
+                    foreach (var mf in ch.GetComponentsInChildren<MeshFilter>(true))
+                    {
+                        if (mf.sharedMesh == null || mf.gameObject.layer == GlyphLayer.LAYER) continue;
+                        var mb = mf.sharedMesh.bounds; var M = mf.transform.localToWorldMatrix;
+                        for (int q = 0; q < 8; q++) { var cpt = M.MultiplyPoint3x4(mb.center + Vector3.Scale(mb.extents, new Vector3((q & 1) == 0 ? -1 : 1, (q & 2) == 0 ? -1 : 1, (q & 4) == 0 ? -1 : 1))); if (!any) { b = new Bounds(cpt, Vector3.zero); any = true; } else b.Encapsulate(cpt); }
+                    }
+                    if (!any) continue;
+                    float cx = b.center.x, cz = b.center.z, rr = Mathf.Min(b.extents.x, b.extents.z);
+                    string lo = nm.ToLowerInvariant();
+                    if (nm == "Path" || nm == "Road" || nm == "Rut" || nm == "Ditch" || nm == "Board")
+                    {   // paths: their triangles, filled
+                        var mf = ch.GetComponent<MeshFilter>(); if (mf == null || mf.sharedMesh == null) continue;
+                        var v = mf.sharedMesh.vertices; var t = mf.sharedMesh.triangles; var M = ch.localToWorldMatrix;
+                        uint pc = id == "bright" ? 0xc8c0b0u : id == "grim" ? 0x4a4440u : id == "snow" ? 0xa8b2bcu : id == "wastes" ? 0x8a7050u : nm == "Board" ? 0x8a6a40u : 0x8a6a48u;
+                        for (int q = 0; q + 2 < t.Length; q += 3)
+                        {
+                            Vector3 A = M.MultiplyPoint3x4(v[t[q]]), B = M.MultiplyPoint3x4(v[t[q + 1]]), C = M.MultiplyPoint3x4(v[t[q + 2]]);
+                            int i0 = PX(Mathf.Min(A.x, Mathf.Min(B.x, C.x))), i1 = PX(Mathf.Max(A.x, Mathf.Max(B.x, C.x))), j0 = PZ(Mathf.Min(A.z, Mathf.Min(B.z, C.z))), j1 = PZ(Mathf.Max(A.z, Mathf.Max(B.z, C.z)));
+                            for (int jj = j0; jj <= j1; jj++)
+                                for (int ii = i0; ii <= i1; ii++)
+                                {
+                                    float x = x0 + (ii + 0.5f) / MAP_PPM, z = z0 + (jj + 0.5f) / MAP_PPM;
+                                    float d1 = (x - B.x) * (A.z - B.z) - (A.x - B.x) * (z - B.z), d2 = (x - C.x) * (B.z - C.z) - (B.x - C.x) * (z - C.z), d3 = (x - A.x) * (C.z - A.z) - (C.x - A.x) * (z - A.z);
+                                    if (!((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0))) Set(ii, jj, pc, 4);
+                                }
+                        }
+                        continue;
+                    }
+                    bool tree = lo.StartsWith("oak") || lo.StartsWith("pine") || lo.StartsWith("birch") || lo.StartsWith("willow") || lo.StartsWith("dead") || lo.StartsWith("aoak") || lo.StartsWith("abirch") || lo.StartsWith("apine") || lo.StartsWith("awillow") || lo.StartsWith("soak") || lo.StartsWith("spine") || lo.StartsWith("sbirch") || lo == "apple";
+                    if (tree)
+                    {
+                        uint tc = lo.StartsWith("a") && lo != "apple" ? 0xd0702au : lo.StartsWith("s") ? 0xb8d0c8u : lo.Contains("dead") ? 0x7a5a3cu : lo.Contains("pine") ? 0x2a6a3au : lo.Contains("birch") ? 0x7ab04au : 0x3a8a3cu;
+                        Disc(cx, cz, Mathf.Clamp(rr, 0.6f, 2.2f), tc, 5); continue;
+                    }
+                    if (lo.StartsWith("bush") || lo == "sbush" || lo.StartsWith("fern") || lo == "reed" || lo.StartsWith("cactus") || lo.StartsWith("pumpkin")) { Disc(cx, cz, Mathf.Clamp(rr, 0.25f, 0.8f), lo.StartsWith("pumpkin") ? 0xe0802au : lo.StartsWith("cactus") ? 0x6aa040u : 0x4a8a34u, 6); continue; }
+                    if (lo.Contains("rock") || nm == "Boulder" || nm == "SharpRock" || nm == "Stalagmite" || nm == "Cairn" || lo.StartsWith("stump") || lo.StartsWith("log") || lo.StartsWith("slog") || lo.StartsWith("sstump")) { Disc(cx, cz, Mathf.Clamp(rr, 0.2f, 1.2f), lo.StartsWith("srock") ? 0xd0d8e0u : lo.Contains("log") || lo.Contains("stump") ? 0x7a5a3cu : 0x9a98a0u, 7); continue; }
+                    if (nm == "Crystal" || nm == "Shard") { Disc(cx, cz, 0.35f, 0xc08aff, 10); continue; }
+                    if (lo == "inn") { Box(b.min.x, b.min.z, b.max.x, b.max.z, 0xe8b443, 11); continue; }
+                    if (lo.StartsWith("house") || lo == "mill" || lo == "smithy" || lo == "stable" || lo == "belltower" || lo.StartsWith("wall") || lo.Contains("tower") || lo.StartsWith("market") || lo == "well" || nm.StartsWith("Fountain") || nm == "Bed" || lo == "pedestal" || nm == "Altar" || lo == "cart" || lo == "hay")
+                    { Box(b.min.x, b.min.z, b.max.x, b.max.z, id == "bright" ? 0xe8e0d0u : id == "grim" ? 0x8a7a70u : 0xb08860u, 8); continue; }
+                    if (nm == "Cliff" || nm == "Wall" || nm == "Slope" || nm == "Jamb" || nm == "IceFall" || nm == "Dune") { Disc(cx, cz, Mathf.Clamp(rr, 0.5f, 1.6f), nm == "Dune" ? 0xc8a878u : id == "snow" ? 0xc0c8d4u : 0x7a7480u, nm == "Dune" ? 1 : 9); continue; }
+                }
             }
-            return sb.ToString();
+            mapTex = new Texture2D(W, H, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp, name = "WorldMap" };
+            mapTex.SetPixels32(px); mapTex.Apply(false, true);
+            Debug.Log("Карта мира: " + W + "×" + H + " точек (" + MAP_PPM + " на метр)");
         }
-        GUIStyle sMapS, sNoteS, sNoteT;
-        GUIStyle sRichS;
-        GUIStyle sRich() { if (sRichS == null || sRichS.fontSize != sSmall.fontSize) sRichS = new GUIStyle(sSmall) { richText = true }; return sRichS; }
-        GUIStyle MapStyle(int fs) { if (sMapS == null || sMapS.fontSize != fs) { sMapS = new GUIStyle(sMono) { richText = true, alignment = TextAnchor.MiddleCenter, fontSize = fs, wordWrap = false }; sMapS.normal.textColor = Color.white; } return sMapS; }
-        void DrawMap(Rect r, bool big)
+        void DrawMap(Rect r, bool big, bool live)
         {
-            // the map's cell: about 2 m across, a character twice as tall as wide; the font fits the rectangle
-            int cols = big ? 56 : 30, rows = big ? 30 : 17;
-            float fs = Mathf.Min(r.width / (cols * 0.62f), r.height / (rows * 1.16f));
-            Rect world; string t = MapText(cols, rows, out world);
-            GUI.Label(r, t, MapStyle(Mathf.Max(5, Mathf.FloorToInt(fs))));
+            if (mapTex == null) { try { BuildMapTex(); } catch (System.Exception e) { Debug.LogException(e); return; } }
+            if (mapMat == null) { var sh = Shader.Find("Hidden/AsciiHero/Map"); if (sh != null) mapMat = new Material(sh); if (mapMat == null) return; }
+            if (mapMpp < 0) mapMpp = 0.07f;
+            // drag to move it, pinch to zoom; it follows the hero until it is moved
+            int nIn = 0; Pointer pa = null, pb = null;
+            foreach (var pt in InputHub.active.Values) if (pt.owner == "ui" && r.Contains(pt.start)) { nIn++; if (pa == null) pa = pt; else if (pb == null) pb = pt; }
+            if (live && nIn == 1 && pa.Delta.sqrMagnitude > 0) { mapFollow = false; mapCenter += new Vector2(pa.Delta.x, -pa.Delta.y) * mapMpp; }       // (screen right = west: x falls; screen down = south... the drag moves the map with the finger)
+            if (live && nIn >= 2)
+            {
+                float d1 = (pa.pos - pb.pos).magnitude, d0 = ((pa.pos - pa.Delta) - (pb.pos - pb.Delta)).magnitude;
+                if (d0 > 10 && d1 > 10) mapMpp = Mathf.Clamp(mapMpp * d0 / d1, 0.025f, 0.35f);
+            }
+            if (mapFollow) mapCenter = new Vector2(pos.x, pos.z);
+            mapCenter.x = Mathf.Clamp(mapCenter.x, mapWorld.xMin, mapWorld.xMax); mapCenter.y = Mathf.Clamp(mapCenter.y, mapWorld.yMin, mapWorld.yMax);
+            float cw = Mathf.Max(5, 9 * k), ch = cw * 1.6f;
+            mapMat.SetVector("_MRect", new Vector4(r.width, r.height, cw, ch));
+            mapMat.SetVector("_MView", new Vector4(mapCenter.x, mapCenter.y, mapMpp, GUI.color.a * uiAlpha));
+            mapMat.SetVector("_MWorld", new Vector4(mapWorld.x, mapWorld.y, mapWorld.width, mapWorld.height));
+            mapMat.SetFloat("_MRound", big ? 0 : 1); mapMat.SetFloat("_MTime", Time.unscaledTime);
+            Graphics.DrawTexture(r, mapTex, mapMat);
+            // the hero: an arrow the way he looks (in the tavern: at the inn's door)
+            Vector3 hp = loc == tavern ? new Vector3(Field.INN.x, 0, 0) : pos;
+            var sp = new Vector2(r.center.x - (hp.x - mapCenter.x) / mapMpp, r.center.y + (hp.z - mapCenter.y) / mapMpp);
+            if (r.Contains(sp))
+            {
+                float hd = player != null ? player.heading : 0; var sv = new Vector2(-Mathf.Sin(hd), Mathf.Cos(hd));
+                float ang = Mathf.Atan2(sv.y, sv.x) * Mathf.Rad2Deg; var m0 = GUI.matrix;
+                GUIUtility.RotateAroundPivot(ang, sp);
+                var st = MapStyle(Mathf.RoundToInt(cw * 2.2f)); var old = GUI.color;
+                GUI.color = new Color(1, 1, 1, uiAlpha * (Time.unscaledTime % 0.9f < 0.6f ? 1f : 0.55f));
+                GUI.Label(new Rect(sp.x - cw * 2, sp.y - ch, cw * 4, ch * 2), "<color=#ffffff>></color>", st);
+                GUI.color = old; GUI.matrix = m0;
+            }
             if (big)
             {   // the key, under the map
-                string key = "<color=#7fc070>\"</color> поляна  <color=#3e9a48>T</color> лес  <color=#8a8a96>#</color> пещера  <color=#e8b443>H</color> трактир  <color=#7a8a40>~</color> болото  <color=#8aff4a>%</color> яд. болото  " +
-                             "<color=#e8e0c8>#</color> светлый город  <color=#7a706a>#</color> трущобы  <color=#c8a868>.</color> пустоши  <color=#b07aff>*</color> копи  <color=#e07a2a>Y</color> осенний лес  <color=#e8f0ff>^</color> высокогорье  <color=#ffffff>@</color> ты";
-                var ks = sRich(); var old = ks.alignment; ks.alignment = TextAnchor.UpperCenter; ks.wordWrap = true;
-                GUI.Label(new Rect(r.x, r.yMax + 2 * k, r.width, 34 * k), key, ks); ks.alignment = old; ks.wordWrap = false;
+                string key = "<color=#3a8a3c>&</color> деревья  <color=#4a8a34>*</color> кусты  <color=#9a98a0>o</color> камни  <color=#6a6670>M</color> скалы  <color=#b08860>#</color> дома  <color=#e8b443>H</color> трактир  <color=#4a7ad0>~</color> вода  <color=#8a6a48>:</color> тропы  <color=#c08aff>*</color> кристаллы  <color=#ffffff>></color> ты" +
+                             "   ·   двигай пальцем, разводи двумя";
+                var ks = sRich(); var old2 = ks.alignment; ks.alignment = TextAnchor.UpperCenter; ks.wordWrap = true;
+                GUI.Label(new Rect(r.x, r.yMax + 2 * k, r.width, 34 * k), key, ks); ks.alignment = old2; ks.wordWrap = false;
             }
         }
+        GUIStyle sMapS, sNoteS, sNoteT, sRichS;
+        GUIStyle sRich() { if (sRichS == null || sRichS.fontSize != sSmall.fontSize) sRichS = new GUIStyle(sSmall) { richText = true }; return sRichS; }
+        GUIStyle MapStyle(int fs) { if (sMapS == null || sMapS.fontSize != fs) { sMapS = new GUIStyle(sMono) { richText = true, alignment = TextAnchor.MiddleCenter, fontSize = fs, wordWrap = false }; sMapS.normal.textColor = Color.white; } return sMapS; }
         void DrawNoteList(Rect r, bool live)
         {
             float rh = 30 * k;
@@ -2445,7 +2574,10 @@ namespace AsciiHero
             pocketExp = Mathf.MoveTowards(pocketExp, pocketBig > 0 ? 1 : 0, dt / 0.35f);
             if (pocketBig > 0) pocketBigShown = pocketBig; else if (pocketExp <= 0) pocketBigShown = 0;
             // a swipe turns the right cloud's page: the backpack - the map - the notes
-            if (pocketSwipe != 0 && pocketBig == 0 && pocketExp <= 0) { int np = Mathf.Clamp(pocketPage + pocketSwipe, 0, 2); if (np != pocketPage) { pocketPage = np; pocketPageT = 0; } }
+            if (pocketSwipe != 0 && pocketBig == 0 && pocketExp <= 0)
+            {   // (swiped to the left - the new page comes in from the left; to the right - from the right)
+                int np = Mathf.Clamp(pocketPage + pocketSwipe, 0, 2); if (np != pocketPage) { pocketPage = np; pocketPageT = 0; pocketSlideFrom = pocketSwipe > 0 ? -1 : 1; }
+            }
             pocketSwipe = 0; pocketPageT = Mathf.Min(1, pocketPageT + dt / 0.25f);
             Vector4 c1, c2; PocketClouds(W, H, out c1, out c2);
             // the smoke
@@ -2483,7 +2615,7 @@ namespace AsciiHero
                     MissingLimbDots(lp);
                     // right: the page (it slides in from the side it was swiped to)
                     float cell; var gr = PocketGrid(W, H, out cell); uiRects.Add(gr);
-                    float slide = (1 - Mathf.SmoothStep(0, 1, pocketPageT)) * cell * 0.8f;
+                    float slide = pocketSlideFrom * (1 - Mathf.SmoothStep(0, 1, pocketPageT)) * gr.width * 0.6f;
                     var pg = new Rect(gr.x + slide, gr.y, gr.width, gr.height);
                     uiAlpha = small * pocketPageT; GUI.color = new Color(1, 1, 1, uiAlpha);
                     if (pocketPage == 0)
@@ -2510,26 +2642,33 @@ namespace AsciiHero
                     }
                     else if (pocketPage == 1)
                     {   // the map, small: a tap opens it wide
-                        DrawMap(pg, false);
-                        if (Tapped(gr) && live) pocketBig = 1;
+                        DrawMap(pg, false, live);
+                        if (Tapped(gr) && live) { pocketBig = 1; mapMpp = 0.09f; }
                     }
                     else DrawNoteList(pg, live);
                     // which page: three dots over the right cloud
                     uiAlpha = small; GUI.color = new Color(1, 1, 1, small);
                     for (int d = 0; d < 3; d++) { float dx = gr.center.x + (d - 1) * 14 * k; Fill(new Rect(dx - 3 * k, gr.y - 12 * k, 6 * k, 6 * k), d == pocketPage ? new Color(0.78f, 0.5f, 1f, 0.95f) : new Color(0.4f, 0.36f, 0.52f, 0.7f)); }
-                    // the game's own buttons: small, under the page
-                    float bw = gr.width / 4 - 4 * k, bh = 18 * k, by = gr.yMax + 6 * k;
-                    if (Button(new Rect(gr.x, by, bw, bh), "сохранить", false, sSmallBtn()) && live) { saveMode = 1; menuPage = 3; menuFromWorld = true; saveInfoDirty = true; }
-                    if (Button(new Rect(gr.x + (bw + 5 * k), by, bw, bh), "загрузить", false, sSmallBtn()) && live) { saveMode = 2; menuPage = 3; menuFromWorld = true; saveInfoDirty = true; }
-                    if (Button(new Rect(gr.x + (bw + 5 * k) * 2, by, bw, bh), "настройки", false, sSmallBtn()) && live) { menuPage = 1; menuFromWorld = true; }
-                    if (Button(new Rect(gr.x + (bw + 5 * k) * 3, by, bw, bh), "выйти", false, sSmallBtn()) && live) { invOpen = false; pocketClose = -1; LeaveWorld(); inMenu = true; menuPage = 0; return; }
                     if (setDev && Button(new Rect(lp.x, lp.yMax - 18 * k, lp.width, 18 * k), "урон −10%", false, sSmallBtn()) && live) { Damage(10); if (projActor != null) projActor.SetLimbs(limbs); }
+                }
+                // the game's own buttons: spheres of smoke in a column on the left (a press bursts the smoke first)
+                {
+                    uiAlpha = ua; GUI.color = new Color(1, 1, 1, ua);
+                    string[] BT = { "сохра-\nнить", "загру-\nзить", "наст-\nройки", "выйти" };
+                    for (int b2 = 0; b2 < 4; b2++)
+                    {
+                        if (!Button(PocketBtn(W, H, b2), BT[b2], false, sSmallBtn()) || !live) continue;
+                        if (b2 == 0) { saveMode = 1; menuPage = 3; menuFromWorld = true; saveInfoDirty = true; }
+                        else if (b2 == 1) { saveMode = 2; menuPage = 3; menuFromWorld = true; saveInfoDirty = true; }
+                        else if (b2 == 2) { menuPage = 1; menuFromWorld = true; }
+                        else { invOpen = false; pocketClose = -1; LeaveWorld(); inMenu = true; menuPage = 0; return; }
+                    }
                 }
                 if (big > 0.01f && pocketBigShown > 0)
                 {
                     uiAlpha = big; GUI.color = new Color(1, 1, 1, big);
                     var br = PocketBigRect(W, H); uiRects.Add(br);
-                    if (pocketBigShown == 1) { var mr = new Rect(br.x, br.y, br.width, br.height - 38 * k); DrawMap(mr, true); }
+                    if (pocketBigShown == 1) { var mr = new Rect(br.x, br.y, br.width, br.height - 38 * k); DrawMap(mr, true, live); }
                     else DrawNote(br, live);
                     // a short tap on it folds it back
                     if (pocketBig > 0 && pocketExp >= 1 && Tapped(br) && live) pocketBig = 0;
@@ -2650,7 +2789,7 @@ namespace AsciiHero
             for (int i = 0; i < SAVE_SLOTS; i++)
             {
                 var r = new Rect(x0, y0 + 32 * k + i * (rh + 6 * k), pw, rh);
-                Fill(r, new Color(0.08f, 0.08f, 0.1f, 0.95f)); Frame(r, new Color(0.32f, 0.3f, 0.26f, 1), Mathf.Max(1, k));
+                Smoke(r);
                 float bwid = 120 * k, nb = (saveMode == 0 ? 2 : 1);
                 GUI.Label(new Rect(r.x + 10 * k, r.y + 4 * k, r.width - nb * (bwid + 8 * k) - 20 * k, 20 * k), "Ячейка " + (i + 1), sName);
                 GUI.Label(new Rect(r.x + 10 * k, r.y + 24 * k, r.width - nb * (bwid + 8 * k) - 20 * k, rh - 26 * k), saveInfo[i], sDesc);
