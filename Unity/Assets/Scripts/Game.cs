@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.61 · Unity";
+        public const string VERSION = "beta 0.62 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -1155,7 +1155,7 @@ namespace AsciiHero
             worldZoomT = 1; perfRun = true; perfIx = 0; PerfReset();
             savedVsync = QualitySettings.vSyncCount; QualitySettings.vSyncCount = 0; Application.targetFrameRate = 240;
             Debug.Log("ТЕСТ НАГРУЗКИ · " + VERSION + " · " + SystemInfo.deviceModel + " · " + SystemInfo.graphicsDeviceName + " · экран " + Screen.width + "×" + Screen.height +
-                      " @" + Screen.currentResolution.refreshRateRatio.value.ToString("0") + " Гц · качество " + QUALITY[setQuality] + ", трава " + GRASS[setGrass] + " %, разрешение " + RES[setRes] + " %");
+                      " @" + Screen.currentResolution.refreshRateRatio.value.ToString("0") + " Гц · качество " + QUALITY[setQuality] + ", трава " + GRASS[setGrass] + " %, разрешение " + RES[setRes] + " %, ограничение в игре " + FPS[setFps] + " к/с (тест идёт без ограничения)");
             if (worldBuildMs > 0) Debug.Log("ТЕСТ · мир (все биомы) строился " + (worldBuildMs / 1000f).ToString("0.0") + " с · память: " + (UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong() / 1048576) + " МБ занято, " + (UnityEngine.Profiling.Profiler.GetTotalReservedMemoryLong() / 1048576) + " МБ взято у системы, графика " + (UnityEngine.Profiling.Profiler.GetAllocatedMemoryForGraphicsDriver() / 1048576) + " МБ");
             perfLocs.Clear(); perfRows.Clear();
             foreach (var l in outdoor) perfLocs.Add(l);
@@ -1251,7 +1251,8 @@ namespace AsciiHero
             int ok60 = 0, ok30 = 0;
             foreach (var r in perfRows)
             {
-                bool a60 = r.ms <= 17.2f && r.miss < 5, a30 = r.ms <= 33.5f;      // (60: the mean within a hair of 1/60 s, hardly a frame missed) if (a60) ok60++; if (a30) ok30++;
+                bool a60 = r.ms <= 17.2f && r.miss < 5, a30 = r.ms <= 33.5f;      // (60: the mean within a hair of 1/60 s, hardly a frame missed)
+                if (a60) ok60++; if (a30) ok30++;
                 sb.Append("\n  ").Append(a60 ? "[60] " : a30 ? "[30] " : "[<30] ").Append(r.name).Append(": ").Append(r.ms.ToString("0.0")).Append(" мс, ").Append((1000f / r.ms).ToString("0")).Append(" к/с, худший ").Append(r.worst.ToString("0"))
                   .Append(" мс, >1/60: ").Append(r.miss.ToString("0")).Append(" %").Append(r.gpu >= 0 ? ", GPU " + r.gpu.ToString("0.0") + " мс" : "").Append(", символов ").Append(r.glyphs);
             }
