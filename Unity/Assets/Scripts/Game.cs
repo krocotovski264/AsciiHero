@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.58 · Unity";
+        public const string VERSION = "beta 0.59 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -43,7 +43,7 @@ namespace AsciiHero
         Camera display, sceneCam; AsciiRenderer ascii;
         Mats mats, actorMats;
         Character hero; MotionActor player;
-        bool world; Tavern tavern; Field field; Cave cave; Forest forest; Location loc; readonly List<Location> outdoor = new List<Location>(); readonly List<Mockup> mockups = new List<Mockup>(); float doorCd, leafClear; Light moonLight; Character bartenderChar; MotionActor bartender;
+        bool world; Tavern tavern; Field field; Cave cave; Forest forest; Location loc; readonly List<Location> outdoor = new List<Location>(); readonly List<Mockup> mockups = new List<Mockup>(); Rect lastView = new Rect(-1e5f, -1e5f, 2e5f, 2e5f); Location waterSeen; float doorCd, leafClear; Light moonLight; Character bartenderChar; MotionActor bartender;
         // integrity instead of a health bar: five limbs (head, armL, armR, legL, legR), each worth 20 %
         readonly Vector4[] pushPts = new Vector4[4]; static readonly Vector4 FAR = new Vector4(9999, 0, 9999, 0);
         int hp = 100; readonly bool[] limbs = { true, true, true, true, true }; float respawnT; Vector3 heroTrail;
@@ -754,9 +754,25 @@ namespace AsciiHero
                     }
             leafClear = Mathf.MoveTowards(leafClear, loc == forest ? 1f : 0f, Time.deltaTime * 1.5f);      // under the trees: the crowns clear off the screen but its rim
             Shader.SetGlobalFloat("_AsciiLeafClear", Mathf.SmoothStep(0, 1, leafClear));
+            // the ground the camera sees (its four corner rays meeting y = 0), 3 m wider all round
+            Rect viewRect = new Rect(p2.x - 14, p2.y - 14, 28, 28);
+            if (sceneCam != null)
+            {
+                float x0 = 1e9f, x1 = -1e9f, z0 = 1e9f, z1 = -1e9f;
+                foreach (var c in new[] { new Vector3(0, 0), new Vector3(1, 0), new Vector3(0, 1), new Vector3(1, 1) })
+                {
+                    var ray = sceneCam.ViewportPointToRay(c); float t = ray.direction.y < -0.01f ? -ray.origin.y / ray.direction.y : 40f;
+                    var g = ray.origin + ray.direction * Mathf.Min(t, 40f);
+                    x0 = Mathf.Min(x0, g.x); x1 = Mathf.Max(x1, g.x); z0 = Mathf.Min(z0, g.z); z1 = Mathf.Max(z1, g.z);
+                }
+                viewRect = Rect.MinMaxRect(x0 - 3, z0 - 3, x1 + 3, z1 + 3);
+            }
+            lastView = viewRect;
+            waterSeen = null;
+            foreach (var n in outdoor) if ((n == loc || Core(n).Overlaps(viewRect)) && n.HasWater && n.WaterIn(viewRect)) { waterSeen = n; if (n == loc) break; }
             foreach (var n in outdoor)
             {
-                bool on = n == loc || RectDist(Core(n), p2) < 14f;
+                bool on = n == loc || Core(n).Overlaps(viewRect);          // (only what can come into view: each location switched on costs its shadows and its characters)
                 if (n.Active != on) n.SetActive(on);
             }
             // the light: each location weighs by how deep the hero is in it (a 4 m blend across each seam)
@@ -1122,7 +1138,10 @@ namespace AsciiHero
         void StartPerfTest()
         {
             if (perfRun) return;
-            inMenu = false; invOpen = false; menuFromWorld = false; if (!world || loc != field) EnterWorld(true);
+            inMenu = false; invOpen = false; menuFromWorld = false;
+            // everything is built first (the world, the tavern): the building must not fall into a measurement
+            try { SetupOutdoor(); if (tavern == null) SetupWorld(); } catch (System.Exception e) { Debug.LogException(e); }
+            if (!world || loc != field) EnterWorld(true);
             if (!world) return;
             worldZoomT = 1; perfRun = true; perfIx = 0; PerfReset();
             savedVsync = QualitySettings.vSyncCount; QualitySettings.vSyncCount = 0; Application.targetFrameRate = 240;
@@ -1135,8 +1154,9 @@ namespace AsciiHero
             perfPhase = 1; perfLocIx = 0; perfWalk = true; perfHeavy = null; perfHeavyMs = 0;
             PerfGo(perfLocs[0]);
         }
-        int pMiss; float perfBaseGpu;
-        void PerfReset() { pMiss = 0; perfT = 0; pSum = pMain = pRender = pGpu = accU = accA = accG = 0; pN = pFt = 0; pWorst = 0; }
+        int pMiss, pHitch; float perfBaseGpu;
+        const float PERF_T1 = 5.5f, PERF_T2 = 4.2f;      // seconds per biome, per stage (the first 1.5 s settle and are not counted)
+        void PerfReset() { pMiss = 0; pHitch = 0; perfT = 0; pSum = pMain = pRender = pGpu = accU = accA = accG = 0; pN = pFt = 0; pWorst = 0; }
         void PerfSet(int ix, bool on)
         {
             switch (ix)
@@ -1161,13 +1181,14 @@ namespace AsciiHero
         {
             if (!perfRun) return;
             float udt = Time.unscaledDeltaTime; perfT += udt;
-            if (perfT > 1.2f)
+            if (perfT > 1.5f && udt > 0.5f) pHitch++;      // (a hitch of half a second or more: a switch or a load, not the scene's cost)
+            else if (perfT > 1.5f)
             {
                 pSum += udt * 1000.0; pN++; pWorst = Mathf.Max(pWorst, udt * 1000f); if (udt > 0.0185f) pMiss++;
                 if (fFtFrame) { pMain += ftBuf[0].cpuMainThreadFrameTime; pRender += ftBuf[0].cpuRenderThreadFrameTime; pGpu += ftBuf[0].gpuFrameTime; pFt++; }
             }
             else { accU = accA = accG = 0; }
-            if (perfT < (perfPhase == 1 ? 5.2f : 3.9f) || pN == 0) return;
+            if (perfT < (perfPhase == 1 ? PERF_T1 : PERF_T2) || pN == 0) return;
             float ms = (float)(pSum / pN), miss = 100f * pMiss / pN;
             if (perfPhase == 1)
             {
@@ -1178,7 +1199,8 @@ namespace AsciiHero
                 perfRows.Add(row);
                 string line = "ТЕСТ · " + row.name + ": " + ms.ToString("0.0") + " мс (" + (1000f / ms).ToString("0") + " к/с), худший кадр " + pWorst.ToString("0") + " мс, кадров дольше 1/60 с: " + miss.ToString("0") + " %";
                 if (pFt > 0) line += " · главный поток " + (pMain / pFt).ToString("0.0") + ", поток отрисовки " + (pRender / pFt).ToString("0.0") + ", GPU " + (pGpu / pFt).ToString("0.0") + " мс";
-                line += " · символов " + row.glyphs + " · включено локаций " + row.active + " · скрипты " + (accU / pN).ToString("0.00") + " мс";
+                line += " · символов " + row.glyphs + " · включено локаций " + row.active + " · зеркало воды " + (ascii.waterOn ? "да" : "нет") + " · скрипты " + (accU / pN).ToString("0.00") + " мс";
+                if (pHitch > 0) line += " · рывков от 0,5 с (не в счёт): " + pHitch;
                 Debug.Log(line);
                 if (ms > perfHeavyMs && loc != tavern) { perfHeavyMs = ms; perfHeavy = loc; }
                 perfLocIx++;
@@ -1194,7 +1216,7 @@ namespace AsciiHero
             }
             // ---- part 2: one stage done ----
             if (perfIx == 0) perfBase = ms;
-            string ln = "ТЕСТ · " + LocTitle(loc) + " · " + PERF[perfIx] + ": " + ms.ToString("0.0") + " мс (" + (1000f / ms).ToString("0") + " к/с), худший кадр " + pWorst.ToString("0") + " мс";
+            string ln = "ТЕСТ · " + LocTitle(perfHeavy) + " · " + PERF[perfIx] + ": " + ms.ToString("0.0") + " мс (" + (1000f / ms).ToString("0") + " к/с), худший кадр " + pWorst.ToString("0") + " мс";
             ln += ", кадров дольше 1/60 с: " + miss.ToString("0") + " %";
             if (perfIx > 0) ln += ", к базе " + (ms - perfBase).ToString("+0.0;-0.0") + " мс";
             if (pFt > 0) { float g = (float)(pGpu / pFt); if (perfIx == 0) perfBaseGpu = g; else ln += " (GPU " + (g - perfBaseGpu).ToString("+0.0;-0.0") + ")"; }
@@ -1202,7 +1224,7 @@ namespace AsciiHero
             ln += " · скрипты: Update " + (accU / pN).ToString("0.00") + " (анимация и ткань " + (accA / pN).ToString("0.00") + "), интерфейс " + (accG / pN).ToString("0.00") + " мс";
             Debug.Log(ln);
             PerfSet(perfIx, false); perfIx++;
-            if (perfIx < PERF.Length) { PerfSet(perfIx, true); PerfReset(); return; }
+            if (perfIx < PERF.Length) { PerfGo(perfHeavy); PerfSet(perfIx, true); PerfReset(); return; }      // (back to the same spot for every stage)
             // ---- the end: the table ----
             perfRun = false; perfWalk = false; QualitySettings.vSyncCount = savedVsync; ApplySettings(false);
             var sb = new System.Text.StringBuilder("ТЕСТ · ИТОГ по биомам (60 к/с = кадр до 16,7 мс; 30 к/с = до 33,3 мс):");
@@ -1564,7 +1586,7 @@ namespace AsciiHero
         void WorldUpdate(float dt)
         {
             float ix = stick.x, iy = stick.y;
-            if (perfRun && perfWalk) { float a = perfT * 0.8f; ix = Mathf.Cos(a) * 0.62f; iy = Mathf.Sin(a) * 0.62f; }      // (the test: he walks a small circle)
+            if (perfRun && perfWalk) { float a = perfT * Mathf.PI * 2 / (perfPhase == 1 ? PERF_T1 : PERF_T2); ix = Mathf.Cos(a) * 0.62f; iy = Mathf.Sin(a) * 0.62f; }      // (the test: he walks a small circle)
             if (InputHub.Key("W")) iy = -1; if (InputHub.Key("S")) iy = 1;
             if (InputHub.Key("A")) ix = -1; if (InputHub.Key("D")) ix = 1;
             float l = Mathf.Sqrt(ix * ix + iy * iy), mag = Mathf.Min(1, l / 0.8f); if (mag < 0.12f) mag = 0;   // 80 % of the ring = full walk
@@ -1830,7 +1852,10 @@ namespace AsciiHero
                 GlyphLayer.SetActorLod(lv);
             }
             ascii.SelfCheck();
-            ascii.waterOn = world && loc != null && loc.HasWater; if (loc != null) ascii.waterY = loc.WaterY;
+            {   // the mirror only with water in sight (it draws the scene a second time)
+                var wl = loc != null && outdoor.Contains(loc) ? waterSeen : loc;
+                ascii.waterOn = world && wl != null && wl.HasWater; if (wl != null) ascii.waterY = wl.WaterY;
+            }
             ascii.SetSize(Mathf.RoundToInt(vr.width), Mathf.RoundToInt(vr.height), cell * dp);
             // the backpack's projection of the hero: its own small ASCII render of the figure in the studio
             if (projAscii != null)

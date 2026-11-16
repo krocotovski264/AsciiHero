@@ -162,7 +162,7 @@ namespace AsciiHero
             foreach (var p in pools) { var pp = p; Water(T, mats, (x, z) => PoolK(pp, x, z), p.c, Mathf.Max(p.rx, p.rz) + 0.3f, new Vector4(1, 0, 0, p.depth > 0.1f ? 1 : 0)); }
 
             // ---- walls: carved out of one volume of rock (see BuildRock) ----
-            var rock = new Material(mats["WETROCK"]) { name = "CaveWall" }; rock.SetFloat("_SeeThrough", 1); rock.SetFloat("_Cull", 0);
+            var rock = new Material(mats["WETROCK"]) { name = "CaveWall" }; rock.SetFloat("_SeeThrough", 1); rock.SetFloat("_Cull", 0); rock.SetVector("_GlyphCell", new Vector4(0.1f, 0.165f, 0, 0));      // (the rock is big: coarser characters, half as many)
             BuildRock(T, mats, rock);
 
             // ---- the grotto: stalagmites, stalactites, sharp rocks, moss ----

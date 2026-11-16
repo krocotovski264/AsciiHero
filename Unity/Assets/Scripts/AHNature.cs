@@ -80,6 +80,7 @@ namespace AsciiHero
             Load();
             var h = new GameObject(name); h.transform.SetParent(parent, false); h.transform.localPosition = pos; h.transform.localRotation = Quaternion.Euler(0, yaw, 0);
             List<Part> parts; if (!M.TryGetValue(name, out parts)) { Debug.LogWarning("no model " + name); return h; }
+            var sz0 = Size(name); bool big = Mathf.Max(sz0.x, Mathf.Max(sz0.y, sz0.z)) * scale > 3.2f && LeafKind(name) < 0;     // (houses, towers, the mill: coarser characters; not the trees)
             for (int i = 0; i < parts.Count; i++)
             {
                 string key = parts[i].mat; string rk; if (recolour != null && recolour.TryGetValue(key, out rk)) key = rk;
@@ -102,6 +103,7 @@ namespace AsciiHero
                     continue;
                 }
                 var mat = matFor != null ? matFor(key) : null; if (mat == null) mat = mats[key];
+                if (big) mat = mats.Big(mat);
                 MeshGen.Obj(MeshOf(name, i, scale), mat, h.transform, Vector3.zero, Quaternion.identity, shadows, name + "_" + key);
             }
             return h;
@@ -204,7 +206,13 @@ namespace AsciiHero
         }
 
         /// the model's size (x, y, z) at scale 1
+        static readonly Dictionary<string, Vector3> sizes = new Dictionary<string, Vector3>();
         public static Vector3 Size(string name)
+        {
+            Vector3 sz; if (sizes.TryGetValue(name, out sz)) return sz;
+            sz = SizeOf(name); sizes[name] = sz; return sz;
+        }
+        static Vector3 SizeOf(string name)
         {
             Load(); List<Part> parts; if (!M.TryGetValue(name, out parts)) return Vector3.one;
             Vector3 lo = Vector3.one * 1e9f, hi = -lo;

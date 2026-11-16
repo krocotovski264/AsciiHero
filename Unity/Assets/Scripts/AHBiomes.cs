@@ -37,6 +37,11 @@ namespace AsciiHero
         }
         float WaterK(float x, float z) { float k = 9; foreach (var p in pools) k = Mathf.Min(k, PoolK(p, x, z)); return k; }
         public override bool HasWater => pools.Count > 0;
+        public override bool WaterIn(Rect w)
+        {
+            foreach (var p in pools) { float r = Mathf.Max(p.rx, p.rz) * 1.15f; if (w.Overlaps(new Rect(p.c.x + origin.x - r, p.c.y + origin.z - r, 2 * r, 2 * r))) return true; }
+            return false;
+        }
         public override float WaterY => WY;
         readonly List<Vector2[]> walks = new List<Vector2[]>();      // boardwalks: dry over the water
         bool OnWalk(float x, float z)
@@ -100,7 +105,11 @@ namespace AsciiHero
             colliders.Add(Collider2.Circle(p.x, p.y, colR * s)); occluders.Add(new Vector4(p.x, p.y, 1.5f * s, 5f * s));
         }
         GameObject Obj(Mesh m, Material mat, Vector3 pos, Quaternion q, bool shadows = true, string name = "part")
-        { return MeshGen.Obj(m, mat, T, pos, q, shadows, name); }
+        {
+            // big pieces (cliffs, dunes, the fountain, walls of rock) get coarser characters
+            var b = m.bounds.size; if (Mathf.Max(b.x, Mathf.Max(b.y, b.z)) > 1.9f && name != "Ground" && name != "Pool") mat = M.Big(mat);
+            return MeshGen.Obj(m, mat, T, pos, q, shadows, name);
+        }
         Light Lamp(Vector3 p, Color c, float intensity, float range)
         {
             var g = new GameObject("Lamp"); g.transform.SetParent(T, false); g.transform.localPosition = p;
