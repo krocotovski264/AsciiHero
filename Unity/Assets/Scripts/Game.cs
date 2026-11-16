@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.57 · Unity";
+        public const string VERSION = "beta 0.58 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -639,7 +639,13 @@ namespace AsciiHero
         // ---- the open world: field (at the origin), forest west of it, cave north of the forest; all built at once, the
         // ones the hero is near are switched on, crossing a seam changes the current location and blends its light ----
         static readonly Vector3 FOREST_O = new Vector3(-20, 0, 0), CAVE_O = new Vector3(-20, 0, -18);
+        float worldBuildMs = -1;
         void SetupOutdoor()
+        {
+            long tB = System.Diagnostics.Stopwatch.GetTimestamp(); bool fresh = field == null || mockups.Count == 0;
+            try { SetupOutdoorInner(); } finally { if (fresh) { worldBuildMs = (float)Ms(tB); Debug.Log("Мир построен за " + (worldBuildMs / 1000f).ToString("0.0") + " с"); } }
+        }
+        void SetupOutdoorInner()
         {
             if (worldLightsRoot == null) SetupWorldLights();
             if (field == null) { field = Field.Build(mats); GlyphLayer.Build(field.root); }
@@ -1078,19 +1084,41 @@ namespace AsciiHero
             Row("Громкость звуков", setSound + " %", () => setSound -= 10, () => setSound += 10);
             Row("Режим разработчика", setDev ? "вкл" : "выкл", () => setDev = !setDev, () => setDev = !setDev);
             if (changed) ApplySettings();
-            if (Button(new Rect(x0, y1 + row * rh + 4 * k, pw, 26 * k), "ТЕСТ ПРОИЗВОДИТЕЛЬНОСТИ (около 45 с, результат — в логе)")) StartPerfTest();
+            if (Button(new Rect(x0, y1 + row * rh + 4 * k, pw, 26 * k), "ТЕСТ НАГРУЗКИ ПО ВСЕМ БИОМАМ (около 2 мин, результат — в логе)")) StartPerfTest();
         }
 
-        // ---------- performance test ----------
-        // Runs on the device: the field with everything on, then one thing switched off at a time; for every stage the
-        // mean frame time (and, where the device reports them, the main-thread, render-thread and GPU times) goes to
-        // the log. What a stage saves is what that part of the frame costs.
+        // ---------- the load test ----------
+        // Runs on the device in two parts.
+        //   1. Every biome in turn (the meadow, the forest, the cave, the tavern and the eight others): the hero is put
+        //      at its spawn and walks a small circle (the camera, the animation, the grass and the water all move)
+        //      with everything on; for each: mean and worst frame, the share of frames over 1/60 s, CPU and GPU times,
+        //      the characters in the scene and how many locations are switched on round it.
+        //   2. In the heaviest biome: everything on, then one part off at a time - what each part of the frame costs.
+        // At the end a table: every biome with its result and whether it holds 60 and 30 frames a second.
         static readonly string[] PERF = { "всё включено", "без травы", "без символов (только 3D-сцена)", "без героя", "без анимации и ткани", "без теней", "без свечения",
             "без интерфейса", "без обводки", "с отдельной камерой глубины (как до 0.35)", "герой: все символы (как в 0.34)", "разрешение 67 %", "герой без слоя символов", "без деревьев, камней и брони (только земля и трава)" };
-        bool perfRun, perfNoAnim, perfNoGui, perfFullActors; int perfIx; float perfT, perfBase, pWorst; int pN, pFt, savedVsync;
+        bool perfRun, perfNoAnim, perfNoGui, perfFullActors, perfWalk; int perfIx; float perfT, perfBase, pWorst; int pN, pFt, savedVsync;
         double pSum, pMain, pRender, pGpu, accU, accA, accG; readonly FrameTiming[] ftBuf = new FrameTiming[1];
         double fMain, fGpu; int fFt;
         static double Ms(long t0) { return (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency; }
+        // part 1: the biomes; part 2: the stages in the heaviest
+        readonly List<Location> perfLocs = new List<Location>(); int perfPhase, perfLocIx; Location perfHeavy; float perfHeavyMs;
+        class PerfRow { public string name; public float ms, worst, miss, gpu, main; public int glyphs, active; }
+        readonly List<PerfRow> perfRows = new List<PerfRow>();
+        string LocTitle(Location l)
+        {
+            if (l == tavern) return "Трактир"; if (l == field) return "Поляна"; if (l == forest) return "Лес"; if (l == cave) return "Пещера";
+            var m = l as Mockup; return m != null ? m.title : "?";
+        }
+        /// put the hero in a location (at its spawn), switch on what is round it
+        void PerfGo(Location l)
+        {
+            if (l == tavern) { EnterWorld(0); return; }
+            if (!world || loc == tavern || !outdoor.Contains(loc)) EnterWorld(1);
+            pos = l.SpawnW; heroTrail = pos; player.ResetSim();
+            hero.go.transform.position = pos; camTgt = new Vector3(pos.x, 0.6f, pos.z);
+            loc = l; UpdateOutdoor(true);
+        }
         void StartPerfTest()
         {
             if (perfRun) return;
@@ -1098,11 +1126,14 @@ namespace AsciiHero
             if (!world) return;
             worldZoomT = 1; perfRun = true; perfIx = 0; PerfReset();
             savedVsync = QualitySettings.vSyncCount; QualitySettings.vSyncCount = 0; Application.targetFrameRate = 240;
-            Debug.Log("ТЕСТ ПРОИЗВОДИТЕЛЬНОСТИ · " + VERSION + " · " + SystemInfo.deviceModel + " · " + SystemInfo.graphicsDeviceName + " · экран " + Screen.width + "×" + Screen.height +
+            Debug.Log("ТЕСТ НАГРУЗКИ · " + VERSION + " · " + SystemInfo.deviceModel + " · " + SystemInfo.graphicsDeviceName + " · экран " + Screen.width + "×" + Screen.height +
                       " @" + Screen.currentResolution.refreshRateRatio.value.ToString("0") + " Гц · качество " + QUALITY[setQuality] + ", трава " + GRASS[setGrass] + " %, разрешение " + RES[setRes] + " %");
-            GlyphLayer.Recount();
-            Debug.Log("ТЕСТ · символов на сцене " + GlyphLayer.count + " · на героях " + GlyphLayer.actorGlyphs + ", рисуется " + GlyphLayer.actorGlyphsDrawn + " (уровень " + GlyphLayer.actorLod + ") · " +
-                      ascii.formats + " · глубина " + (ascii.depthFromLit ? "из альфы цвета" : "отдельной камерой"));
+            if (worldBuildMs > 0) Debug.Log("ТЕСТ · мир (все биомы) строился " + (worldBuildMs / 1000f).ToString("0.0") + " с · память: " + (UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong() / 1048576) + " МБ занято, " + (UnityEngine.Profiling.Profiler.GetTotalReservedMemoryLong() / 1048576) + " МБ взято у системы, графика " + (UnityEngine.Profiling.Profiler.GetAllocatedMemoryForGraphicsDriver() / 1048576) + " МБ");
+            perfLocs.Clear(); perfRows.Clear();
+            foreach (var l in outdoor) perfLocs.Add(l);
+            perfLocs.Add(null);         // (null: the tavern, built when it is reached)
+            perfPhase = 1; perfLocIx = 0; perfWalk = true; perfHeavy = null; perfHeavyMs = 0;
+            PerfGo(perfLocs[0]);
         }
         int pMiss; float perfBaseGpu;
         void PerfReset() { pMiss = 0; perfT = 0; pSum = pMain = pRender = pGpu = accU = accA = accG = 0; pN = pFt = 0; pWorst = 0; }
@@ -1122,7 +1153,7 @@ namespace AsciiHero
                 case 10: perfFullActors = on; break;
                 case 11: if (on) { int old = setRes; setRes = 1; ApplySettings(false); setRes = old; } else ApplySettings(false); break;
                 case 12: if (hero != null) foreach (var r in hero.glyphs) if (r != null) r.enabled = !on; break;
-                case 13: if (field != null) foreach (Transform c in field.root.transform) if (c.name != "Ground" && c.name != "Grass") c.gameObject.SetActive(!on); break;
+                case 13: if (loc != null && loc.root != null) foreach (Transform c in loc.root.transform) if (c.name != "Ground" && c.name != "Grass" && c.name != "Path") c.gameObject.SetActive(!on); break;
             }
             if (perfRun) { QualitySettings.vSyncCount = 0; Application.targetFrameRate = 240; }
         }
@@ -1136,20 +1167,56 @@ namespace AsciiHero
                 if (fFtFrame) { pMain += ftBuf[0].cpuMainThreadFrameTime; pRender += ftBuf[0].cpuRenderThreadFrameTime; pGpu += ftBuf[0].gpuFrameTime; pFt++; }
             }
             else { accU = accA = accG = 0; }
-            if (perfT < 3.9f || pN == 0) return;
-            float ms = (float)(pSum / pN); if (perfIx == 0) perfBase = ms;
-            string line = "ТЕСТ · " + PERF[perfIx] + ": " + ms.ToString("0.0") + " мс (" + (1000f / ms).ToString("0") + " к/с), худший кадр " + pWorst.ToString("0") + " мс";
-            // (the screen shows a frame only on its refresh: a frame a little over 1/60 s waits for the next one and counts double)
-            line += ", кадров дольше 1/60 с: " + (100f * pMiss / pN).ToString("0") + " %";
-            if (perfIx > 0) line += ", к базе " + (ms - perfBase).ToString("+0.0;-0.0") + " мс";
-            if (pFt > 0) { float g = (float)(pGpu / pFt); if (perfIx == 0) perfBaseGpu = g; else line += " (GPU " + (g - perfBaseGpu).ToString("+0.0;-0.0") + ")"; }
-            if (pFt > 0) line += " · главный поток " + (pMain / pFt).ToString("0.0") + ", поток отрисовки " + (pRender / pFt).ToString("0.0") + ", GPU " + (pGpu / pFt).ToString("0.0") + " мс";
-            line += " · скрипты: Update " + (accU / pN).ToString("0.00") + " (анимация и ткань " + (accA / pN).ToString("0.00") + "), интерфейс " + (accG / pN).ToString("0.00") + " мс";
-            Debug.Log(line);
+            if (perfT < (perfPhase == 1 ? 5.2f : 3.9f) || pN == 0) return;
+            float ms = (float)(pSum / pN), miss = 100f * pMiss / pN;
+            if (perfPhase == 1)
+            {
+                // ---- part 1: one biome done ----
+                GlyphLayer.Recount();
+                int act = 0; foreach (var l in outdoor) if (l.Active) act++;
+                var row = new PerfRow { name = LocTitle(loc), ms = ms, worst = pWorst, miss = miss, gpu = pFt > 0 ? (float)(pGpu / pFt) : -1, main = pFt > 0 ? (float)(pMain / pFt) : -1, glyphs = GlyphLayer.count, active = loc == tavern ? 1 : act };
+                perfRows.Add(row);
+                string line = "ТЕСТ · " + row.name + ": " + ms.ToString("0.0") + " мс (" + (1000f / ms).ToString("0") + " к/с), худший кадр " + pWorst.ToString("0") + " мс, кадров дольше 1/60 с: " + miss.ToString("0") + " %";
+                if (pFt > 0) line += " · главный поток " + (pMain / pFt).ToString("0.0") + ", поток отрисовки " + (pRender / pFt).ToString("0.0") + ", GPU " + (pGpu / pFt).ToString("0.0") + " мс";
+                line += " · символов " + row.glyphs + " · включено локаций " + row.active + " · скрипты " + (accU / pN).ToString("0.00") + " мс";
+                Debug.Log(line);
+                if (ms > perfHeavyMs && loc != tavern) { perfHeavyMs = ms; perfHeavy = loc; }
+                perfLocIx++;
+                if (perfLocIx < perfLocs.Count)
+                {
+                    var next = perfLocs[perfLocIx];
+                    if (next == null) { if (tavern == null) SetupWorld(); next = tavern; }
+                    PerfGo(next); PerfReset(); return;
+                }
+                // part 2: the parts of the frame, in the heaviest biome
+                Debug.Log("ТЕСТ · самый тяжёлый биом — " + LocTitle(perfHeavy) + ": по частям кадра");
+                perfPhase = 2; perfIx = 0; PerfGo(perfHeavy); PerfReset(); return;
+            }
+            // ---- part 2: one stage done ----
+            if (perfIx == 0) perfBase = ms;
+            string ln = "ТЕСТ · " + LocTitle(loc) + " · " + PERF[perfIx] + ": " + ms.ToString("0.0") + " мс (" + (1000f / ms).ToString("0") + " к/с), худший кадр " + pWorst.ToString("0") + " мс";
+            ln += ", кадров дольше 1/60 с: " + miss.ToString("0") + " %";
+            if (perfIx > 0) ln += ", к базе " + (ms - perfBase).ToString("+0.0;-0.0") + " мс";
+            if (pFt > 0) { float g = (float)(pGpu / pFt); if (perfIx == 0) perfBaseGpu = g; else ln += " (GPU " + (g - perfBaseGpu).ToString("+0.0;-0.0") + ")"; }
+            if (pFt > 0) ln += " · главный поток " + (pMain / pFt).ToString("0.0") + ", поток отрисовки " + (pRender / pFt).ToString("0.0") + ", GPU " + (pGpu / pFt).ToString("0.0") + " мс";
+            ln += " · скрипты: Update " + (accU / pN).ToString("0.00") + " (анимация и ткань " + (accA / pN).ToString("0.00") + "), интерфейс " + (accG / pN).ToString("0.00") + " мс";
+            Debug.Log(ln);
             PerfSet(perfIx, false); perfIx++;
             if (perfIx < PERF.Length) { PerfSet(perfIx, true); PerfReset(); return; }
-            perfRun = false; QualitySettings.vSyncCount = savedVsync; ApplySettings(false);
+            // ---- the end: the table ----
+            perfRun = false; perfWalk = false; QualitySettings.vSyncCount = savedVsync; ApplySettings(false);
+            var sb = new System.Text.StringBuilder("ТЕСТ · ИТОГ по биомам (60 к/с = кадр до 16,7 мс; 30 к/с = до 33,3 мс):");
+            int ok60 = 0, ok30 = 0;
+            foreach (var r in perfRows)
+            {
+                bool a60 = r.ms <= 16.9f && r.miss < 15, a30 = r.ms <= 33.5f; if (a60) ok60++; if (a30) ok30++;
+                sb.Append("\n  ").Append(a60 ? "[60] " : a30 ? "[30] " : "[<30] ").Append(r.name).Append(": ").Append(r.ms.ToString("0.0")).Append(" мс, ").Append((1000f / r.ms).ToString("0")).Append(" к/с, худший ").Append(r.worst.ToString("0"))
+                  .Append(" мс, >1/60: ").Append(r.miss.ToString("0")).Append(" %").Append(r.gpu >= 0 ? ", GPU " + r.gpu.ToString("0.0") + " мс" : "").Append(", символов ").Append(r.glyphs);
+            }
+            sb.Append("\n  держат 60 к/с: ").Append(ok60).Append(" из ").Append(perfRows.Count).Append(", 30 к/с: ").Append(ok30).Append(" из ").Append(perfRows.Count);
+            Debug.Log(sb.ToString());
             Debug.Log("ТЕСТ ЗАВЕРШЁН · «к базе» со знаком минус — сколько миллисекунд кадра стоит выключенная часть");
+            EnterWorld(1);
             consoleOpen = true; ShowToast("Тест завершён: открой лог, нажми «Копировать» и пришли его");
         }
         bool fFtFrame;
@@ -1497,6 +1564,7 @@ namespace AsciiHero
         void WorldUpdate(float dt)
         {
             float ix = stick.x, iy = stick.y;
+            if (perfRun && perfWalk) { float a = perfT * 0.8f; ix = Mathf.Cos(a) * 0.62f; iy = Mathf.Sin(a) * 0.62f; }      // (the test: he walks a small circle)
             if (InputHub.Key("W")) iy = -1; if (InputHub.Key("S")) iy = 1;
             if (InputHub.Key("A")) ix = -1; if (InputHub.Key("D")) ix = 1;
             float l = Mathf.Sqrt(ix * ix + iy * iy), mag = Mathf.Min(1, l / 0.8f); if (mag < 0.12f) mag = 0;   // 80 % of the ring = full walk
@@ -1912,7 +1980,7 @@ namespace AsciiHero
             float L = safe.x + 12 * k, T = safe.y + 8 * k;
             if (perfRun)
             {   // the test: only the picture and a line of progress
-                if (!perfNoGui) GUI.Label(new Rect(L, T, 600 * k, 22 * k), "Тест производительности: " + (perfIx + 1) + " из " + PERF.Length + " · " + PERF[perfIx], sTitle);
+                if (!perfNoGui) GUI.Label(new Rect(L, T, 600 * k, 22 * k), (perfPhase == 1 ? "Тест нагрузки: биом " + (perfLocIx + 1) + " из " + perfLocs.Count + " · " + LocTitle(loc) : "Тест нагрузки: " + LocTitle(loc) + " · " + (perfIx + 1) + " из " + PERF.Length + " · " + PERF[perfIx]), sTitle);
                 FinishGui(); accG += Ms(tG); return;
             }
             if (world) DrawDanger(W, H);
