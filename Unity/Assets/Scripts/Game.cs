@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.62 · Unity";
+        public const string VERSION = "beta 0.63 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -1286,7 +1286,7 @@ namespace AsciiHero
             HandlePointers(dt);
             if (InputHub.Key("Back"))
             {
-                if (world) { if (menuFromWorld) menuFromWorld = false; else if (invOpen) ClosePocket(); else OpenBackpack(); }
+                if (world) { if (menuFromWorld) menuFromWorld = false; else if (invOpen) { if (pocketBig > 0) pocketBig = 0; else ClosePocket(); } else OpenBackpack(); }
                 else Application.Quit();
             }
 
@@ -1371,6 +1371,11 @@ namespace AsciiHero
             }
             foreach (var p in InputHub.ended)
             {
+                if (p.owner == "ui" && world && invOpen && !menuFromWorld)
+                {   // a sideways swipe in the pocket turns the page (left: on to the next)
+                    var dd = p.pos - p.start;
+                    if (Mathf.Abs(dd.x) > 60 * k && Mathf.Abs(dd.x) > 1.6f * Mathf.Abs(dd.y) && InPocket(p.start)) { pocketSwipe = dd.x < 0 ? 1 : -1; continue; }
+                }
                 if (p.owner == "ui" && (p.pos - p.start).magnitude < 40 * k)
                 {
                     if (world && invOpen && !menuFromWorld && !InPocket(p.pos)) ClosePocket();      // a tap outside the smoke closes the pocket
@@ -1829,7 +1834,7 @@ namespace AsciiHero
         {
             if (!world || perfRun) return;
             if (invOpen && pocketClose >= 0) { pocketClose = -1; return; }      // (tapped again while it was closing: it stays)
-            invOpen = true; menuFromWorld = false; invT = 0; pocketT = 0; pocketClose = -1;
+            invOpen = true; menuFromWorld = false; invT = 0; pocketT = 0; pocketClose = -1; pocketBig = 0; pocketBigShown = 0; pocketExp = 0;
             try { MakeProjection(); } catch (System.Exception e) { Debug.LogException(e); }
             stickId = int.MinValue; stick = Vector2.zero; stickRun = 0; stickRunArmed = false;
             foreach (var q in InputHub.active.Values) q.owner = "ui";
@@ -2242,52 +2247,74 @@ namespace AsciiHero
         // its dark hollow (0.65 s). The game goes on around it; a tap outside the smoke closes it (the smoke blows apart).
         // Two windows: the hero's state (a live projection of him - as he stands, moves, with the limbs he has - and his
         // integrity, limbs, armour, weapons) and the backpack.
-        // the two clouds: a smaller one on the left (the hero), a larger one on the right (the backpack), together about
-        // 60 % of the screen (capped by its height; then a little wider than round)
-        void PocketClouds(float W, float H, out Vector3 c1, out Vector3 c2)
+        // the two clouds: a smaller one on the left (the hero), a larger one on the right (the backpack, the map, the
+        // notes), together about 60 % of the screen. Opening the map or a note runs them together into one wide cloud
+        // (pocketExp 0..1). Each cloud: centre x, y, radius, how much wider than tall.
+        void PocketClouds(float W, float H, out Vector4 c1, out Vector4 c2)
         {
             float r2 = Mathf.Min(H * 0.47f, Mathf.Sqrt(0.6f * W * H / (Mathf.PI * (1 + 0.62f * 0.62f)))), r1 = r2 * 0.62f;
             float overlap = r1 * 0.45f, total = 2 * r1 + 2 * r2 - overlap;
             if (total > W * 0.96f) { float f = W * 0.96f / total; r1 *= f; r2 *= f; overlap *= f; total *= f; }
             float x0 = W / 2 - total / 2, cy = H / 2;
-            c1 = new Vector3(x0 + r1, cy + r2 * 0.12f, r1); c2 = new Vector3(x0 + 2 * r1 - overlap + r2, cy, r2);
+            var a = new Vector4(x0 + r1, cy + r2 * 0.12f, r1, 1); var b = new Vector4(x0 + 2 * r1 - overlap + r2, cy, r2, 1);
+            float e = Mathf.SmoothStep(0, 1, pocketExp);
+            if (e > 0)
+            {
+                float rm = H * 0.46f, st = Mathf.Min(2.0f, W * 0.46f / rm);
+                var m = new Vector4(W / 2, H / 2, rm, st);
+                a = Vector4.Lerp(a, m, e); b = Vector4.Lerp(b, m, e);
+            }
+            c1 = a; c2 = b;
         }
+        static bool InCloud(Vector2 p, Vector4 c, float k2) { var d = p - new Vector2(c.x, c.y); d.x /= Mathf.Max(0.01f, c.w); return d.magnitude < c.z * k2; }
         bool InPocket(Vector2 p)
         {
-            Vector3 a, b; PocketClouds(Screen.width, Screen.height, out a, out b);
-            return (p - new Vector2(a.x, a.y)).magnitude < a.z * 1.05f || (p - new Vector2(b.x, b.y)).magnitude < b.z * 1.05f;
+            Vector4 a, b; PocketClouds(Screen.width, Screen.height, out a, out b);
+            return InCloud(p, a, 1.05f) || InCloud(p, b, 1.05f);
         }
         Rect PocketProjRect(float W, float H)
         {
-            Vector3 a, b; PocketClouds(W, H, out a, out b);
+            Vector4 a, b; PocketClouds(W, H, out a, out b);
             float h = a.z * 1.55f, w = h * 0.75f; return new Rect(a.x - w / 2, a.y - h / 2, w, h);
         }
+        /// the right cloud's working area (the cells, the small map, the list of notes)
         Rect PocketGrid(float W, float H, out float cell)
         {
-            Vector3 a, b; PocketClouds(W, H, out a, out b);
+            float save = pocketExp; pocketExp = 0;
+            Vector4 a, b; PocketClouds(W, H, out a, out b); pocketExp = save;
             // 5 x 5 in sight (of 5 x 10), as big as fits in the cloud with the buttons under it
             float side = b.z * 1.3f; cell = Mathf.Floor(Mathf.Min(side / 5f, (side - 30 * k) / 5f));
             float gw = cell * 5, gh = cell * 5; return new Rect(b.x - gw / 2, b.y - gh / 2 - 12 * k, gw, gh);
         }
+        /// the one wide cloud's working area (the opened map or note)
+        Rect PocketBigRect(float W, float H)
+        {
+            float rm = H * 0.46f, st = Mathf.Min(2.0f, W * 0.46f / rm);
+            float w = 2 * rm * st * 0.72f, h = 2 * rm * 0.74f; return new Rect(W / 2 - w / 2, H / 2 - h / 2, w, h);
+        }
         float pocketScroll; Material keyMat;
+        // the right cloud's pages, turned by a swipe: 0 the backpack, 1 the map, 2 the notes; what is opened wide (0 none,
+        // 1 the map, 2 a note), and how far the clouds have run together
+        int pocketPage, pocketBig, pocketBigShown, pocketNote; float pocketExp, pocketPageT = 1, noteScroll; int pocketSwipe;
         readonly Vector4[] pRim = new Vector4[44], pFly = new Vector4[16];
         static float Hh(float n) { float x = Mathf.Sin(n * 127.1f) * 43758.5453f; return x - Mathf.Floor(x); }
         /// the puffs of the pocket's smoke, on the CPU: the billows that make up the rims (more on the larger cloud, by its
         /// length of edge) and the puffs that break off - slowly, not far - and shrink away
-        void PocketPuffs(Vector3 c1, Vector3 c2)
+        void PocketPuffs(Vector4 c1, Vector4 c2)
         {
             float t = pocketT, cl = pocketClose < 0 ? 0 : pocketClose;
             float g = Mathf.SmoothStep(0, 1, t / 0.35f) * (1 + 0.06f * Mathf.Sin(Mathf.Clamp01(t / 0.7f) * Mathf.PI)), s = Mathf.Max(g, 0.02f) * (1 + 0.3f * cl);
-            float rr = Mathf.Min(c1.z, c2.z), share1 = c1.z / (c1.z + c2.z);
+            float rr = Mathf.Min(c1.z, c2.z), share1 = c1.z * c1.w / (c1.z * c1.w + c2.z * c2.w);
             for (int k = 0; k < pRim.Length; k++)
             {
                 bool left = k < Mathf.RoundToInt(pRim.Length * share1); var C = left ? c1 : c2;
                 int n = left ? Mathf.RoundToInt(pRim.Length * share1) : pRim.Length - Mathf.RoundToInt(pRim.Length * share1), ix = left ? k : k - (pRim.Length - n);
                 float h1 = Hh(k + 0.7f), h2 = Hh(k * 5.3f + 2.1f);
-                float a = (ix + 0.35f * h1) / n * Mathf.PI * 2 + t * 0.05f * (h2 - 0.5f);
+                float a = (ix + 0.35f * h1) / Mathf.Max(1, n) * Mathf.PI * 2 + t * 0.05f * (h2 - 0.5f);
                 float ph = Mathf.Repeat(t / (1.8f + 1.4f * h2) + h1, 1f), sw = Mathf.Sin(ph * Mathf.PI);
                 float rad = rr * s * (0.07f + 0.07f * sw + 0.04f * h2);
-                pRim[k] = new Vector4(C.x + Mathf.Cos(a) * C.z * s * (0.93f + 0.05f * sw), C.y + Mathf.Sin(a) * C.z * s * (0.93f + 0.05f * sw), rad, 0);
+                float ro = C.z * s * (0.93f + 0.05f * sw);
+                pRim[k] = new Vector4(C.x + Mathf.Cos(a) * ro * C.w, C.y + Mathf.Sin(a) * ro, rad, 0);
             }
             for (int q = 0; q < pFly.Length; q++)
             {
@@ -2296,19 +2323,137 @@ namespace AsciiHero
                 float a = h2 * Mathf.PI * 2 + 0.2f * ph;
                 float dist = C.z * s * (0.95f + (0.1f + 0.18f * h1) * ph);          // (slow and not far)
                 float rad = rr * s * (0.08f + 0.07f * h2) * (1 - ph) * Mathf.Clamp01(t / 0.25f);
-                pFly[q] = new Vector4(C.x + Mathf.Cos(a) * dist, C.y + Mathf.Sin(a) * dist, rad, ph);
+                pFly[q] = new Vector4(C.x + Mathf.Cos(a) * dist * C.w, C.y + Mathf.Sin(a) * dist, rad, ph);
             }
         }
+
+        // ---- the notes: what the hero finds to read (lore). The first is his own, though he does not remember writing it ----
+        class Note { public string title, text; }
+        static readonly Note[] NOTES = {
+            new Note { title = "Записи без подписи", text =
+"<i>Почерк мой. Я не помню, как писал это.</i>\n\n" +
+"<b>3-й день Жатвы, 412 г. от Ухода Братьев.</b>\nНас шестеро, все из рыцарей Церкви Примара. Приказ отца Ильвара: спуститься в старые катакомбы под Вельдской пустошью, найти, откуда идёт голос, и запечатать. Пастухи говорят, по ночам земля там шепчет на языке, которого никто не знает.\n\n" +
+"<b>5-й день Жатвы.</b>\nВход нашли у леса, за каменной осыпью. Внизу сыро, со сводов капает. Факелы горят хуже, чем должны. Бран говорит, что воздух здесь «старый».\n\n" +
+"<b>7-й день Жатвы.</b>\nНашли кости, вросшие в стену. Это не захоронение, кости будто растут из камня. Отец Ильвар велел не смотреть на них долго. Шёпот слышат уже все.\n\n" +
+"<b>9-й день Жатвы.</b>\nПотеряли Эдрика и Бриса. Тени отделились от стен и забрали их, а доспехи остались лежать пустые, будто внутри никого никогда не было. Мы идём дальше: приказ есть приказ.\n\n" +
+"<b>10-й день Жатвы.</b>\nОтец Ильвар понял, чей это голос. Он побелел и сказал, что Церковь знала, куда нас посылает. Голос зовёт меня по имени. Я забываю имя, когда пытаюсь его записать.\n\n" +
+"<b>?? день.</b>\nТемно. Руки не мои. Если кто-то найдёт это: не снимай шлем с мёртвых. Они" },
+        };
+
+        /// the world, as an ASCII map in the orientation of the screen (up is north, right is west - as the camera sees
+        /// it): each place in its own characters and colour, the hero an @
+        string MapText(int cols, int rows, out Rect world)
+        {
+            float x0 = 1e9f, x1 = -1e9f, z0 = 1e9f, z1 = -1e9f;
+            foreach (var l in outdoor) { var r = Core(l); x0 = Mathf.Min(x0, r.xMin); x1 = Mathf.Max(x1, r.xMax); z0 = Mathf.Min(z0, r.yMin); z1 = Mathf.Max(z1, r.yMax); }
+            x1 = Mathf.Max(x1, Field.INN.x + 4);
+            world = Rect.MinMaxRect(x0, z0, x1, z1);
+            var sb = new System.Text.StringBuilder(cols * rows * 24);
+            bool inTavern = loc == tavern;
+            for (int r = 0; r < rows; r++)
+            {
+                string lastCol = null;
+                for (int c = 0; c < cols; c++)
+                {
+                    float x = x1 - (c + 0.5f) / cols * (x1 - x0), z = z0 + (r + 0.5f) / rows * (z1 - z0);
+                    string ch = " ", col = "000000";
+                    Location at = null; foreach (var l in outdoor) if (Core(l).Contains(new Vector2(x, z))) { at = l; break; }
+                    float h = Hh(c * 7.3f + r * 13.1f);
+                    if (x > Field.INN.x - 3.2f && x < Field.INN.x + 3.6f && Mathf.Abs(z) < 3.4f) { ch = "H"; col = "e8b443"; }
+                    else if (at != null)
+                    {
+                        string id = at is Mockup ? ((Mockup)at).kind : at.id;
+                        switch (id)
+                        {
+                            case "field": ch = h < 0.5f ? "\"" : h < 0.8f ? "'" : ","; col = "7fc070"; break;
+                            case "forest": ch = h < 0.6f ? "T" : "t"; col = "3e9a48"; break;
+                            case "cave": ch = h < 0.5f ? "#" : "="; col = "8a8a96"; break;
+                            case "swamp": ch = h < 0.6f ? "~" : "-"; col = "7a8a40"; break;
+                            case "toxic": ch = h < 0.5f ? "%" : "~"; col = "8aff4a"; break;
+                            case "bright": ch = h < 0.6f ? "#" : "="; col = "e8e0c8"; break;
+                            case "grim": ch = h < 0.6f ? "#" : ":"; col = "7a706a"; break;
+                            case "wastes": ch = h < 0.6f ? "." : ","; col = "c8a868"; break;
+                            case "crystal": ch = h < 0.5f ? "*" : "'"; col = "b07aff"; break;
+                            case "autumn": ch = h < 0.6f ? "Y" : "y"; col = "e07a2a"; break;
+                            case "snow": ch = h < 0.6f ? "^" : "."; col = "e8f0ff"; break;
+                        }
+                    }
+                    // the hero
+                    if (!inTavern && Mathf.Abs(x - pos.x) < (x1 - x0) / cols * 0.6f && Mathf.Abs(z - pos.z) < (z1 - z0) / rows * 0.6f) { ch = "@"; col = Time.unscaledTime % 0.8f < 0.55f ? "ffffff" : "c060ff"; }
+                    if (inTavern && ch == "H") { ch = "@"; col = Time.unscaledTime % 0.8f < 0.55f ? "ffffff" : "c060ff"; inTavern = false; }
+                    if (ch == "<") ch = "&lt;";
+                    if (col != lastCol) { if (lastCol != null) sb.Append("</color>"); sb.Append("<color=#").Append(col).Append('>'); lastCol = col; }
+                    sb.Append(ch);
+                }
+                if (lastCol != null) sb.Append("</color>");
+                if (r < rows - 1) sb.Append('\n');
+            }
+            return sb.ToString();
+        }
+        GUIStyle sMapS, sNoteS, sNoteT;
+        GUIStyle MapStyle(int fs) { if (sMapS == null || sMapS.fontSize != fs) { sMapS = new GUIStyle(sMono) { richText = true, alignment = TextAnchor.MiddleCenter, fontSize = fs, wordWrap = false }; sMapS.normal.textColor = Color.white; } return sMapS; }
+        void DrawMap(Rect r, bool big)
+        {
+            // the map's cell: about 2 m across, a character twice as tall as wide; the font fits the rectangle
+            int cols = big ? 56 : 30, rows = big ? 30 : 17;
+            float fs = Mathf.Min(r.width / (cols * 0.62f), r.height / (rows * 1.16f));
+            Rect world; string t = MapText(cols, rows, out world);
+            GUI.Label(r, t, MapStyle(Mathf.Max(5, Mathf.FloorToInt(fs))));
+            if (big)
+            {   // the key, under the map
+                string key = "<color=#7fc070>\"</color> поляна  <color=#3e9a48>T</color> лес  <color=#8a8a96>#</color> пещера  <color=#e8b443>H</color> трактир  <color=#7a8a40>~</color> болото  <color=#8aff4a>%</color> яд. болото  " +
+                             "<color=#e8e0c8>#</color> светлый город  <color=#7a706a>#</color> трущобы  <color=#c8a868>.</color> пустоши  <color=#b07aff>*</color> копи  <color=#e07a2a>Y</color> осенний лес  <color=#e8f0ff>^</color> высокогорье  <color=#ffffff>@</color> ты";
+                var ks = sRich(); var old = ks.alignment; ks.alignment = TextAnchor.UpperCenter; ks.wordWrap = true;
+                GUI.Label(new Rect(r.x, r.yMax + 2 * k, r.width, 34 * k), key, ks); ks.alignment = old; ks.wordWrap = false;
+            }
+        }
+        void DrawNoteList(Rect r, bool live)
+        {
+            float rh = 30 * k;
+            for (int i = 0; i < NOTES.Length; i++)
+            {
+                var rr = new Rect(r.x, r.y + i * (rh + 6 * k), r.width, rh); uiRects.Add(rr);
+                Fill(rr, new Color(0.06f, 0.05f, 0.08f, 0.8f)); Frame(rr, new Color(0.4f, 0.36f, 0.52f, 0.9f), Mathf.Max(1, k));
+                GUI.Label(new Rect(rr.x + 8 * k, rr.y, rr.width - 16 * k, rr.height), "<color=#c8b48a>[=]</color>  " + NOTES[i].title, NoteTitleStyle());
+                if (Tapped(rr) && live) { pocketNote = i; pocketBig = 2; noteScroll = 0; }
+            }
+        }
+        GUIStyle NoteTitleStyle() { int fs = Mathf.Max(8, Mathf.RoundToInt(12 * k)); if (sNoteT == null || sNoteT.fontSize != fs) { sNoteT = new GUIStyle(sSmall) { richText = true, fontSize = fs, alignment = TextAnchor.MiddleLeft, wordWrap = false }; sNoteT.normal.textColor = new Color(0.86f, 0.8f, 0.66f); } return sNoteT; }
+        void DrawNote(Rect r, bool live)
+        {
+            int fs = Mathf.Max(8, Mathf.RoundToInt(12.5f * k));
+            if (sNoteS == null || sNoteS.fontSize != fs) { sNoteS = new GUIStyle(sSmall) { richText = true, fontSize = fs, alignment = TextAnchor.UpperLeft, wordWrap = true }; sNoteS.normal.textColor = new Color(0.86f, 0.8f, 0.66f); }
+            var n = NOTES[Mathf.Clamp(pocketNote, 0, NOTES.Length - 1)];
+            var head = new Rect(r.x, r.y, r.width, 24 * k);
+            GUI.Label(head, "<b>" + n.title + "</b>", NoteTitleStyle());
+            var body = new Rect(r.x, head.yMax + 4 * k, r.width, r.yMax - head.yMax - 4 * k);
+            float th = sNoteS.CalcHeight(new GUIContent(n.text), body.width);
+            foreach (var pt in InputHub.active.Values) if (pt.owner == "ui" && body.Contains(pt.start) && live) noteScroll -= pt.Delta.y;
+            noteScroll = Mathf.Clamp(noteScroll, 0, Mathf.Max(0, th - body.height));
+            GUI.BeginGroup(body);
+            GUI.Label(new Rect(0, -noteScroll, body.width, th + 4), n.text, sNoteS);
+            GUI.EndGroup();
+            if (th > body.height) { var sb = new Rect(r.xMax + 4 * k, body.y, 2 * k, body.height); Fill(sb, new Color(0.25f, 0.22f, 0.32f, 0.6f)); Fill(new Rect(sb.x, body.y + body.height * noteScroll / th, sb.width, body.height * body.height / th), new Color(0.4f, 0.36f, 0.52f, 0.9f)); }
+        }
+
         void PocketUI(float W, float H)
         {
-            Vector3 c1, c2; PocketClouds(W, H, out c1, out c2);
+            // the clouds run together while the map or a note is open, and part again
+            float dt = Time.unscaledDeltaTime;
+            pocketExp = Mathf.MoveTowards(pocketExp, pocketBig > 0 ? 1 : 0, dt / 0.35f);
+            if (pocketBig > 0) pocketBigShown = pocketBig; else if (pocketExp <= 0) pocketBigShown = 0;
+            // a swipe turns the right cloud's page: the backpack - the map - the notes
+            if (pocketSwipe != 0 && pocketBig == 0 && pocketExp <= 0) { int np = Mathf.Clamp(pocketPage + pocketSwipe, 0, 2); if (np != pocketPage) { pocketPage = np; pocketPageT = 0; } }
+            pocketSwipe = 0; pocketPageT = Mathf.Min(1, pocketPageT + dt / 0.25f);
+            Vector4 c1, c2; PocketClouds(W, H, out c1, out c2);
             // the smoke
             if (pocketMat == null) { var sh = Shader.Find("Hidden/AsciiHero/Pocket"); if (sh != null) pocketMat = new Material(sh); }
             float cellW = ascii != null && ascii.cols > 0 ? W / ascii.cols : 8 * k, cellH = ascii != null && ascii.rows > 0 ? H / ascii.rows : 14 * k;
             if (pocketMat != null)
             {
                 float m = c2.z * 0.9f;
-                var R = Rect.MinMaxRect(Mathf.Max(0, c1.x - c1.z - m), Mathf.Max(0, c2.y - c2.z - m), Mathf.Min(W, c2.x + c2.z + m), Mathf.Min(H, c2.y + c2.z + m));
+                var R = Rect.MinMaxRect(Mathf.Max(0, Mathf.Min(c1.x - c1.z * c1.w, c2.x - c2.z * c2.w) - m), Mathf.Max(0, Mathf.Min(c1.y - c1.z, c2.y - c2.z) - m),
+                                        Mathf.Min(W, Mathf.Max(c1.x + c1.z * c1.w, c2.x + c2.z * c2.w) + m), Mathf.Min(H, Mathf.Max(c1.y + c1.z, c2.y + c2.z) + m));
                 pocketMat.SetFloat("_PT", pocketT); pocketMat.SetFloat("_PClose", pocketClose < 0 ? 0 : pocketClose);
                 pocketMat.SetVector("_PRect", new Vector4(R.x, R.y, R.width, R.height));
                 pocketMat.SetVector("_PC1", c1); pocketMat.SetVector("_PC2", c2);
@@ -2320,45 +2465,73 @@ namespace AsciiHero
             float ua = Mathf.SmoothStep(0, 1, (pocketT - 0.35f) / 0.65f);
             if (pocketClose >= 0) ua *= 1 - Mathf.SmoothStep(0, 1, pocketClose / 0.45f);
             if (ua <= 0.01f) return;
-            uiAlpha = ua; var oldC = GUI.color; GUI.color = new Color(1, 1, 1, ua);
+            var oldC = GUI.color;
             bool live = ua > 0.6f;
             if (!live) taps.Clear();
+            float small = ua * Mathf.Clamp01(1 - pocketExp * 2.5f), big = ua * Mathf.Clamp01((pocketExp - 0.6f) / 0.4f);
             try
             {
-                // left: the hero, live, standing on the darkness (no frame, no background)
-                var lp = PocketProjRect(W, H); uiRects.Add(lp);
-                if (keyMat == null) { var sh = Shader.Find("Hidden/AsciiHero/Key"); if (sh != null) keyMat = new Material(sh); }
-                if (projAscii != null && projAscii.final != null && keyMat != null) { keyMat.SetFloat("_KeyAlpha", ua); Graphics.DrawTexture(lp, projAscii.final, keyMat); }
-                MissingLimbDots(lp);
-                // right: the backpack - 10 x 10 cells, 10 x 5 in sight, scrolled by dragging
-                float cell; var gr = PocketGrid(W, H, out cell); uiRects.Add(gr);
-                foreach (var pt in InputHub.active.Values)
-                    if (pt.owner == "ui" && gr.Contains(pt.start) && live) pocketScroll -= pt.Delta.y / cell;
-                pocketScroll = Mathf.Clamp(pocketScroll, 0, 5);      // (10 rows, 5 in sight)
-                var lineC = new Color(0.4f, 0.36f, 0.52f, 0.9f); var fillC = new Color(0.03f, 0.025f, 0.05f, 0.85f);
-                int fs = Mathf.Max(8, Mathf.RoundToInt(cell * 0.5f));
-                if (sBag == null || sBag.fontSize != fs) { sBag = new GUIStyle(sMono) { richText = false, alignment = TextAnchor.MiddleCenter, fontSize = fs, wordWrap = false }; sBag.normal.textColor = new Color(0.91f, 0.71f, 0.26f); }
-                GUI.BeginGroup(gr);
-                int r0 = Mathf.FloorToInt(pocketScroll); float off = (pocketScroll - r0) * cell;
-                for (int r = r0; r < Mathf.Min(10, r0 + 6); r++)
-                    for (int cc = 0; cc < 5; cc++)
-                    {
-                        var cr = new Rect(cc * cell + 2, (r - r0) * cell - off + 2, cell - 4, cell - 4);
-                        Fill(cr, fillC); Frame(cr, lineC, Mathf.Max(1, k));
-                        int ii = r * 5 + cc;
-                        if (ii < inventory.Count && inventory[ii].Length > 0) GUI.Label(cr, inventory[ii].Substring(0, 1), sBag);
+                if (small > 0.01f)
+                {
+                    uiAlpha = small; GUI.color = new Color(1, 1, 1, small);
+                    // left: the hero, live, standing on the darkness (no frame, no background)
+                    var lp = PocketProjRect(W, H); uiRects.Add(lp);
+                    if (keyMat == null) { var sh = Shader.Find("Hidden/AsciiHero/Key"); if (sh != null) keyMat = new Material(sh); }
+                    if (projAscii != null && projAscii.final != null && keyMat != null) { keyMat.SetFloat("_KeyAlpha", small); Graphics.DrawTexture(lp, projAscii.final, keyMat); }
+                    MissingLimbDots(lp);
+                    // right: the page (it slides in from the side it was swiped to)
+                    float cell; var gr = PocketGrid(W, H, out cell); uiRects.Add(gr);
+                    float slide = (1 - Mathf.SmoothStep(0, 1, pocketPageT)) * cell * 0.8f;
+                    var pg = new Rect(gr.x + slide, gr.y, gr.width, gr.height);
+                    uiAlpha = small * pocketPageT; GUI.color = new Color(1, 1, 1, uiAlpha);
+                    if (pocketPage == 0)
+                    {   // the backpack - 5 x 10 cells, 5 x 5 in sight, scrolled by dragging
+                        foreach (var pt in InputHub.active.Values)
+                            if (pt.owner == "ui" && gr.Contains(pt.start) && live) pocketScroll -= pt.Delta.y / cell;
+                        pocketScroll = Mathf.Clamp(pocketScroll, 0, 5);
+                        var lineC = new Color(0.4f, 0.36f, 0.52f, 0.9f); var fillC = new Color(0.03f, 0.025f, 0.05f, 0.85f);
+                        int fs = Mathf.Max(8, Mathf.RoundToInt(cell * 0.5f));
+                        if (sBag == null || sBag.fontSize != fs) { sBag = new GUIStyle(sMono) { richText = false, alignment = TextAnchor.MiddleCenter, fontSize = fs, wordWrap = false }; sBag.normal.textColor = new Color(0.91f, 0.71f, 0.26f); }
+                        GUI.BeginGroup(pg);
+                        int r0 = Mathf.FloorToInt(pocketScroll); float off = (pocketScroll - r0) * cell;
+                        for (int r = r0; r < Mathf.Min(10, r0 + 6); r++)
+                            for (int cc = 0; cc < 5; cc++)
+                            {
+                                var cr = new Rect(cc * cell + 2, (r - r0) * cell - off + 2, cell - 4, cell - 4);
+                                Fill(cr, fillC); Frame(cr, lineC, Mathf.Max(1, k));
+                                int ii = r * 5 + cc;
+                                if (ii < inventory.Count && inventory[ii].Length > 0) GUI.Label(cr, inventory[ii].Substring(0, 1), sBag);
+                            }
+                        GUI.EndGroup();
+                        var sb = new Rect(pg.xMax + 4 * k, pg.y, 2 * k, pg.height); Fill(sb, new Color(0.25f, 0.22f, 0.32f, 0.6f));
+                        Fill(new Rect(sb.x, pg.y + pg.height * (pocketScroll / 10f), sb.width, pg.height * 0.5f), lineC);
                     }
-                GUI.EndGroup();
-                // the scroll: a thin bar beside the cells
-                var sb = new Rect(gr.xMax + 4 * k, gr.y, 2 * k, gr.height); Fill(sb, new Color(0.25f, 0.22f, 0.32f, 0.6f));
-                Fill(new Rect(sb.x, gr.y + gr.height * (pocketScroll / 10f), sb.width, gr.height * 0.5f), lineC);
-                // the game's own buttons: small, under the cells
-                float bw = gr.width / 4 - 4 * k, bh = 18 * k, by = gr.yMax + 6 * k;
-                if (Button(new Rect(gr.x, by, bw, bh), "сохранить", false, sSmallBtn()) && live) { saveMode = 1; menuPage = 3; menuFromWorld = true; saveInfoDirty = true; }
-                if (Button(new Rect(gr.x + (bw + 5 * k), by, bw, bh), "загрузить", false, sSmallBtn()) && live) { saveMode = 2; menuPage = 3; menuFromWorld = true; saveInfoDirty = true; }
-                if (Button(new Rect(gr.x + (bw + 5 * k) * 2, by, bw, bh), "настройки", false, sSmallBtn()) && live) { menuPage = 1; menuFromWorld = true; }
-                if (Button(new Rect(gr.x + (bw + 5 * k) * 3, by, bw, bh), "выйти", false, sSmallBtn()) && live) { invOpen = false; pocketClose = -1; LeaveWorld(); inMenu = true; menuPage = 0; return; }
-                if (setDev && Button(new Rect(lp.x, lp.yMax - 18 * k, lp.width, 18 * k), "урон −10%", false, sSmallBtn()) && live) { Damage(10); if (projActor != null) projActor.SetLimbs(limbs); }
+                    else if (pocketPage == 1)
+                    {   // the map, small: a tap opens it wide
+                        DrawMap(pg, false);
+                        if (Tapped(gr) && live) pocketBig = 1;
+                    }
+                    else DrawNoteList(pg, live);
+                    // which page: three dots over the right cloud
+                    uiAlpha = small; GUI.color = new Color(1, 1, 1, small);
+                    for (int d = 0; d < 3; d++) { float dx = gr.center.x + (d - 1) * 14 * k; Fill(new Rect(dx - 3 * k, gr.y - 12 * k, 6 * k, 6 * k), d == pocketPage ? new Color(0.78f, 0.5f, 1f, 0.95f) : new Color(0.4f, 0.36f, 0.52f, 0.7f)); }
+                    // the game's own buttons: small, under the page
+                    float bw = gr.width / 4 - 4 * k, bh = 18 * k, by = gr.yMax + 6 * k;
+                    if (Button(new Rect(gr.x, by, bw, bh), "сохранить", false, sSmallBtn()) && live) { saveMode = 1; menuPage = 3; menuFromWorld = true; saveInfoDirty = true; }
+                    if (Button(new Rect(gr.x + (bw + 5 * k), by, bw, bh), "загрузить", false, sSmallBtn()) && live) { saveMode = 2; menuPage = 3; menuFromWorld = true; saveInfoDirty = true; }
+                    if (Button(new Rect(gr.x + (bw + 5 * k) * 2, by, bw, bh), "настройки", false, sSmallBtn()) && live) { menuPage = 1; menuFromWorld = true; }
+                    if (Button(new Rect(gr.x + (bw + 5 * k) * 3, by, bw, bh), "выйти", false, sSmallBtn()) && live) { invOpen = false; pocketClose = -1; LeaveWorld(); inMenu = true; menuPage = 0; return; }
+                    if (setDev && Button(new Rect(lp.x, lp.yMax - 18 * k, lp.width, 18 * k), "урон −10%", false, sSmallBtn()) && live) { Damage(10); if (projActor != null) projActor.SetLimbs(limbs); }
+                }
+                if (big > 0.01f && pocketBigShown > 0)
+                {
+                    uiAlpha = big; GUI.color = new Color(1, 1, 1, big);
+                    var br = PocketBigRect(W, H); uiRects.Add(br);
+                    if (pocketBigShown == 1) { var mr = new Rect(br.x, br.y, br.width, br.height - 38 * k); DrawMap(mr, true); }
+                    else DrawNote(br, live);
+                    // a short tap on it folds it back
+                    if (pocketBig > 0 && pocketExp >= 1 && Tapped(br) && live) pocketBig = 0;
+                }
             }
             finally { GUI.color = oldC; uiAlpha = 1; }
         }

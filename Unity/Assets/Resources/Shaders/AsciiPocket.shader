@@ -35,7 +35,7 @@ Shader "Hidden/AsciiHero/Pocket"
             // a cloud: a circle whose edge rolls (noise along the angle, moving)
             float Cloud(float2 p, float4 C, float s, float t)
             {
-                float2 d = p - C.xy; float a = atan2(d.y, d.x);
+                float2 d = p - C.xy; d.x /= max(C.w, 0.01); float a = atan2(d.y, d.x);      // (w: how much wider than tall - the clouds run together into one wide one)
                 float w = N2(float2(a * 2.4 + t * 0.45, t * 0.3 + C.x * 0.01)) * 0.5 + N2(float2(a * 5.7 - t * 0.7, C.y * 0.01)) * 0.3 + N2(float2(a * 17.0 + t * 1.3, 4.1)) * 0.2;
                 return length(d) - C.z * s * (0.9 + 0.12 * w);
             }
