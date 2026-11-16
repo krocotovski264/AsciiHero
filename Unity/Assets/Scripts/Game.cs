@@ -2296,7 +2296,6 @@ namespace AsciiHero
             float e = Mathf.SmoothStep(0, 1, pocketExp);
             if (e > 0)
             {
-                float col = PocketBtnR(H) * 2 + 22 * k;
                 float rm = H * 0.46f, st = Mathf.Min(2.0f, (W - col) * 0.46f / rm);
                 var m = new Vector4(col + (W - col) / 2, H / 2, rm, st);
                 a = Vector4.Lerp(a, m, e); b = Vector4.Lerp(b, m, e);
