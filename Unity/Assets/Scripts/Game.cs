@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.64 · Unity";
+        public const string VERSION = "beta 0.65 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -43,7 +43,8 @@ namespace AsciiHero
         Camera display, sceneCam; AsciiRenderer ascii;
         Mats mats, actorMats;
         Character hero; MotionActor player;
-        bool world; Tavern tavern; Field field; Cave cave; Forest forest; Location loc; readonly List<Location> outdoor = new List<Location>(); readonly List<Mockup> mockups = new List<Mockup>(); Rect lastView = new Rect(-1e5f, -1e5f, 2e5f, 2e5f); Location waterSeen; readonly Plane[] mirPlanes = new Plane[6]; float doorCd, leafClear; Light moonLight; Character bartenderChar; MotionActor bartender;
+        bool world; Tavern tavern; Field field; Cave cave; Forest forest; Location loc; readonly List<Location> outdoor = new List<Location>(); readonly List<Mockup> mockups = new List<Mockup>(); Rect lastView = new Rect(-1e5f, -1e5f, 2e5f, 2e5f); Location waterSeen; readonly Plane[] mirPlanes = new Plane[6];
+        float roofFade, roofFadeSet = -1; List<Renderer> roofRs; MaterialPropertyBlock roofMpb; float doorCd, leafClear; Light moonLight; Character bartenderChar; MotionActor bartender;
         // integrity instead of a health bar: five limbs (head, armL, armR, legL, legR), each worth 20 %
         readonly Vector4[] pushPts = new Vector4[4]; static readonly Vector4 FAR = new Vector4(9999, 0, 9999, 0);
         int hp = 100; readonly bool[] limbs = { true, true, true, true, true }; float respawnT; Vector3 heroTrail;
@@ -769,7 +770,23 @@ namespace AsciiHero
             }
             lastView = viewRect;
             // the cave's roof hides its inside from outside; inside the hero sees it open
-            if (cave != null && cave.roof != null) { bool show = loc != cave; if (cave.roof.activeSelf != show) cave.roof.SetActive(show); }
+            if (cave != null && cave.roof != null)
+            {   // (it dissolves over 0.7 s as he goes in, and comes back the same way)
+                roofFade = Mathf.MoveTowards(roofFade, loc != cave ? 0f : 1f, Time.deltaTime / 0.7f);
+                bool on = roofFade < 0.999f; if (cave.roof.activeSelf != on) cave.roof.SetActive(on);
+                if (on && Mathf.Abs(roofFade - roofFadeSet) > 1e-3f)
+                {
+                    roofFadeSet = roofFade;
+                    if (roofRs == null) roofRs = new List<Renderer>(cave.roof.GetComponentsInChildren<Renderer>(true));
+                    if (roofMpb == null) roofMpb = new MaterialPropertyBlock();
+                    foreach (var r in roofRs)
+                    {
+                        if (r == null) continue;
+                        var sm = r.sharedMaterial; if (sm != null && sm.shader != null && sm.shader.name == "AsciiHero/Leaves") { r.enabled = roofFade < 0.5f; continue; }
+                        r.GetPropertyBlock(roofMpb); roofMpb.SetFloat("_Fade", roofFade); roofMpb.SetFloat("_GlyphFade", roofFade); r.SetPropertyBlock(roofMpb);
+                    }
+                }
+            }
             // the mirror: only for a lake in the camera's view (puddles and swamp murk keep their own sheen without it)
             waterSeen = null;
             if (sceneCam != null) GeometryUtility.CalculateFrustumPlanes(sceneCam, mirPlanes);
@@ -1076,9 +1093,9 @@ namespace AsciiHero
         void MenuUI(float W, float H)
         {
             if (!world) MenuLandscape(W, H);
-            else Fill(new Rect(0, 0, W, H), new Color(0.01f, 0.01f, 0.02f, 0.7f));
+            // (in the world the settings lie on their cloud of smoke over the game, no square behind them)
             float cx = W / 2, top = safe.y + 30 * k, bottom = safe.yMax - 10 * k;
-            if (menuPage != 0) Smoke(new Rect(cx - 250 * k, top + 40 * k, 500 * k, bottom - top - 50 * k), false, 0, 0.9f);       // (the pages lie on a cloud of smoke)
+            if (menuPage != 0) { Smoke(new Rect(cx - 300 * k, top + 30 * k, 600 * k, bottom - top - 30 * k), false, 0, 0.95f); smokeFlat = true; }       // (the pages lie on a cloud of smoke, their buttons part of it)
             GUI.Label(new Rect(cx - 250 * k, top, 500 * k, 50 * k), "ASCII HERO", sBig);
             if (menuPage == 0)
             {
@@ -1857,8 +1874,8 @@ namespace AsciiHero
         void ActionButton(Rect r, string text, bool on)
         {
             var old = GUI.color;
-            GUI.color = new Color(0.93f, 0.74f, 0.33f, on ? 0.45f : 0.16f); GUI.DrawTexture(r, texDisc);
-            GUI.color = new Color(0.93f, 0.74f, 0.33f, 0.85f); GUI.DrawTexture(r, texRing);
+            GUI.color = new Color(0.72f, 0.52f, 1.0f, on ? 0.45f : 0.16f); GUI.DrawTexture(r, texDisc);
+            GUI.color = new Color(0.72f, 0.52f, 1.0f, 0.85f); GUI.DrawTexture(r, texRing);
             GUI.color = old; GUI.Label(r, text, sBtn);
         }
 
@@ -1974,20 +1991,20 @@ namespace AsciiHero
         }
         void Styles()
         {
-            var gold = new Color(0.93f, 0.74f, 0.33f); var ink = new Color(0.86f, 0.84f, 0.78f);
+            var gold = new Color(0.72f, 0.52f, 1.0f); var ink = new Color(0.84f, 0.82f, 0.92f);
             int fs(float s) { return Mathf.Max(8, Mathf.RoundToInt(s * k)); }
             sTitle = new GUIStyle(GUI.skin.label) { fontSize = fs(15), fontStyle = FontStyle.Bold, richText = true }; sTitle.normal.textColor = gold;
             sSmall = new GUIStyle(GUI.skin.label) { fontSize = fs(10), richText = true, wordWrap = true }; sSmall.normal.textColor = new Color(0.6f, 0.6f, 0.65f);
             sBadge = new GUIStyle(GUI.skin.label) { fontSize = fs(11), richText = true, wordWrap = false }; sBadge.normal.textColor = ink;
             sBtn = new GUIStyle(GUI.skin.label) { fontSize = fs(12), alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, wordWrap = true }; sBtn.normal.textColor = ink;
-            sBtnOn = new GUIStyle(sBtn); sBtnOn.normal.textColor = new Color(0.1f, 0.08f, 0.04f);
+            sBtnOn = new GUIStyle(sBtn); sBtnOn.normal.textColor = new Color(0.8f, 0.58f, 1f);        // (the active tab: violet)
             sMono = new GUIStyle(GUI.skin.label) { fontSize = fs(8.5f), alignment = TextAnchor.MiddleCenter, wordWrap = false }; sMono.normal.textColor = gold; if (mono != null) sMono.font = mono;
             sName = new GUIStyle(GUI.skin.label) { fontSize = fs(12), fontStyle = FontStyle.Bold }; sName.normal.textColor = ink;
-            sDesc = new GUIStyle(GUI.skin.label) { fontSize = fs(9.5f), wordWrap = true }; sDesc.normal.textColor = new Color(0.62f, 0.6f, 0.56f);
+            sDesc = new GUIStyle(GUI.skin.label) { fontSize = fs(9.5f), wordWrap = true }; sDesc.normal.textColor = new Color(0.6f, 0.58f, 0.68f);
             sToast = new GUIStyle(GUI.skin.label) { fontSize = fs(12), alignment = TextAnchor.MiddleCenter, wordWrap = true }; sToast.normal.textColor = Color.white;
             sBig = new GUIStyle(GUI.skin.label) { fontSize = fs(34), fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter }; sBig.normal.textColor = gold;
             sRight = new GUIStyle(sSmall) { alignment = TextAnchor.LowerRight, wordWrap = false };
-            sRightSmall = new GUIStyle(sSmall) { alignment = TextAnchor.UpperRight, wordWrap = false }; sRightSmall.normal.textColor = new Color(0.93f, 0.74f, 0.33f);
+            sRightSmall = new GUIStyle(sSmall) { alignment = TextAnchor.UpperRight, wordWrap = false }; sRightSmall.normal.textColor = new Color(0.72f, 0.52f, 1.0f);
         }
         void Fill(Rect r, Color c) { var old = GUI.color; c.a *= uiAlpha; GUI.color = c; GUI.DrawTexture(r, texWhite); GUI.color = old; }
         void Frame(Rect r, Color c, float w = 1)
@@ -2003,18 +2020,20 @@ namespace AsciiHero
         // ---- the interface in the hero's shadow-smoke (Hidden/AsciiHero/SmokeBox) ----
         Material smokeMat;
         /// a piece of smoke round r: a button, a panel; on = lit violet; burst 0..1 = just pressed
+        bool smokeFlat;       // the buttons lie on a panel of smoke: no smoke of their own (only the burst of a press)
         void Smoke(Rect r, bool on = false, float burst = 0, float fill = 0.93f)
         {
             if (Event.current == null || Event.current.type != EventType.Repaint) return;
+            if (smokeFlat) { if (burst <= 0.01f) return; fill = 0; }
             if (smokeMat == null) { var sh = Shader.Find("Hidden/AsciiHero/SmokeBox"); if (sh != null) smokeMat = new Material(sh); }
             if (smokeMat == null) { Fill(r, new Color(0.02f, 0.015f, 0.03f, fill)); return; }
-            float pad = Mathf.Min(r.height * 0.9f, 34 * k) * (1 + burst);
+            float sz = Mathf.Min(r.height * 0.5f, 28 * k), pad = sz * (2.2f + 6f * burst) + 4 * k;
             var R = new Rect(r.x - pad, r.y - pad, r.width + 2 * pad, r.height + 2 * pad);
             float cw = ascii != null && ascii.cols > 0 ? Screen.width / (float)ascii.cols : 6 * k, ch = ascii != null && ascii.rows > 0 ? Screen.height / (float)ascii.rows : 10 * k;
             smokeMat.SetVector("_SBRect", new Vector4(R.width, R.height, r.width * 0.5f, r.height * 0.5f));
             smokeMat.SetVector("_SBCell", new Vector4(cw, ch, Mathf.Max(0.6f, 0.5f * k), (r.x * 0.013f + r.y * 0.029f) % 50f));
             smokeMat.SetFloat("_SBT", Time.unscaledTime); smokeMat.SetFloat("_SBOn", on ? 1 : 0); smokeMat.SetFloat("_SBBurst", burst);
-            smokeMat.SetFloat("_SBAlpha", GUI.color.a * uiAlpha); smokeMat.SetFloat("_SBFill", fill);
+            smokeMat.SetFloat("_SBAlpha", GUI.color.a * uiAlpha * (smokeFlat ? burst : 1)); smokeMat.SetFloat("_SBFill", fill); smokeMat.SetFloat("_SBSz", 28 * k); smokeMat.SetFloat("_SBRad", Mathf.Max(r.width, r.height) > 300 * k && Mathf.Min(r.width, r.height) > 120 * k ? 40 * k : 1e6f);      // (a big panel: rounded corners, straight sides)
             Graphics.DrawTexture(R, texWhite, smokeMat);
         }
         // a tapped button first bursts its smoke, and only then does what it does (0.3 s later)
@@ -2033,7 +2052,7 @@ namespace AsciiHero
         bool Option(Rect r, string id, string name, string desc, bool on)
         {
             uiRects.Add(r);
-            var gold = new Color(0.93f, 0.74f, 0.33f);
+            var gold = new Color(0.72f, 0.52f, 1.0f);
             Smoke(r, on);
             float iw = 46 * k;
             string ico; ICON.TryGetValue(id, out ico);
@@ -2045,6 +2064,7 @@ namespace AsciiHero
 
         void OnGUI()
         {
+            smokeFlat = false;
             if (Event.current.type != EventType.Repaint) return;
             long tG = System.Diagnostics.Stopwatch.GetTimestamp();
             LogHub.Pump();
@@ -2096,7 +2116,7 @@ namespace AsciiHero
             GUI.Label(new Rect(x, y + 56 * k, w, 22 * k), st, stStyle);
             var bar = new Rect(x, y + 84 * k, w, 6 * k);
             Fill(bar, new Color(0.2f, 0.19f, 0.17f));
-            Fill(new Rect(bar.x, bar.y, bar.width * Mathf.Clamp01(stageIndex / (float)stageCount), bar.height), failed ? new Color(0.9f, 0.3f, 0.25f) : new Color(0.93f, 0.74f, 0.33f));
+            Fill(new Rect(bar.x, bar.y, bar.width * Mathf.Clamp01(stageIndex / (float)stageCount), bar.height), failed ? new Color(0.9f, 0.3f, 0.25f) : new Color(0.72f, 0.52f, 1.0f));
             GUI.Label(new Rect(x, y + 96 * k, w, 18 * k), (Time.realtimeSinceStartup - loadT0).ToString("0.0") + " с · шаг " + stageIndex + " из " + stageCount, sSmall);
             if (!consoleOpen) consoleOpen = failed;
         }
@@ -2152,7 +2172,8 @@ namespace AsciiHero
 
             // panel
             float px = vr.xMax, pw = W - px, right = safe.xMax;
-            var panel = new Rect(px, 0, pw, H); Smoke(new Rect(px + 14 * k, 14 * k, pw - 10 * k, H - 28 * k), false, 0, 0.96f);
+            var panel = new Rect(px, 0, pw, H); { bool f0 = smokeFlat; smokeFlat = false; Smoke(new Rect(px - 22 * k, -60 * k, pw + 120 * k, H + 120 * k), false, 0, 0.97f); smokeFlat = f0; }
+            smokeFlat = true;           // (from here on the panel's buttons are part of its smoke)
             uiRects.Add(panel);
             float x0 = px + 10 * k, cw = right - x0 - 10 * k, y = safe.y + 8 * k;
             string[] tabs = { "ТЕЛО", "БРОНЯ", "ОРУЖИЕ" };
@@ -2198,7 +2219,7 @@ namespace AsciiHero
                     {   // developer: tap the number to type any value, up to fifty times past the slider's range
                         float raw = ix == 0 ? cfg.height : cfg.body[ix];
                         var tf = new Rect(cw * 0.72f, ry - 1 * k, cw * 0.28f, 19 * k);
-                        Fill(tf, new Color(0.12f, 0.12f, 0.15f, 0.95f)); Frame(tf, new Color(0.93f, 0.74f, 0.33f, 0.8f), Mathf.Max(1, k));
+                        Fill(tf, new Color(0.12f, 0.12f, 0.15f, 0.95f)); Frame(tf, new Color(0.72f, 0.52f, 1.0f, 0.8f), Mathf.Max(1, k));
                         GUI.Label(new Rect(tf.x, tf.y + 2 * k, tf.width - 4 * k, tf.height), raw.ToString("0.###"), sRightSmall);
                         if (bp.factor) GUI.Label(new Rect(cw * 0.4f, ry, cw * 0.3f, 16 * k), txt, sRightSmall);
                         var absF = new Rect(bodyList.x + tf.x, bodyList.y + tf.y, tf.width, tf.height);
@@ -2208,7 +2229,7 @@ namespace AsciiHero
                     // slider
                     float v = ix == 0 ? cfg.height : cfg.body[ix], u = Mathf.Clamp01((v - bp.min) / (bp.max - bp.min));
                     var track = new Rect(8 * k, ry + 25 * k, cw - 16 * k, 4 * k);
-                    Fill(track, new Color(0.25f, 0.24f, 0.22f)); Fill(new Rect(track.x, track.y, track.width * u, track.height), new Color(0.93f, 0.74f, 0.33f));
+                    Fill(track, new Color(0.25f, 0.24f, 0.22f)); Fill(new Rect(track.x, track.y, track.width * u, track.height), new Color(0.72f, 0.52f, 1.0f));
                     float d0 = Body.Def(ix, cfg.sex); if (ix == 1) d0 = Body.DefaultWeight(cfg.sex, cfg.height); if (ix == 0) d0 = cfg.sex == 'f' ? 167 : 180;
                     Fill(new Rect(track.x + track.width * Mathf.Clamp01((d0 - bp.min) / (bp.max - bp.min)) - k, track.y - 3 * k, 2 * k, 10 * k), new Color(0.6f, 0.58f, 0.5f));   // the default
                     bool outside = v < bp.min || v > bp.max;
@@ -2222,7 +2243,7 @@ namespace AsciiHero
                 if (bodyScrollMax > 0)
                 {   // scroll bar
                     float bh = bodyList.height * bodyList.height / (bodyList.height + bodyScrollMax);
-                    Fill(new Rect(bodyList.xMax + 3 * k, bodyList.y + (bodyList.height - bh) * bodyScroll / bodyScrollMax, 3 * k, bh), new Color(0.93f, 0.74f, 0.33f, 0.6f));
+                    Fill(new Rect(bodyList.xMax + 3 * k, bodyList.y + (bodyList.height - bh) * bodyScroll / bodyScrollMax, 3 * k, bh), new Color(0.72f, 0.52f, 1.0f, 0.6f));
                 }
             }
             else
@@ -2390,7 +2411,7 @@ namespace AsciiHero
 
         // ---- the map: the world rasterised once (3 points a metre) into a texture of colours and classes, drawn in
         // characters by Hidden/AsciiHero/Map; it can be dragged and pinched (zoomed); the hero is an arrow ----
-        Texture2D mapTex; Rect mapWorld; const float MAP_PPM = 3f; Material mapMat;
+        Texture2D mapTex; Rect mapWorld; const float MAP_PPM = 4f; Material mapMat;
         Vector2 mapCenter; float mapMpp = -1; bool mapFollow = true;
         static Color32 C32(uint c) { return new Color32((byte)(c >> 16), (byte)(c >> 8), (byte)c, 255); }
         static string KindOf(Location l) { var m = l as Mockup; return m != null ? m.kind : l.id; }
@@ -2499,6 +2520,7 @@ namespace AsciiHero
             // drag to move it, pinch to zoom; it follows the hero until it is moved
             int nIn = 0; Pointer pa = null, pb = null;
             foreach (var pt in InputHub.active.Values) if (pt.owner == "ui" && r.Contains(pt.start)) { nIn++; if (pa == null) pa = pt; else if (pb == null) pb = pt; }
+            if (!big) nIn = 0;          // (the small map takes no gestures: a tap opens it)
             if (live && nIn == 1 && pa.Delta.sqrMagnitude > 0) { mapFollow = false; mapCenter += new Vector2(pa.Delta.x, -pa.Delta.y) * mapMpp; }       // (screen right = west: x falls; screen down = south... the drag moves the map with the finger)
             if (live && nIn >= 2)
             {
@@ -2507,7 +2529,7 @@ namespace AsciiHero
             }
             if (mapFollow) mapCenter = new Vector2(pos.x, pos.z);
             mapCenter.x = Mathf.Clamp(mapCenter.x, mapWorld.xMin, mapWorld.xMax); mapCenter.y = Mathf.Clamp(mapCenter.y, mapWorld.yMin, mapWorld.yMax);
-            float cw = Mathf.Max(5, 9 * k), ch = cw * 1.6f;
+            float cw = Mathf.Max(3, 5.2f * k), ch = cw * 1.6f;           // (three times the characters of a 9-point cell)
             mapMat.SetVector("_MRect", new Vector4(r.width, r.height, cw, ch));
             mapMat.SetVector("_MView", new Vector4(mapCenter.x, mapCenter.y, mapMpp, GUI.color.a * uiAlpha));
             mapMat.SetVector("_MWorld", new Vector4(mapWorld.x, mapWorld.y, mapWorld.width, mapWorld.height));
@@ -2521,7 +2543,7 @@ namespace AsciiHero
                 float hd = player != null ? player.heading : 0; var sv = new Vector2(-Mathf.Sin(hd), Mathf.Cos(hd));
                 float ang = Mathf.Atan2(sv.y, sv.x) * Mathf.Rad2Deg; var m0 = GUI.matrix;
                 GUIUtility.RotateAroundPivot(ang, sp);
-                var st = MapStyle(Mathf.RoundToInt(cw * 2.2f)); var old = GUI.color;
+                var st = MapStyle(Mathf.RoundToInt(cw * 3.2f)); var old = GUI.color;
                 GUI.color = new Color(1, 1, 1, uiAlpha * (Time.unscaledTime % 0.9f < 0.6f ? 1f : 0.55f));
                 GUI.Label(new Rect(sp.x - cw * 2, sp.y - ch, cw * 4, ch * 2), "<color=#ffffff>></color>", st);
                 GUI.color = old; GUI.matrix = m0;
@@ -2548,11 +2570,11 @@ namespace AsciiHero
                 if (Tapped(rr) && live) { pocketNote = i; pocketBig = 2; noteScroll = 0; }
             }
         }
-        GUIStyle NoteTitleStyle() { int fs = Mathf.Max(8, Mathf.RoundToInt(12 * k)); if (sNoteT == null || sNoteT.fontSize != fs) { sNoteT = new GUIStyle(sSmall) { richText = true, fontSize = fs, alignment = TextAnchor.MiddleLeft, wordWrap = false }; sNoteT.normal.textColor = new Color(0.86f, 0.8f, 0.66f); } return sNoteT; }
+        GUIStyle NoteTitleStyle() { int fs = Mathf.Max(8, Mathf.RoundToInt(12 * k)); if (sNoteT == null || sNoteT.fontSize != fs) { sNoteT = new GUIStyle(sSmall) { richText = true, fontSize = fs, alignment = TextAnchor.MiddleLeft, wordWrap = false }; sNoteT.normal.textColor = new Color(0.84f, 0.8f, 0.92f); } return sNoteT; }
         void DrawNote(Rect r, bool live)
         {
             int fs = Mathf.Max(8, Mathf.RoundToInt(12.5f * k));
-            if (sNoteS == null || sNoteS.fontSize != fs) { sNoteS = new GUIStyle(sSmall) { richText = true, fontSize = fs, alignment = TextAnchor.UpperLeft, wordWrap = true }; sNoteS.normal.textColor = new Color(0.86f, 0.8f, 0.66f); }
+            if (sNoteS == null || sNoteS.fontSize != fs) { sNoteS = new GUIStyle(sSmall) { richText = true, fontSize = fs, alignment = TextAnchor.UpperLeft, wordWrap = true }; sNoteS.normal.textColor = new Color(0.84f, 0.8f, 0.92f); }
             var n = NOTES[Mathf.Clamp(pocketNote, 0, NOTES.Length - 1)];
             var head = new Rect(r.x, r.y, r.width, 24 * k);
             GUI.Label(head, "<b>" + n.title + "</b>", NoteTitleStyle());
@@ -2624,7 +2646,7 @@ namespace AsciiHero
                         pocketScroll = Mathf.Clamp(pocketScroll, 0, 5);
                         var lineC = new Color(0.4f, 0.36f, 0.52f, 0.9f); var fillC = new Color(0.03f, 0.025f, 0.05f, 0.85f);
                         int fs = Mathf.Max(8, Mathf.RoundToInt(cell * 0.5f));
-                        if (sBag == null || sBag.fontSize != fs) { sBag = new GUIStyle(sMono) { richText = false, alignment = TextAnchor.MiddleCenter, fontSize = fs, wordWrap = false }; sBag.normal.textColor = new Color(0.91f, 0.71f, 0.26f); }
+                        if (sBag == null || sBag.fontSize != fs) { sBag = new GUIStyle(sMono) { richText = false, alignment = TextAnchor.MiddleCenter, fontSize = fs, wordWrap = false }; sBag.normal.textColor = new Color(0.82f, 0.66f, 1f); }
                         GUI.BeginGroup(pg);
                         int r0 = Mathf.FloorToInt(pocketScroll); float off = (pocketScroll - r0) * cell;
                         for (int r = r0; r < Mathf.Min(10, r0 + 6); r++)

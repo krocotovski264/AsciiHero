@@ -11,6 +11,7 @@ Shader "AsciiHero/Glyph"
         _GlyphSmoke ("Smoke body", Float) = 0
         _GlyphCloth ("Cloth", Float) = 0
         _GlyphSee ("See-through wall", Float) = 0
+        _GlyphFade ("Dissolved (0 whole .. 1 gone)", Float) = 0
         _GlyphCell ("Glyph size (m)", Vector) = (0.017, 0.028, 0, 0)
     }
     SubShader
@@ -36,6 +37,7 @@ Shader "AsciiHero/Glyph"
                 float4 _GlyphCell;
                 float _GlyphCloth;
                 float _GlyphSee;
+                float _GlyphFade;
             CBUFFER_END
             TEXTURE2D(_AsciiAtlas); SAMPLER(sampler_AsciiAtlas);
             // see-through (same as AsciiHero/Lit): the characters of a wall in front of the hero thin out and dim
@@ -204,7 +206,7 @@ Shader "AsciiHero/Glyph"
                 float myZ = -pVS.z;
                 bool inside = all(suv >= 0.0) && all(suv <= 1.0);
                 float seeK = _GlyphSee > 0.5 ? SeeK(pWS) : 0.0;
-                bool seeGone = frac(i.seed.x * 13.37 + 0.21) < seeK * 1.02;
+                bool seeGone = frac(i.seed.x * 13.37 + 0.21) < seeK * 1.02 || frac(i.seed.x * 7.13 + 0.53) < _GlyphFade * 1.02;      // (_GlyphFade: dissolving away)
                 bool vis = !seeGone && ((scat || smkA > 0.03) ? (lodKeep && !gone && inside) : lodKeep && !gone && ember < 0.999 && dot(nVS, toCam) > -0.05 - ember - _GlyphPuff * 4.0 - (_DashSpin.w != 0.0 ? 4.0 : 0.0) && myZ <= sceneZ + 0.008 + (0.0035 + 0.007 * (lod - 1.0)) * myZ && inside);
                 float3 lit = SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, sampler_AsciiLitTex, suv, 0).rgb;
                 float3 col = _AsciiLinear > 0.5 ? pow(max(lit, 0.0), 1.0 / 2.2) : max(lit, 0.0);

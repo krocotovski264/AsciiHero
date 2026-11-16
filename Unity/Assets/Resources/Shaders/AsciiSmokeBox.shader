@@ -20,7 +20,7 @@ Shader "Hidden/AsciiHero/SmokeBox"
             sampler2D _AsciiAtlas; float _AsciiRows;
             float4 _SBRect;     // the drawn rectangle (px): w, h; the body's half size inside it (px): hw, hh
             float4 _SBCell;     // character cell (px) w, h; outline (px); seed
-            float _SBT, _SBOn, _SBBurst, _SBAlpha, _SBFill;
+            float _SBT, _SBOn, _SBBurst, _SBAlpha, _SBFill, _SBSz, _SBRad;
             float H2(float2 p) { p = frac(p * float2(123.34, 456.21)); p += dot(p, p + 45.32); return frac(p.x * p.y); }
             float N2(float2 p)
             {
@@ -30,14 +30,45 @@ Shader "Hidden/AsciiHero/SmokeBox"
             float4 frag (v2f_img i) : SV_Target
             {
                 float2 px = float2(i.uv.x, 1.0 - i.uv.y) * _SBRect.xy, c = _SBRect.xy * 0.5, d = px - c;
-                float2 hs = _SBRect.zw; float rad = min(hs.x, hs.y) * 0.9;
-                // a rounded box whose edge rolls (noise along the edge, moving) and bulges in billows
+                float2 hs = _SBRect.zw; float rad = min(min(hs.x, hs.y) * 0.9, _SBRad);
+                // a rounded box whose edge rolls (noise round the edge - taken on a circle, so it closes on itself with no seam)
                 float2 q = abs(d) - (hs - rad); float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rad;
-                float a = atan2(d.y, d.x), per = (hs.x + hs.y) * 0.02;
-                float t = _SBT, seed = _SBCell.w;
-                float wob = (N2(float2(a * per * 0.6 + t * 0.5, seed)) - 0.5) * 0.9 + (N2(float2(a * per * 1.7 - t * 0.9, seed + 7.0)) - 0.5) * 0.5;
-                float burst = _SBBurst;
-                sd -= wob * min(hs.y, 26.0) * (0.35 + 0.8 * burst);
+                float2 e = normalize(d / max(hs, 1.0) + 1e-5);
+                float per = clamp((hs.x + hs.y) * 0.012, 1.2, 6.0);
+                float t = _SBT, seed = _SBCell.w, burst = _SBBurst, sz = min(hs.y, _SBSz);
+                float wob = (N2(e * per + float2(t * 0.45, seed)) - 0.5) * 0.9 + (N2(e * per * 2.7 + float2(-t * 0.8, seed + 7.0)) - 0.5) * 0.5;
+                sd -= wob * sz * (0.35 + 0.8 * burst);
+                // billows: round puffs sitting on the edge, swelling and settling
+                float k2s = sz * 0.35;
+                [unroll] for (int b = 0; b < 8; b++)
+                {
+                    float h1 = frac(sin((b + 1.3) * 91.7 + seed) * 4375.85), h2 = frac(sin((b + 7.1) * 47.3 + seed) * 2375.17);
+                    float a = h1 * 6.2832 + t * 0.06 * (h2 - 0.5);
+                    float ph = frac(t / (1.6 + 1.4 * h2) + h1), swl = sin(ph * 3.14159);
+                    float2 P = float2(cos(a), sin(a)) * (hs + sz * 0.1);
+                    float r = sz * (0.22 + 0.25 * swl);
+                    float pd = length(d - P) - r;
+                    float hh = saturate(0.5 + 0.5 * (pd - sd) / k2s); sd = lerp(pd, sd, hh) - k2s * hh * (1.0 - hh);
+                }
+                // puffs breaking off the edge and drifting away, shrinking; a press throws many more, faster and further
+                float fly = 1e5, flyK = 0;
+                [unroll] for (int f = 0; f < 10; f++)
+                {
+                    float h1 = frac(sin((f + 2.9) * 63.1 + seed) * 5375.3), h2 = frac(sin((f + 5.3) * 29.9 + seed) * 7375.9);
+                    bool extra = f >= 5;                   // (the second half only while bursting)
+                    float L = extra ? 0.45 + 0.3 * h2 : 1.6 + 1.2 * h2;
+                    float ph = frac(t / L + h1);
+                    float a = h2 * 6.2832 + 0.3 * ph;
+                    float2 dir = float2(cos(a), sin(a));
+                    float reach = sz * (extra ? 1.6 + 1.6 * h1 : 0.5 + 0.6 * h1) * (1.0 + 1.5 * burst);
+                    float2 P = dir * (hs + sz * 0.2) + dir * reach * ph;
+                    float r = sz * (extra ? 0.3 : 0.22 + 0.12 * h2) * (1.0 - ph) * (extra ? burst : 1.0);
+                    if (r <= 0.3) continue;
+                    float pd = length(d - P) - r;
+                    fly = min(fly, pd);
+                    flyK = max(flyK, saturate(1.0 - pd / (sz * (0.3 + 0.6 * ph))) * ph * (1.0 - ph) * 4.0);
+                }
+                sd = min(sd, fly);
                 // the character cells
                 float2 cellSz = _SBCell.xy, cell = floor(px / cellSz);
                 float2 l = clamp(frac(px / cellSz), 0.04, 0.96); l.y = 1.0 - l.y;
@@ -48,9 +79,9 @@ Shader "Hidden/AsciiHero/SmokeBox"
                 float fleck = 0.0;
                 if (sd > 0.0)
                 {
-                    float reach = min(hs.y, 30.0) * (1.0 + 2.5 * burst);
+                    float reach = sz * (1.0 + 2.5 * burst);
                     float hh = H2(cell + floor(t * (9.0 + 20.0 * burst)) * float2(1.7, 3.3) + seed);
-                    float k2 = saturate(1.0 - sd / reach);
+                    float k2 = max(saturate(1.0 - sd / reach), saturate(flyK));
                     fleck = hh > 1.0 - (0.14 + 0.4 * burst) * k2 ? (0.35 + 0.65 * k2) : 0.0;
                 }
                 float gd = max(dens, fleck);

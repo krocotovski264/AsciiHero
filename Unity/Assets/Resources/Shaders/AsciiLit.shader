@@ -19,6 +19,7 @@ Shader "AsciiHero/Lit"
         _Cloth ("Cloth", Float) = 0
         _AsciiFlat ("Wall or floor (no outline)", Float) = 0
         _SeeThrough ("Shows the hero through (cave walls)", Float) = 0
+        _Fade ("Dissolved (0 whole .. 1 gone)", Float) = 0
         [Enum(UnityEngine.Rendering.CullMode)] _Cull ("Cull", Float) = 2
     }
     SubShader
@@ -42,6 +43,7 @@ Shader "AsciiHero/Lit"
             float _Cloth;
             float _AsciiFlat;
             float _SeeThrough;
+            float _Fade;
         CBUFFER_END
         TEXTURE2D(_MainTex); SAMPLER(sampler_MainTex);
         float _AsciiNDPass;
@@ -64,7 +66,7 @@ Shader "AsciiHero/Lit"
             int2 q = int2(fmod(floor(pix), 4.0));
             return (M[q.y * 4 + q.x] + 0.5) / 16.0;
         }
-        void SeeClip(float3 pWS, float2 pix) { if (_SeeThrough > 0.5) clip(Bayer4(pix) - SeeK(pWS) * 1.02); }
+        void SeeClip(float3 pWS, float2 pix) { if (_SeeThrough > 0.5) clip(Bayer4(pix) - SeeK(pWS) * 1.02); if (_Fade > 0.001) clip(Bayer4(pix) - _Fade * 1.02); }      // (_Fade: a piece dissolving away - the cave's roof)
         float4 _DashShift;   // per renderer (world): during the dash the armour pieces lag behind the body
         float4 _DashSpin;    // per renderer: xyz = axis, w = angle; the piece tumbles about _DashPivot while it flies
         float4 _DashPivot;
