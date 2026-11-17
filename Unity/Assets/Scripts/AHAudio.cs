@@ -13,8 +13,8 @@ namespace AsciiHero
     {
         readonly Dictionary<string, List<AudioClip>> groups = new Dictionary<string, List<AudioClip>>();
         readonly AudioSource[] voices = new AudioSource[14]; int voiceIx;
-        class Bed { public AudioSource src; public float target, vol; }
-        readonly Dictionary<string, Bed> beds = new Dictionary<string, Bed>();
+        class Loop { public AudioSource src; public float target, vol; }
+        readonly Dictionary<string, Loop> beds = new Dictionary<string, Loop>();
         readonly GameObject root;
         readonly Dictionary<string, int> lastPick = new Dictionary<string, int>();
         public Vector3 ear; public Vector3 earRight = Vector3.right;
@@ -59,14 +59,14 @@ namespace AsciiHero
         /// a looping bed: how loud it should be (it eases there)
         public void Bed(string name, float target)
         {
-            Bed b;
+            Loop b;
             if (!beds.TryGetValue(name, out b))
             {
                 if (target <= 0.001f) return;
                 List<AudioClip> l; if (!groups.TryGetValue(name, out l) || l.Count == 0) return;
                 var s = root.AddComponent<AudioSource>(); s.clip = l[0]; s.loop = true; s.playOnAwake = false; s.volume = 0; s.spatialBlend = 0;
                 s.time = Random.value * Mathf.Max(0, l[0].length - 1);
-                b = new Bed { src = s }; beds[name] = b;
+                b = new Loop { src = s }; beds[name] = b;
             }
             b.target = Mathf.Clamp01(target);
         }
