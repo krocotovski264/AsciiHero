@@ -324,6 +324,7 @@ namespace AsciiHero
                 SteadyPelvis(dt);
             }
             AttackLayer(dt);
+            CutLayer(dt);
             bool shieldArm = ch.cfg.weapon == "shield"; BoneFlags();
             if (finQ.Length != nb) finQ = new Quaternion[nb];
             for (int k = 0; k < nb; k++)
@@ -1044,6 +1045,43 @@ namespace AsciiHero
             }
         }
         Vector2 atkDrift;
+        // ---------- the story's clips (CutLib): over everything, the arms free of the weapon grip ----------
+        CutLib.Clip cut; float cutT, cutW, cutSpeed = 1; bool cutHold, cutLoop; Quaternion[] cutQ;
+        public bool InCut => cut != null && cutW > 0.01f;
+        public string CutName => cut != null ? cut.name : null;
+        public bool CutHeld => cutHold;
+        /// play a story clip: hold = stay on its first frame (until played again without hold), loop = over and over
+        public void PlayCut(string name, bool hold = false, bool loop = false, float speed = 1)
+        {
+            CutLib.Load(); CutLib.Clip c; if (!CutLib.clips.TryGetValue(name, out c)) { Debug.LogWarning("Нет клипа " + name); return; }
+            if (cut != c || !hold) cutT = 0;
+            cut = c; cutHold = hold; cutLoop = loop; cutSpeed = speed; if (cutW < 0.01f && hold) cutW = 1;
+        }
+        public void StopCut() { if (cut != null) { cutLoop = false; cutHold = false; cutT = Mathf.Max(cutT, (cut.n - 1f) / CutLib.fps); } }
+        /// how far through the clip (0..1); 1 when none plays
+        public float CutProgress => cut == null ? 1 : Mathf.Clamp01(cutT * CutLib.fps / Mathf.Max(1, cut.n - 1));
+        void CutLayer(float dt)
+        {
+            if (cut == null) return;
+            float len = (cut.n - 1f) / CutLib.fps;
+            if (!cutHold) cutT += dt * cutSpeed;
+            if (cutLoop && cutT > len) cutT -= len;
+            bool done = !cutLoop && !cutHold && cutT >= len;
+            cutW = Mathf.MoveTowards(cutW, done ? 0 : 1, dt / (done ? 0.35f : 0.25f));
+            if (cutW <= 0.001f && done)
+            {
+                // where the clip left the body (a man who got up from the ground stands a little away from where he lay)
+                Vector3 endRo = Vector3.zero; if (cutQ == null) cutQ = new Quaternion[MotionDB.nb];
+                CutLib.Sample(cut, cut.n - 1, cutQ, ref endRo);
+                if (cut.name == "wake") { float fx = Mathf.Sin(heading), fz = Mathf.Cos(heading); atkDrift += new Vector2(fx * endRo.z + fz * endRo.x, fz * endRo.z - fx * endRo.x) * 0; }
+                cut = null; return;
+            }
+            if (cutQ == null || cutQ.Length != MotionDB.nb) cutQ = new Quaternion[MotionDB.nb];
+            for (int k = 0; k < cutQ.Length; k++) cutQ[k] = outQ[k];
+            Vector3 cro = Vector3.zero; CutLib.Sample(cut, Mathf.Min(cutT, len) * CutLib.fps, cutQ, ref cro);
+            float wl = wWalk; wWalk = 0; Lay(cutQ, new Vector3(cro.x, cro.y, cro.z), cutW, false); wWalk = wl;
+            ovW = Mathf.Max(ovW, cutW);
+        }
         /// how high a foot is above where it stands on the ground (m; for the steps' sounds); 9 = no such leg
         public float FootLift(int si)
         {

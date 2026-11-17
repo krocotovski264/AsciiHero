@@ -27,3 +27,8 @@ CC BY-SA 3.0 - Citadel Station 13 (github.com/Citadel-Station-13/Citadel-Station
   step_water      water1-4.ogg (footsteps in water)
   splash          the same, slowed and layered two at a time (wading deep); these derived files are CC BY-SA 3.0 too
 All the loops were trimmed, made seamless (cross-faded end into start), mixed to mono and levelled.
+
+Other assets of AsciiHero (not sounds):
+  Resources/rathead.bytes  the rat-man's head, cut from "rat" of the 3moji set, CC BY-SA 4.0 (modified: head only, rescaled, recoloured)
+  Resources/cuts.bytes     the story's scene clips, from the CMU Graphics Lab Motion Capture Database (mocap.cs.cmu.edu), free to use;
+                           subjects 114, 26, 111, 18, retargeted to the game's skeleton

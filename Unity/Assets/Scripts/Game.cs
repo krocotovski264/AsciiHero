@@ -7,9 +7,9 @@ using UnityEngine.Rendering.Universal;
 
 namespace AsciiHero
 {
-    public class Game : MonoBehaviour
+    public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.72 · Unity";
+        public const string VERSION = "beta 0.73 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -1005,7 +1005,7 @@ namespace AsciiHero
         void EnterWorld(int where) { EnterWorld(where, null); }
         void EnterWorld(int where, Vector3? at)
         {
-            SaveCfg();
+            SaveCfg(); StoryHide();
             try
             {
                 if (where == 0) { if (tavern == null) SetupWorld(); }
@@ -1040,6 +1040,7 @@ namespace AsciiHero
         void AddRipple(float x, float z, float a) { ripples[rippleIx] = new Vector4(x, z, tNow, a); rippleIx = (rippleIx + 1) % ripples.Length; }
         void LeaveWorld()
         {
+            StoryHide();
             world = false;
             if (tavern != null) { tavern.SetActive(false); bartenderChar.go.SetActive(false); }
             foreach (var l in outdoor) l.SetActive(false);
@@ -1078,7 +1079,8 @@ namespace AsciiHero
         static readonly int[] GRASS = { 0, 25, 50, 75, 100 }, RES = { 50, 67, 75, 85, 100 }, FPS = { 30, 60, 90, 120 };
         static readonly string[] DEVELOPERS = { "Программисты: OBLOGO и kotovski264", "", "Анимация ходьбы и передвижения в бою: набор 100STYLE —", "I. Mason, S. Starke, T. Komura (CC BY 4.0)", "", "Скелеты в пещере: BodyParts3D, DBCLS —", "© The Database Center for Life Science (CC BY 4.0)", "",
             "Звуки: Kenney (CC0); freesound: felix.blume, inchadney, sengjinn, BlueDelta, straget (CC0);",
-            "mystiscool, Corsica_S, D W, inchadney, gregswinford, Benboncan (CC BY);", "шаги по воде: Citadel Station 13 (CC BY-SA 3.0)" };
+            "mystiscool, Corsica_S, D W, inchadney, gregswinford, Benboncan (CC BY);", "шаги по воде: Citadel Station 13 (CC BY-SA 3.0)", "",
+            "Голова крысолюда: модель rat из набора 3moji (CC BY-SA 4.0), изменена", "Анимации сцен: CMU Graphics Lab Motion Capture Database (mocap.cs.cmu.edu)" };
         void LoadSettings()
         {
             bool phone = Application.isMobilePlatform;
@@ -1582,9 +1584,10 @@ namespace AsciiHero
         const float DASH_DIST = 2.0f, DASH_T = 0.1f; float dashAnim = 0.4f, dashSettle = 0;
         float dashT = 9, dashCd, dashMist, dashLen = 2; readonly Vector4[] dashObst = new Vector4[8], dashBox = new Vector4[4]; Vector3 dashFrom, dashDir; Vector2? moveDir; bool dashShifted;
         Rect atkRect, defRect, dashRect;
-        void DoAttack() { if (world && player != null && dashT >= DASH_T) player.StartAttack(); }
+        void DoAttack() { if (world && player != null && dashT >= DASH_T && !StoryLock()) player.StartAttack(); }
         void DoDash(Vector2? swipe = null)
         {
+            if (StoryLock()) return;
             if (!world || player == null || dashCd > 0 || !(limbs[3] || limbs[4])) return;
             if (player.IdleBusy) { player.PokeIdle(); return; }      // sitting: he gets up first
             // moving: where the stick points; standing: where the hero looks
@@ -1717,10 +1720,12 @@ namespace AsciiHero
             if (perfRun && perfWalk) { float a = perfT * Mathf.PI * 2 / (perfPhase <= 1 ? PERF_T1 : PERF_T2); ix = Mathf.Cos(a) * 0.62f; iy = Mathf.Sin(a) * 0.62f; }      // (the test: he walks a small circle)
             if (InputHub.Key("W")) iy = -1; if (InputHub.Key("S")) iy = 1;
             if (InputHub.Key("A")) ix = -1; if (InputHub.Key("D")) ix = 1;
+            if (StoryLock()) { ix = 0; iy = 0; }          // a full scene: the hero is not his own
             float l = Mathf.Sqrt(ix * ix + iy * iy), mag = Mathf.Min(1, l / 0.8f); if (mag < 0.12f) mag = 0;   // 80 % of the ring = full walk
             float runIn = Mathf.Max(stickRun, InputHub.Key("Run") ? 1f : 0f);
             if (mag > 0.85f || (mag > 0 && runIn > 0)) mag = 1 + runIn;
-            { float sk = loc.SpeedKW(pos); if (sk != 1 && mag > sk) mag = sk; }        // sticky mud: a slow wade
+            { float sk = loc.SpeedKW(pos); if (sk != 1 && mag > sk) mag = sk; }
+            mag = StoryCapMag(mag);        // sticky mud: a slow wade
             {   // water: the deeper, the slower - down to the walk (WaterDepth.WadeK); the walk itself is not slowed
                 float wd = loc.DepthW(pos); player.wadeDepth = wd;
                 player.speedCap = wd <= 0.05f ? 99f : Mathf.Max(1.05f, WaterDepth.WadeK(wd) * (player.maxSpeed + 0.5f));
@@ -1758,6 +1763,7 @@ namespace AsciiHero
             if (player.idleYawW > 0) { Vector3 co = Mirror(new Vector3(Mathf.Sin(isoYaw), 0, Mathf.Cos(isoYaw))); idleYaw = Mathf.DeltaAngle(player.heading * Mathf.Rad2Deg, Mathf.Atan2(co.x, co.z) * Mathf.Rad2Deg) * Mathf.Deg2Rad * player.idleYawW; }   // waving: turned to the camera
             hero.go.transform.rotation = Quaternion.Euler(0, (player.heading - player.spinYaw + idleYaw) * Mathf.Rad2Deg, 0);      // the full-turn sweep spins the whole figure
             loc.Update(tNow); Pickups(); UpdateDummies(dt, tNow); UpdateDebris(dt); UpdateDanger(tNow);
+            StoryUpdate(dt);
             // the lake: every step in the water sends out a ring (standing still, now and then a small one)
             if (loc.HasWater)
             {
@@ -1846,6 +1852,7 @@ namespace AsciiHero
                 var bp = bartenderChar.go.transform.position; float dd = new Vector2(bp.x - pos.x, bp.z - pos.z).magnitude;
                 if (dd < bd) { bd = dd; best = new Vector2(bp.x, bp.z); }
             }
+            best = StoryNearest(best, ref bd);
             return best;
         }
         /// is this point of the screen (GUI coordinates) on the hero?
@@ -2410,17 +2417,25 @@ namespace AsciiHero
             }
             float bw2 = (cw - 6 * k) / 2;
             float bw3 = (cw - 24 * k) / 5;
-            if (Button(new Rect(x0, bottom, bw3, 32 * k), "СЛУЧ.")) Randomize();
-            if (Button(new Rect(x0 + bw3 + 6 * k, bottom, bw3, 32 * k), "БАР ▶", true)) EnterWorld(0);
-            if (Button(new Rect(x0 + (bw3 + 6 * k) * 2, bottom, bw3, 32 * k), "ПОЛЕ ▶", true)) EnterWorld(1);
-            if (Button(new Rect(x0 + (bw3 + 6 * k) * 3, bottom, bw3, 32 * k), "ЛЕС ▶", true)) EnterWorld(3);
-            if (Button(new Rect(x0 + (bw3 + 6 * k) * 4, bottom, bw3, 32 * k), "ПЕЩЕРА ▶", true)) EnterWorld(2);
+            if (Button(new Rect(x0, bottom, setDev ? (cw - 30 * k) / 6 : bw3, 32 * k), "СЛУЧ.")) Randomize();
+            if (!setDev)
+            {   // the game: the first location (the test places are the developer's)
+                if (Button(new Rect(x0 + bw3 + 6 * k, bottom, cw - bw3 - 6 * k, 32 * k), sLast != null || sDone.Count > 0 ? "ПРОДОЛЖИТЬ ▶" : "В ПУТЬ ▶", true)) StartStory(false);
+                return;
+            }
+            float bw4 = (cw - 30 * k) / 6;
+            if (Button(new Rect(x0 + bw4 + 6 * k, bottom, bw4, 32 * k), "БАР ▶", true)) EnterWorld(0);
+            if (Button(new Rect(x0 + (bw4 + 6 * k) * 2, bottom, bw4, 32 * k), "ПОЛЕ ▶", true)) EnterWorld(1);
+            if (Button(new Rect(x0 + (bw4 + 6 * k) * 3, bottom, bw4, 32 * k), "ЛЕС ▶", true)) EnterWorld(3);
+            if (Button(new Rect(x0 + (bw4 + 6 * k) * 4, bottom, bw4, 32 * k), "ПЕЩЕРА ▶", true)) EnterWorld(2);
+            if (Button(new Rect(x0 + (bw4 + 6 * k) * 5, bottom, bw4, 32 * k), "СЮЖЕТ ▶", true)) StartStory(false);
         }
 
         // the world: no interface on the screen at all (the controls are invisible); a tap on the hero opens the backpack
         void WorldUI(float W, float H, float L, float T)
         {
             stickR = 62 * k;
+            if (!invOpen) StoryGUI(W, H);
             if (invOpen) PocketUI(W, H);
             else if (setDev && loc != null && loc != tavern) SkyUI();
         }
@@ -2441,6 +2456,7 @@ namespace AsciiHero
             if (loc == tavern) return "wood";
             float wd = loc.DepthW(pos);
             if (wd > 0.04f) return "water";
+            if (loc is StoryLocation) { var b = ((StoryLocation)loc).BiomeAtW(pos); return b == "tavern" ? "wood" : b == "meadow" ? (skyS.SnowCover > 0.45f ? "snow" : "grass") : "stone"; }
             if (skyS.SnowCover > 0.45f && loc != cave) return "snow";
             if (loc == cave) return "stone";
             if (loc == field || loc == forest) return "grass";
@@ -2906,6 +2922,7 @@ namespace AsciiHero
                     if (keyMat == null) { var sh = Shader.Find("Hidden/AsciiHero/Key"); if (sh != null) keyMat = new Material(sh); }
                     if (projAscii != null && projAscii.final != null && keyMat != null) { keyMat.SetFloat("_KeyAlpha", small); Graphics.DrawTexture(lp, projAscii.final, keyMat); }
                     MissingLimbDots(lp);
+                    PocketSkull(lp, small);
                     // right: the page (it slides in from the side it was swiped to)
                     float cell; var gr = PocketGrid(W, H, out cell); uiRects.Add(gr);
                     float slide = pocketSlideFrom * (1 - Mathf.SmoothStep(0, 1, pocketPageT)) * gr.width * 0.6f;
@@ -3039,7 +3056,7 @@ namespace AsciiHero
             bool tav = loc != null && loc == tavern, cv = loc != null && loc == cave, fo = loc != null && loc == forest;
             var d = new SaveData
             {
-                version = VERSION, date = System.DateTime.Now.ToString("dd.MM.yyyy HH:mm"), loc = tav ? "tavern" : cv ? "cave" : fo ? "forest" : loc is Mockup ? ((Mockup)loc).kind : "field",
+                version = VERSION, date = System.DateTime.Now.ToString("dd.MM.yyyy HH:mm"), loc = loc is StoryLocation ? "story:" + ((StoryLocation)loc).region : tav ? "tavern" : cv ? "cave" : fo ? "forest" : loc is Mockup ? ((Mockup)loc).kind : "field",
                 x = loc != null ? pos.x : 0, z = loc != null ? pos.z : 1.5f, heading = player != null ? player.heading : Mathf.PI, hp = hp,
                 limbs = (bool[])limbs.Clone(), sex = cfg.sex.ToString(), build = cfg.build, height = cfg.height, armor = cfg.armor, weapon = cfg.weapon,
                 body = cfg.body != null ? (float[])cfg.body.Clone() : null, items = inventory.ToArray()
@@ -3066,6 +3083,13 @@ namespace AsciiHero
             inventory.Clear(); if (d.items != null) inventory.AddRange(d.items);
             invOpen = false; menuFromWorld = false; inMenu = false; respawnT = 0; dashT = 99; presetIx = -1;
             Rebuild();
+            if (d.loc != null && d.loc.StartsWith("story:") || !setDev)
+            {   // the story: its place, where he stood (without the developer's mode an old save of the test world starts the story)
+                StartStory(false); if (!story) return;
+                var sl = d.loc != null && d.loc.StartsWith("story:") ? SLoc(d.loc.Substring(6)) : null;
+                if (sl != null) { if (!sDone.Contains("wake")) { sDone.Add("wake"); sDone.Add("letter"); player.StopCut(); sDir = null; letterOn = false; } StoryGo(sl, new Vector3(d.x, 0, d.z), d.heading); }
+                ShowToast("Загружено: ячейка " + (i + 1)); return;
+            }
             EnterWorld(d.loc == "tavern" ? 0 : d.loc == "cave" ? 2 : d.loc == "forest" ? 3 : 1);
             pos = new Vector3(d.x, 0, d.z); heroTrail = pos; player.heading = d.heading; player.ResetSim();
             hero.go.transform.position = pos; hero.go.transform.rotation = Quaternion.Euler(0, d.heading * Mathf.Rad2Deg, 0);

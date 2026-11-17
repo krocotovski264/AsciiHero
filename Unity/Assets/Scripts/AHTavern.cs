@@ -127,8 +127,11 @@ namespace AsciiHero
             p.x = Mathf.Clamp(p.x, bounds.xMin, bounds.xMax); p.y = Mathf.Clamp(p.y, bounds.yMin, bounds.yMax);
             return p;
         }
+        /// a place's own collisions on top of its colliders (the story's places: the cells of their grid that are not ground)
+        protected virtual Vector2 ExtraCollide(Vector2 p, float r) { return p; }
         public Vector2 CollideRaw(Vector2 p, float r)
         {
+            p = ExtraCollide(p, r);
             for (int it = 0; it < 2; it++)
                 foreach (var c in colliders)
                 {
