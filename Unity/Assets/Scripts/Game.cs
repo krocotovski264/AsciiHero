@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.79 · Unity";
+        public const string VERSION = "beta 0.80 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -1650,7 +1650,7 @@ namespace AsciiHero
         void DoAttack() { if (world && player != null && dashT >= DASH_T && !StoryLock()) { player.StartAttack(); StoryFight(); } }
         void DoDash(Vector2? swipe = null)
         {
-            if (StoryLock()) return;
+            if (StoryLock() || HeroGrabbed) return;
             if (!world || player == null || dashCd > 0 || !(limbs[3] || limbs[4])) return;
             if (player.IdleBusy) { player.PokeIdle(); return; }      // sitting: he gets up first
             // moving: where the stick points; standing: where the hero looks

@@ -283,7 +283,7 @@ namespace AsciiHero
             public Vector3 p, home, goal; public int hp, maxHp; public float scale = 1;
             public int state; public float t, cd, seenT, lostT, dodgeCd, parryCd, leapT, stagger, deadT, barkCd, guardT, strafe = 1, dmgK = 1, think, biteT = -1, biteCd = 2; public bool fortitudeUsed;
             public Vector2 leapV, step; public float stepT; public bool noticed, hurtBark, swingHit, raged; public int combo; public Vector3 lastSeen;
-            public BoneArm bones; public bool gone; public float fourK, fourPh, retreatT, throwCd = 3, windT = -1; public bool parryRiposte; public Quaternion[] hunchRest, hunchPre, hunchSet; public bool hunchOn;
+            public BoneArm bones; public bool gone; public Vector3 dFrom, dTo, triB; public float dropY; public Vector2 runDir; public float dDur, dT, trailT, seqT, triCd, summonCd = 8; public int seq; public bool grabber; public Foe grabbed; public float fourK, fourPh, retreatT, throwCd = 3, windT = -1; public bool parryRiposte; public Quaternion[] hunchRest, hunchPre, hunchSet; public bool hunchOn;
             public bool Dead => hp <= 0;
             public bool Boss => kind == "boss";
         }
@@ -454,7 +454,7 @@ namespace AsciiHero
             ch.go.transform.SetParent(L.root.transform, true); ch.go.transform.position = w; ch.go.transform.rotation = Quaternion.Euler(0, heading * Mathf.Rad2Deg, 0);
             GlyphLayer.Build(ch.go);
             var f = new Foe { id = id, name = name, kind = kind, ch = ch, act = new MotionActor(ch), L = L, p = w, home = w, goal = w };
-            f.bones = arm; f.act.heading = heading; f.act.maxSpeed = boss ? Mathf.Max(3.6f, player.maxSpeed * 1.05f) : zombie ? 1.3f : Mathf.Max(3.4f, player.maxSpeed);       // (as fast as the hero runs)
+            f.bones = arm; f.act.heading = heading; f.act.maxSpeed = boss ? player.maxSpeed * 1.05f : zombie ? 1.3f : player.maxSpeed;       // (as fast as the hero runs)
             f.maxHp = f.hp = boss ? 70 : zombie ? 40 : 30;
             f.think = Random.value * 2; f.cd = 1;
             if (kind == "drunk") { f.act.PlayCut("talk", false, true, 0.7f + 0.3f * Random.value); }
@@ -497,6 +497,7 @@ namespace AsciiHero
             for (int i = 0; i < foes.Count; i++)
             {
                 var f = foes[i]; if (f.L != L || f.gone) continue;
+                if (f.grabber) { UpdateGrabber(f, dt); continue; }
                 // far from the hero they sleep (switched off: no thinking, no skinning)
                 bool near = (new Vector2(f.p.x - pos.x, f.p.z - pos.z)).magnitude < 30f || f.noticed && !f.Dead;
                 if (f.ch.go.activeSelf != near) f.ch.go.SetActive(near);
@@ -528,9 +529,17 @@ namespace AsciiHero
                 Vector2 extra = Vector2.zero;
                 if (f.leapT > 0) { f.leapT -= dt; extra = f.leapV * dt; f.leapV *= Mathf.Exp(-dt * 5); }
                 if (f.stagger > 0) { dir2 = null; mag = 0; }
+                if (f.dDur > 0) { dir2 = null; mag = 0; lockP = new Vector2(pos.x, pos.z); }
                 var dd = f.act.Locomotion(dt, dir2, mag, lockP, me, q => FoeCollide(f, q));
                 dd += f.act.TakeAttackDrift() + extra;
                 var np = FoeCollide(f, me + dd);
+                if (f.dDur > 0)
+                {   // a long dash along a set line: quick off, easing into its end
+                    f.dT += dt; float u = Mathf.Clamp01(f.dT / f.dDur), e = 1 - (1 - u) * (1 - u);
+                    var tgt = Vector3.Lerp(f.dFrom, f.dTo, e); np = FoeCollide(f, new Vector2(tgt.x, tgt.z));
+                    f.trailT -= dt; if (f.trailT <= 0) { f.trailT = 0.05f; SpawnPuff(new Vector3(np.x, 0.6f, np.y), 0.05f, Vector3.zero, 0.35f); }
+                    if (u >= 1) f.dDur = 0;
+                }
                 f.p = new Vector3(np.x, 0, np.y);
                 f.ch.go.transform.position = f.p; f.ch.go.transform.rotation = Quaternion.Euler(0, f.act.heading * Mathf.Rad2Deg, 0);
                 if (f.kind != "zombie") HunchReset(f);
@@ -616,7 +625,7 @@ namespace AsciiHero
                 {   // out of his reach, sideways round him, until the next run in
                     f.retreatT -= dt;
                     var side = new Vector2(-toH.y, toH.x).normalized * f.strafe;
-                    dir2 = (side + toH.normalized * (dist < 3f ? -1f : dist > 4f ? 0.6f : 0f)).normalized; mag = 1.2f;
+                    dir2 = (side + toH.normalized * (dist < 3f ? -1f : dist > 4f ? 0.6f : 0f)).normalized; mag = 2f;
                     if (Random.value < dt * 0.5f) f.strafe = -f.strafe;
                     if (heroSwinging && dist < 2.4f && f.dodgeCd <= 0) { f.dodgeCd = 1f; Leap(f, -toH.normalized, 6f); }
                     return;
@@ -633,9 +642,32 @@ namespace AsciiHero
             // who swings a lot meets parries and a riposte, one who dashes to a side finds him there, one who keeps away
             // gets a knife thrown at where he is going. His blows are hard to read: a short, quiet wind-up. ----
             var M = mind;
-            if (!f.raged && f.hp < f.maxHp * 0.4f) { f.raged = true; Play("boss_rage"); f.parryCd = 0; }
+            if (!f.raged && f.hp < f.maxHp * 0.5f) { f.raged = true; Play("boss_rage"); f.parryCd = 0; }
             float tempo = f.raged ? 0.7f : 1f;
             M.Observe(this, f, dist, dt);
+            f.triCd -= dt; f.summonCd -= dt;
+            if (f.dDur > 0) return;                                   // (in the middle of a dash)
+            if (f.seq > 0) { ChiefSeq(f, toH, dist, dt); return; }
+            if (f.raged)
+            {
+                bool heroStill = player.Velocity.magnitude < 0.6f;
+                // the hero stands and only swings: the blow meets nothing - a long dash back - and he comes straight back
+                // in with a sabre; every blow of the hero's in a row makes it likelier (up to 90 %)
+                if (heroSwinging && heroStill && dist < player.Reach + 0.6f && M.chain >= 1 && f.dodgeCd <= 0 && Random.value < M.EvadeK)
+                {
+                    f.dodgeCd = 0.5f; Sound("clash", 0.5f, f.p);
+                    DashTo(f, f.p - new Vector3(toH.x, 0, toH.y).normalized * 3.2f, 0.28f); f.seq = 1; f.seqT = 0.18f; return;
+                }
+                // the hero hides behind his blade: two dashes along the legs of a right triangle to his back, a cut
+                if (M.GuardSpam && f.triCd <= 0 && dist < 4.5f)
+                {
+                    f.triCd = 4.5f; var H = pos; var u = new Vector3(-toH.x, 0, -toH.y).normalized;          // from him to the chief
+                    var A = f.p; var B = H - u * 1.3f; var mid = (A + B) / 2; var perp = Vector3.Cross(Vector3.up, (B - A).normalized) * (f.strafe >= 0 ? 1 : -1);
+                    f.triB = B; DashTo(f, mid + perp * (B - A).magnitude / 2, 0.22f); f.seq = 10; return;
+                }
+                // the hero runs from him: a rat drops on the hero from above and holds him till the chief comes
+                if (M.fleeT > 3.5f && f.summonCd <= 0 && dist > 5f) { f.summonCd = 18f; M.fleeT = 0; SummonGrabber(f); }
+            }
             // a knife from his belt: when the hero keeps away (or has kept away of late), at where he will be
             f.throwCd -= dt;
             if (f.throwCd <= 0 && dist > 4.2f && dist < 11f && !f.act.Attacking && f.seenT <= 0.1f && (M.farK > 0.4f || dist > 6f))
@@ -650,8 +682,8 @@ namespace AsciiHero
                 else if (r < pParry + 0.18f + pDodge)
                 {   // a dash aside (to the side the hero does not favour) or straight back
                     float sideS = M.dashSide > 0.25f ? -1 : M.dashSide < -0.25f ? 1 : (Random.value < 0.5f ? 1 : -1);
-                    if (Random.value < 0.6f) Leap(f, new Vector2(-toH.y, toH.x).normalized * sideS * 0.85f - toH.normalized * 0.35f, 7f);
-                    else Leap(f, -toH.normalized, 7.5f);
+                    var away = Random.value < 0.6f ? new Vector2(-toH.y, toH.x).normalized * sideS * 0.85f - toH.normalized * 0.35f : -toH.normalized;
+                    away.Normalize(); DashTo(f, f.p + new Vector3(away.x, 0, away.y) * 2.6f, 0.26f);
                 }
             }
             f.act.guardHeld = f.guardT > 0;
@@ -689,15 +721,85 @@ namespace AsciiHero
                 if (Random.value < dt * 0.3f) f.strafe = -f.strafe;
             }
         }
+        /// the chief's moves made of several steps
+        void ChiefSeq(Foe f, Vector2 toH, float dist, float dt)
+        {
+            f.seqT -= dt; if (f.seqT > 0) return;
+            switch (f.seq)
+            {
+                case 1:     // back from the dodge: straight at him, a cut
+                    DashTo(f, pos - new Vector3(-toH.x, 0, -toH.y).normalized * 1.0f, 0.22f); f.seq = 2; f.seqT = 0.2f; break;
+                case 2: f.act.StartAttack(); f.swingHit = false; f.cd = 0.5f; f.seq = 0; break;
+                case 10:    // the second leg of the triangle: to his back
+                    DashTo(f, f.triB, 0.22f); f.seq = 11; f.seqT = 0.24f; break;
+                case 11: f.act.StartAttack(); f.swingHit = false; f.cd = 0.6f; f.combo = 1; f.seq = 0; break;
+                default: f.seq = 0; break;
+            }
+        }
+        /// a rat out of nowhere: drops on the hero from above, holds him fast; when the chief is on him it runs off
+        void SummonGrabber(Foe chief)
+        {
+            var L = chief.L; var at = pos - new Vector3(Mathf.Sin(player.heading), 0, Mathf.Cos(player.heading)) * 0.45f;
+            var g = MakeFoe("grab" + Time.frameCount, "Крысолюд", "rat", L, at, player.heading);
+            g.grabber = true; g.noticed = true; g.hp = 999; g.grabbed = chief; g.p = at; g.dropY = 3.2f;
+            foes.Add(g); grabT = 6f; Sound("draw", 0.6f, at);
+            Bark(g.ch.go.transform, "rat_notice");
+        }
+        float grabT;
+        bool HeroGrabbed => story && grabT > 0;
+        /// the holding rat: falls onto the hero, clings behind him, lets go when the chief is near (or after six seconds),
+        /// runs off out of sight and is gone
+        void UpdateGrabber(Foe g, float dt)
+        {
+            var back = new Vector3(Mathf.Sin(player.heading), 0, Mathf.Cos(player.heading)) * 0.45f;
+            if (g.dropY > 0)
+            {   // falling
+                g.dropY = Mathf.Max(0, g.dropY - dt * 9f);
+                g.p = pos - back;
+                g.ch.go.transform.position = g.p + Vector3.up * g.dropY; g.act.heading = player.heading; g.ch.go.transform.rotation = Quaternion.Euler(0, g.act.heading * Mathf.Rad2Deg, 0);
+                g.act.Locomotion(dt, null, 0, null, new Vector2(g.p.x, g.p.z), null); g.act.Animate(tNow, dt);
+                if (g.dropY <= 0) { Sound("hit_armor", 0.6f, pos); player.PokeIdle(); }
+                return;
+            }
+            var chief = g.grabbed; bool hold = grabT > 0 && chief != null && !chief.Dead && (new Vector2(chief.p.x - pos.x, chief.p.z - pos.z)).magnitude > 1.6f;
+            if (hold)
+            {   // clinging behind him
+                grabT -= dt;
+                g.p = pos - back; g.act.heading = player.heading;
+                g.ch.go.transform.position = g.p; g.ch.go.transform.rotation = Quaternion.Euler(0, g.act.heading * Mathf.Rad2Deg, 0);
+                g.act.Locomotion(dt, null, 0, null, new Vector2(g.p.x, g.p.z), null); g.act.Animate(tNow, dt);
+                return;
+            }
+            grabT = 0;
+            // off it runs, away from the camera's side, and is gone once out of sight
+            if (g.runDir == Vector2.zero) { var cf = sceneCam.transform.forward; g.runDir = new Vector2(cf.x, cf.z).normalized; if (g.runDir == Vector2.zero) g.runDir = Vector2.up; }
+            var dd = g.act.Locomotion(dt, g.runDir, 2f, null, new Vector2(g.p.x, g.p.z), null);
+            g.p += new Vector3(dd.x, 0, dd.y); g.ch.go.transform.position = g.p; g.ch.go.transform.rotation = Quaternion.Euler(0, g.act.heading * Mathf.Rad2Deg, 0);
+            HunchReset(g); g.act.Animate(tNow, dt); Hunch(g); Fours(g, 99, dt);
+            var vp = sceneCam.WorldToViewportPoint(g.p);
+            if (vp.x < -0.1f || vp.x > 1.1f || vp.y < -0.1f || vp.y > 1.1f || (g.p - pos).magnitude > 18f) { g.gone = true; g.hp = 0; Destroy(g.ch.go); }
+        }
         // ---- what the chief has learnt about the hero (one fight's memory) ----
         class BossMind
         {
-            readonly List<float> swings = new List<float>(); public float dashSide, guardK, farK, hitsK; float lastDashT = 9, lastAtk;
-            public void Swing(float t) { swings.Add(t); while (swings.Count > 0 && t - swings[0] > 8f) swings.RemoveAt(0); }
+            readonly List<float> swings = new List<float>(); public float dashSide, guardK, farK, hitsK, fleeT; float lastDashT = 9, lastAtk = -9;
+            public int chain; float guardHold; readonly List<float> guardUps = new List<float>(); bool guardWas;
+            public void Swing(float t) { swings.Add(t); while (swings.Count > 0 && t - swings[0] > 8f) swings.RemoveAt(0); chain = t - lastAtk < 1.6f ? chain + 1 : 1; lastAtk = t; }
+            /// each blow of the hero's in a row: likelier to be met with a long dash back (up to 90 %)
+            public float EvadeK => Mathf.Min(0.9f, 0.3f + 0.15f * chain);
+            /// he holds his guard up, or keeps putting it up
+            public bool GuardSpam => guardHold > 0.7f || guardUps.Count >= 3;
             public void Hit() { hitsK = Mathf.Min(1, hitsK + 0.25f); }
             public void Observe(Game g, Foe f, float dist, float dt)
             {
                 guardK += ((g.player.guardHeld && dist < 4 ? 1 : 0) - guardK) * dt * 0.25f;
+                bool gh = g.player.guardHeld; guardHold = gh ? guardHold + dt : 0;
+                if (gh && !guardWas) guardUps.Add(Time.time); guardWas = gh; while (guardUps.Count > 0 && Time.time - guardUps[0] > 3f) guardUps.RemoveAt(0);
+                if (Time.time - lastAtk > 1.6f) chain = 0;
+                // running from him: far and getting further
+                var away = new Vector2(g.pos.x - f.p.x, g.pos.z - f.p.z); var hv = new Vector2(g.player.Velocity.x, g.player.Velocity.z);
+                bool flee = dist > 5f && Vector2.Dot(hv, away.normalized) > 1.2f;
+                fleeT = flee ? fleeT + dt : Mathf.Max(0, fleeT - dt * 0.5f);
                 farK += ((dist > 4.2f ? 1 : 0) - farK) * dt * 0.15f;
                 hitsK = Mathf.Max(0, hitsK - dt * 0.05f);
                 // a new dash of the hero's: to which side of the chief?
@@ -803,7 +905,7 @@ namespace AsciiHero
         void Fours(Foe f, float dist, float dt)
         {
             float sp = f.act.Velocity.magnitude;
-            bool on = !f.act.Attacking && f.leapT <= 0 && sp > 1.7f && (!f.noticed || dist > 3.2f) && f.kind != "drunk";
+            bool on = !f.act.Attacking && f.windT <= 0 && f.guardT <= 0 && f.biteT < 0 && f.kind != "drunk";       // (on all fours but to strike or guard)
             f.fourK = Mathf.MoveTowards(f.fourK, on ? 1 : 0, dt / (on ? 0.25f : 0.18f));
             if (f.fourK < 0.01f) return;
             float q = Mathf.SmoothStep(0, 1, f.fourK);
@@ -822,6 +924,13 @@ namespace AsciiHero
                 lo.rotation = Quaternion.Slerp(Quaternion.identity, Quaternion.FromToRotation(cl, dl), q) * lo.rotation;
             }
             tr.position = f.p + Vector3.down * (0.1f * q);
+        }
+        /// a long dash to a point (the chief): in a set time, from where he stands
+        void DashTo(Foe f, Vector3 to, float time)
+        {
+            var d = new Vector2(to.x - f.p.x, to.z - f.p.z); var c = FoeCollide(f, new Vector2(f.p.x, f.p.z) + d);
+            f.dFrom = f.p; f.dTo = new Vector3(c.x, 0, c.y); f.dDur = time; f.dT = 0; f.leapT = 0;
+            SpawnPuff(f.p + Vector3.up * 0.5f, 0.06f, Vector3.zero, 0.5f); Sound("cloth", 0.6f, f.p);
         }
         void Leap(Foe f, Vector2 d, float sp) { f.leapV = d.normalized * sp; f.leapT = 0.28f; SpawnPuff(f.p + Vector3.up * 0.3f, 0.04f, Vector3.zero, 0.4f); Sound("cloth", 0.5f, f.p); }
 
@@ -863,7 +972,7 @@ namespace AsciiHero
             var hf = new Vector2(Mathf.Sin(player.heading), Mathf.Cos(player.heading));
             for (int i = 0; i < foes.Count; i++)
             {
-                var f = foes[i]; if (f.L != L || f.Dead || player.atkHits.Contains(1000 + i)) continue;
+                var f = foes[i]; if (f.L != L || f.Dead || f.grabber || player.atkHits.Contains(1000 + i)) continue;
                 var d = new Vector2(f.p.x - pos.x, f.p.z - pos.z); float dist = d.magnitude;
                 if (dist > player.Reach + (f.Boss ? 0.15f : 0) || (Vector2.Dot(hf, d / Mathf.Max(dist, 0.01f)) < 0.3f && !player.Around)) continue;
                 player.atkHits.Add(1000 + i);
@@ -1096,7 +1205,7 @@ namespace AsciiHero
         void Choose(int n) { if (sDir == null || !sDir.choosing) return; sDir.chosen = n; sDir.choosing = false; Next(); }
         /// a full scene takes the hero; the guided one slows him to a walk
         bool StoryLock() { return story && world && sDir != null && sDir.tier >= 3; }
-        float StoryCapMag(float mag) { return story && sDir != null && sDir.tier == 2 ? Mathf.Min(mag, 1f) : mag; }
+        float StoryCapMag(float mag) { if (HeroGrabbed) return 0; return story && sDir != null && sDir.tier == 2 ? Mathf.Min(mag, 1f) : mag; }
 
         /// once a frame in the world, after the hero has moved
         void StoryUpdate(float dt)
