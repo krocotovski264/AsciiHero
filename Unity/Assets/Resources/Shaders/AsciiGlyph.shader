@@ -74,8 +74,10 @@ Shader "AsciiHero/Glyph"
             // round the skirt). Foliage (flag 2) sways in the wind.
             #define CLOTH_COLS 12
             #define CLOTH_ROWS 8
-            float4 _ClothGrid[96];        // world displacement of each particle from its rest place
-            float4 _ClothMap;             // skirt mesh: x = centre z, y = top y, z = bottom y
+            float4 _ClothGrid[144];       // world displacement of each particle from its rest place
+            float4 _ClothNrm[144];        // the cloak's simulated normals (world)
+            float4 _ClothMap2;            // the cloak (_ClothMap.w = 1): width at the top and at the hem, columns, rows
+            float4 _ClothMap;             // skirt mesh: x = centre z, y = top y, z = bottom y, w = 1 for the cloak
             float _ClothSim;              // per renderer: 1 = this is the simulated skirt
             float4 _AsciiWind;            // xy = direction (world xz), z = strength
             float WHash(float2 p) { p = frac(p * float2(123.34, 456.21)); p += dot(p, p + 45.32); return frac(p.x * p.y); }
@@ -108,6 +110,16 @@ Shader "AsciiHero/Glyph"
                     return ws + sway + fl * (0.012 + 0.025 * st * gust) * hk;
                 }
                 if (_GlyphCloth < 0.5 || _ClothSim < 0.5) return ws;
+                if (_ClothMap.w > 0.5)
+                {   // the cloak: a sheet, columns across (x grows with the width row by row), rows down
+                    int C = (int)_ClothMap2.z, R = (int)_ClothMap2.w;
+                    float v01 = saturate((_ClothMap.y - os.y) / max(_ClothMap.y - _ClothMap.z, 1e-3));
+                    float W = lerp(_ClothMap2.x, _ClothMap2.y, v01);
+                    float uu = saturate(os.x / max(W, 1e-3) + 0.5) * (C - 1), vv = v01 * (R - 1);
+                    int a0 = min((int)floor(uu), C - 2), b0 = min((int)floor(vv), R - 2); float fa = saturate(uu - a0), fb = saturate(vv - b0);
+                    float3 e00 = _ClothGrid[b0 * C + a0].xyz, e01 = _ClothGrid[b0 * C + a0 + 1].xyz, e10 = _ClothGrid[(b0 + 1) * C + a0].xyz, e11 = _ClothGrid[(b0 + 1) * C + a0 + 1].xyz;
+                    return ws + lerp(lerp(e00, e01, fa), lerp(e10, e11, fa), fb);
+                }
                 float u = frac(atan2(os.z - _ClothMap.x, os.x) / 6.2831853 + 1.0) * CLOTH_COLS;
                 float v = saturate((_ClothMap.y - os.y) / max(_ClothMap.y - _ClothMap.z, 1e-3)) * (CLOTH_ROWS - 1);
                 int c0 = (int)floor(u) % CLOTH_COLS, c1 = (c0 + 1) % CLOTH_COLS; float fu = frac(u);

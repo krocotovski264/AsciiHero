@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.67 · Unity";
+        public const string VERSION = "beta 0.68 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -136,7 +136,7 @@ namespace AsciiHero
         // UI
         float k = 1; Rect safe; int tab; string toast; float toastT;
         readonly List<Rect> uiRects = new List<Rect>(); List<Rect> uiRectsPrev = new List<Rect>();
-        readonly List<Vector2> taps = new List<Vector2>();
+        readonly List<Vector2> taps = new List<Vector2>(), consoleTaps = new List<Vector2>(); Rect consoleRect;
         Rect sliderRect, stickRect; Vector2 stickCenter, stick; float stickR, stickRun; int stickId = int.MinValue;
         Texture2D texWhite, texDisc, texRing; GUIStyle sBig, sRight, sRightSmall, sTitle, sSmall, sBtn, sBtnOn, sMono, sName, sDesc, sBadge, sToast;
         Font mono; float fpsAcc; int fpsN; string fpsText = "";
@@ -964,7 +964,7 @@ namespace AsciiHero
                     var r = kv.Key; var sm = r.sharedMaterial;
                     if (sm == actorMats["SHADOW"] || sm == actorMats["EYE"]) continue;
                     Object key = r is SkinnedMeshRenderer ? (Object)r : r.transform.parent;
-                    string kind = sm == actorMats["CHAIN"] ? "chain" : cfg.armor == "robe" && (sm == actorMats["ROBE"] || sm == actorMats["ROBED"]) ? "robe" : "";
+                    string kind = sm == actorMats["CHAIN"] ? "chain" : (cfg.armor == "robe" && (sm == actorMats["ROBE"] || sm == actorMats["ROBED"])) || sm == actorMats["CAPE"] ? "robe" : "";
                     Piece pc; if (!byKey.TryGetValue(key, out pc)) { pc = new Piece { kind = kind }; byKey[key] = pc; pieces.Add(pc); }
                     pc.rs.Add(r); if (kv.Value != null) pc.rs.Add(kv.Value);
                 }
@@ -973,7 +973,7 @@ namespace AsciiHero
             cloak = null; cloakRs.Clear();
             if (hero.skirt != null)
             {
-                cloak = new Cloak(hero);
+                cloak = hero.capeRest != null ? (ICloth)new CapeSim(hero) : new Cloak(hero);
                 var sr = hero.skirt.GetComponent<Renderer>(); Renderer gr;
                 if (sr != null) { cloakRs.Add(sr); if (GlyphLayer.pairs.TryGetValue(sr, out gr) && gr != null) cloakRs.Add(gr); }
             }
@@ -1526,7 +1526,7 @@ namespace AsciiHero
         static Vector3 Mirror(Vector3 v) { return new Vector3(-v.x, v.y, v.z); }
 
         // ---------- actions: attack, guard, dash ----------
-        Cloak cloak; readonly List<Renderer> cloakRs = new List<Renderer>(); MaterialPropertyBlock clothMpb;
+        ICloth cloak; readonly List<Renderer> cloakRs = new List<Renderer>(); MaterialPropertyBlock clothMpb;
         readonly Sky skyS = new Sky(); bool skyOpen;
         Vector3 windV; float windA = 0.7f, windStr = 0.3f, windTarget = 0.4f, windPhaseT, windRun; int windPhase = 1;
         class Piece { public string kind = ""; public List<Renderer> rs = new List<Renderer>(); public float delay, om = 11, zeta = 0.45f, lift = 0.3f, wob, turns = 1, side; public Vector3 axis = Vector3.up; }
@@ -2160,6 +2160,10 @@ namespace AsciiHero
             smokeFlat = false;
             if (Event.current.type != EventType.Repaint) return;
             long tG = System.Diagnostics.Stopwatch.GetTimestamp();
+            // the open log lies over everything: a tap on it is the log's alone (nothing under it is pressed)
+            consoleTaps.Clear();
+            if (consoleOpen && consoleRect.width > 0)
+                for (int i = taps.Count - 1; i >= 0; i--) if (consoleRect.Contains(taps[i])) { consoleTaps.Add(taps[i]); taps.RemoveAt(i); }
             LogHub.Pump();
             k = Mathf.Max(0.5f, Mathf.Min(Screen.height / 390f, Screen.width / 844f));
             safe = Screen.safeArea; safe.y = Screen.height - safe.yMax;
@@ -2221,12 +2225,16 @@ namespace AsciiHero
             float top = safe.y + (loading ? 140 : 40) * k;
             if (!consoleOpen)
             {
+                consoleRect = Rect.zero;
                 string tag = LogHub.errors > 0 ? "LOG · " + LogHub.errors + " ош." : "LOG";
                 if (Button(new Rect(safe.x + 8 * k, H - (H - safe.yMax) - 30 * k, 96 * k, 24 * k), tag, LogHub.errors > 0)) consoleOpen = true;
                 return;
             }
             var panel = new Rect(safe.x + 8 * k, top, safe.width - 16 * k, H - (H - safe.yMax) - top - 8 * k);
-            Fill(panel, new Color(0, 0, 0, 0.86f)); Frame(panel, new Color(0.4f, 0.36f, 0.26f), Mathf.Max(1, k));
+            consoleRect = panel;
+            // (its own taps: the ones that fell on it, taken away from everything drawn before)
+            taps.AddRange(consoleTaps); consoleTaps.Clear();
+            Fill(panel, new Color(0, 0, 0, 0.96f)); Frame(panel, new Color(0.4f, 0.36f, 0.26f), Mathf.Max(1, k));
             uiRects.Add(panel);
             float bx = panel.xMax - 8 * k, by = panel.y + 6 * k, bh = 26 * k;
             if (Button(new Rect(bx - 90 * k, by, 90 * k, bh), "Скрыть")) consoleOpen = false;
@@ -2370,7 +2378,16 @@ namespace AsciiHero
         }
 
         // ---------- sounds ----------
-        Sfx sfx; readonly float[] footUp = { 1, 1 }; bool wasCut; float waterNearT, waterNear = 99, lastFlash, plateT;
+        Sfx sfx; readonly float[] footUp = { 1, 1 }, footPrevY = { 0, 0 }, footPrevDy = { 0, 0 }, footT = { 0, 0 }; float stepDist;
+        void Step(float sp)
+        {
+            string sf = Surface(); float v = Mathf.Lerp(0.3f, 0.6f, Mathf.Clamp01(sp / 4.5f));
+            if (sf == "water") { sfx.Play(loc.DepthW(pos) > 0.3f ? "splash" : "step_water", v * 0.9f); return; }
+            if (sf == "snow") v *= 1.2f; if (sf == "mud") v *= 0.9f;
+            sfx.Play("step_" + sf, v, 1, 0.09f, null, 0, true);
+            if (skyS.Rain > 0.3f && sf != "stone" && sf != "wood") sfx.Play("step_water", v * 0.35f * skyS.Rain, 1.2f);      // wet ground
+            plateT -= 1; if (sp > 3 && plateT <= 0) { sfx.Play("plates", 0.12f); plateT = 2 + Random.Range(0, 3); }      // the plates of the armour on a run
+        } bool wasCut; float waterNearT, waterNear = 99, lastFlash, plateT;
         string Surface()
         {
             if (loc == tavern) return "wood";
@@ -2395,32 +2412,29 @@ namespace AsciiHero
         {
             if (sfx == null) return;
             sfx.ear = pos; if (sceneCam != null) sfx.earRight = sceneCam.transform.right;
-            // steps: a foot that comes down to the ground
+            // steps: a foot that comes down - the lowest point of its fall (on a run the feet hardly touch the height
+            // they stand at, so a fixed height missed steps); and if the feet say nothing while he moves on, the distance
+            // walked keeps the beat
             if (player != null && !invOpen)
             {
                 float sp = player.Velocity.magnitude;
+                bool stepped = false;
                 for (int si = 0; si < 2; si++)
                 {
                     float y = player.FootLift(si); if (y > 8) continue;
-                    if (footUp[si] > 0 && y < 0.025f)
-                    {
-                        footUp[si] = 0;
-                        if (sp > 0.25f || player.Attacking)
-                        {
-                            string sf = Surface(); float v = Mathf.Lerp(0.28f, 0.6f, Mathf.Clamp01(sp / 4.5f));
-                            if (sf == "water") { sfx.Play(loc.DepthW(pos) > 0.3f ? "splash" : "step_water", v * 0.9f); }
-                            else
-                            {
-                                if (sf == "snow") v *= 1.2f; if (sf == "mud") v *= 0.9f;
-                                sfx.Play("step_" + sf, v, 1, 0.09f);
-                                if (skyS.Rain > 0.3f && sf != "stone" && sf != "wood") sfx.Play("step_water", v * 0.35f * skyS.Rain, 1.2f);      // wet ground
-                            }
-                            // the plates of the armour on a run
-                            plateT -= 1; if (sp > 3 && plateT <= 0) { sfx.Play("plates", 0.12f); plateT = 2 + Random.Range(0, 3); }
-                        }
-                    }
-                    else if (y > 0.06f) footUp[si] = 1;
+                    footT[si] -= dt;
+                    if (footPrevDy[si] < -0.0005f && y - footPrevY[si] >= 0 && footPrevY[si] < 0.09f && footT[si] <= 0 && footUp[si] > 0) { stepped = true; footT[si] = 0.16f; footUp[si] = 0; }
+                    if (y > footPrevY[si] + 0.001f && y > 0.03f) footUp[si] = 1;
+                    footPrevDy[si] = y - footPrevY[si]; footPrevY[si] = y;
                 }
+                if (sp > 0.25f || player.Attacking)
+                {
+                    stepDist += sp * dt;
+                    float stride = Mathf.Lerp(0.62f, 1.1f, Mathf.Clamp01((sp - 1.4f) / 3.5f));
+                    if (!stepped && stepDist > stride * 1.35f) stepped = true;
+                    if (stepped) { stepDist = 0; Step(sp); }
+                }
+                else stepDist = 0;
                 // a cut: the blade's whoosh as the edge starts to travel
                 bool cut = player.Cutting;
                 if (cut && !wasCut) { sfx.Play("swing", 0.5f, 1, 0.1f); sfx.Play("blade", 0.22f, 1.1f); }
@@ -2479,7 +2493,11 @@ namespace AsciiHero
             }
             RowB(Sky.TOD, skyS.tod, i => skyS.tod = i);
             RowB(Sky.SEASON, skyS.season, i => skyS.season = i);
-            RowB(Sky.WEATHER, skyS.weather, i => skyS.weather = i);
+            // precipitation: on/off, then how strong (snow in winter, rain otherwise)
+            if (Button(new Rect(x1 - 4 * (bw + gap) + gap, y, bw, bh), (skyS.precip ? "[x] " : "[ ] ") + "Осадки", skyS.precip)) skyS.precip = !skyS.precip;
+            for (int i = 0; i < 3; i++)
+                if (Button(new Rect(x1 - (3 - i) * (bw + gap) + gap, y, bw, bh), Sky.LEVEL[i], skyS.precip && skyS.level == i)) { skyS.level = i; skyS.precip = true; }
+            y += bh + gap;
         }
 
         // ---------- backpack ----------

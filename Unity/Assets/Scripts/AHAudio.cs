@@ -12,7 +12,7 @@ namespace AsciiHero
     public class Sfx
     {
         readonly Dictionary<string, List<AudioClip>> groups = new Dictionary<string, List<AudioClip>>();
-        readonly AudioSource[] voices = new AudioSource[14]; int voiceIx;
+        readonly AudioSource[] voices = new AudioSource[14], stepVoices = new AudioSource[2]; int voiceIx, stepIx;
         class Loop { public AudioSource src; public float target, vol; }
         readonly Dictionary<string, Loop> beds = new Dictionary<string, Loop>();
         readonly GameObject root;
@@ -31,12 +31,13 @@ namespace AsciiHero
                 l.Add(c);
             }
             for (int i = 0; i < voices.Length; i++) { var s = root.AddComponent<AudioSource>(); s.playOnAwake = false; s.spatialBlend = 0; voices[i] = s; }
+            for (int i = 0; i < 2; i++) { var s = root.AddComponent<AudioSource>(); s.playOnAwake = false; s.spatialBlend = 0; s.priority = 32; stepVoices[i] = s; }
             Debug.Log("Звуки: " + groups.Count + " групп");
         }
         public bool Has(string g) { return groups.ContainsKey(g); }
 
         /// one sound of the group; at = where it is (null: at the hero / no place)
-        public void Play(string g, float vol = 1, float pitch = 1, float vary = 0.07f, Vector3? at = null, float delay = 0)
+        public void Play(string g, float vol = 1, float pitch = 1, float vary = 0.07f, Vector3? at = null, float delay = 0, bool step = false)
         {
             List<AudioClip> l; if (!groups.TryGetValue(g, out l) || l.Count == 0 || vol <= 0.003f) return;
             int last; lastPick.TryGetValue(g, out last);
@@ -48,10 +49,11 @@ namespace AsciiHero
                 vol *= 1f / (1f + 0.18f * dist * dist * 0.25f); if (vol < 0.01f) return;
                 pan = Mathf.Clamp(Vector3.Dot(d, earRight) / Mathf.Max(dist, 1f), -1, 1) * 0.7f;
             }
-            // a free voice (or the oldest)
+            // a free voice (or the oldest); steps have two voices of their own, taking turns, so nothing cuts them off
             AudioSource s = null;
-            for (int i = 0; i < voices.Length; i++) { var v = voices[(voiceIx + i) % voices.Length]; if (!v.isPlaying) { s = v; voiceIx = (voiceIx + i + 1) % voices.Length; break; } }
-            if (s == null) { s = voices[voiceIx]; voiceIx = (voiceIx + 1) % voices.Length; }
+            if (step) { s = stepVoices[stepIx]; stepIx = 1 - stepIx; }
+            else for (int i = 0; i < voices.Length; i++) { var v = voices[(voiceIx + i) % voices.Length]; if (!v.isPlaying) { s = v; voiceIx = (voiceIx + i + 1) % voices.Length; break; } }
+            if (s == null && !step) { s = voices[voiceIx]; voiceIx = (voiceIx + 1) % voices.Length; }
             s.clip = l[k]; s.volume = Mathf.Clamp01(vol); s.pitch = pitch * (1 + Random.Range(-vary, vary)); s.panStereo = pan;
             if (delay > 0) s.PlayDelayed(delay); else s.Play();
         }

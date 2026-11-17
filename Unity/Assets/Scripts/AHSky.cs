@@ -4,7 +4,8 @@
 //                 the cold moon at night), how bright the ambient air is, the tint of the whole picture
 //   season      - the foliage: fresh green with a few blossoms in spring, deep green in summer, orange and yellow in
 //                 autumn, bare grey twigs in winter; in winter the ground lies white
-//   weather     - clear, rain (grey air, wet dark ground that glints, slanting '/' streaks over the screen), a downpour
+//   weather     - precipitation on or off, light, medium or heavy; snow in winter, rain otherwise (grey air, wet dark
+//                 ground that glints, slanting '/' streaks over the screen; heavy rain is a downpour
 //                 (darker, denser and faster, flashes of lightning) or snow (flakes drifting down; the ground whitens
 //                 the longer it falls)
 // Night, summer and clear sky is the world exactly as it was before the sky existed.
@@ -16,8 +17,11 @@ namespace AsciiHero
     {
         public static readonly string[] TOD = { "Утро", "День", "Вечер", "Ночь" };
         public static readonly string[] SEASON = { "Весна", "Лето", "Осень", "Зима" };
-        public static readonly string[] WEATHER = { "Ясно", "Дождь", "Ливень", "Снег" };
-        public int tod = 3, season = 1, weather = 0;
+        public static readonly string[] LEVEL = { "Лёгкие", "Средние", "Сильные" };
+        // precipitation: on or off and how strong; what falls follows the season - snow in winter, rain the rest of the year
+        public int tod = 3, season = 1, level = 1; public bool precip;
+        static readonly float[] AMOUNT = { 0.35f, 0.65f, 1f };
+        int weather => !precip ? 0 : season == 3 ? 3 : level == 2 ? 2 : 1;
 
         // eased state
         float[] todW = { 0, 0, 0, 1 }, seasW = { 0, 1, 0, 0 };
@@ -44,15 +48,16 @@ namespace AsciiHero
         {
             float k = 1 - Mathf.Exp(-dt / 0.8f), kSlow = 1 - Mathf.Exp(-dt / 2.5f);
             for (int i = 0; i < 4; i++) { todW[i] += ((i == tod ? 1 : 0) - todW[i]) * k; seasW[i] += ((i == season ? 1 : 0) - seasW[i]) * k; }
-            float rT = weather == 1 ? 0.55f : weather == 2 ? 1 : 0, sT = weather == 3 ? 1 : 0;
+            float amt = precip ? AMOUNT[Mathf.Clamp(level, 0, 2)] : 0;
+            float rT = weather == 1 || weather == 2 ? amt : 0, sT = weather == 3 ? amt : 0;
             rain += (rT - rain) * k; snow += (sT - snow) * k;
-            overcast += ((weather == 0 ? 0 : weather == 2 ? 1 : 0.7f) - overcast) * k;
+            overcast += ((weather == 0 ? 0 : 0.45f + 0.55f * amt) - overcast) * k;
             wet += ((weather == 1 || weather == 2 ? 1 : 0) - wet) * (rT > wet ? kSlow : (1 - Mathf.Exp(-dt / 20f)));            // dries slowly
             float coverT = Mathf.Max(seasW[3] * 0.85f, weather == 3 ? 1 : 0);
             snowCover += (coverT - snowCover) * (coverT > snowCover ? (1 - Mathf.Exp(-dt / (weather == 3 ? 6f : 2f))) : (1 - Mathf.Exp(-dt / 8f)));
             // lightning in a downpour: a flash every 6-14 s, sometimes doubled
             flash = Mathf.Max(0, flash - dt * 4);
-            if (rain > 0.8f) { flashT -= dt; if (flashT <= 0) { flash = 1; flashT = Random.value < 0.3f ? 0.18f : 6 + 8 * Random.value; } }
+            if (rain > 0.8f && weather == 2) { flashT -= dt; if (flashT <= 0) { flash = 1; flashT = Random.value < 0.3f ? 0.18f : 6 + 8 * Random.value; } }
 
             ambK = 0; sunK = 0; heroK = 0; expK = 0; sunCol = Color.black; grade = Color.black; sunDir = Vector3.zero;
             for (int i = 0; i < 4; i++)

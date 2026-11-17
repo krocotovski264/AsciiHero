@@ -328,42 +328,64 @@ namespace AsciiHero
             return c.y + hs.y;
         }
 
-        /// the knight's cloak: from the shoulders down past the knees, hanging behind; simulated as cloth (AHCloth) like the
-        /// robe's skirt - its grid goes all round the body, only the back of it is drawn
+        /// the knight's cloak, cut like a real one: a piece of heavy cloth gathered across the shoulders and the top of the
+        /// back, widening to 1.7 times that at the hem (a half-circle cloak), hanging clear of the armour and the backside
+        /// (it never comes back in under a bulge above it) down to the middle of the calves, with soft vertical folds. It is
+        /// simulated as cloth (AHCloth.CapeSim) on a grid laid on the same shape.
+        public Vector3[] capeRest, capeNrm; public Vector4 capeShape; public const int CAPE_C = 10, CAPE_R = 14;
         void Cape()
         {
             var h = human; var P = h.pos; float neckY = h.Head("neck01").y;
-            float yTop = neckY - 0.035f, yBot = h.Head("lowerleg01.L").y - 0.06f;
-            float x0 = 0, z0 = 0, z1 = 0;
+            float yTop = neckY - 0.045f, yBot = (h.Head("lowerleg01.L").y + h.Head("foot.L").y) / 2;
+            // the body's half width at the shoulders and its back (min z) at each height
+            float x0 = 0, zf = -1, zb0 = 0;
             for (int i = 0; i < h.n; i++)
             {
                 var rg = h.region[i];
-                if (HumanDB.vpart[i] == 0 && Mathf.Abs(P[i].y - (yTop - 0.05f)) < 0.02f && (rg == Region.Torso || rg == Region.UpperArm))
-                { x0 = Mathf.Max(x0, Mathf.Abs(P[i].x)); z0 = Mathf.Min(z0, P[i].z); z1 = Mathf.Max(z1, P[i].z); }
+                if (HumanDB.vpart[i] != 0) continue;
+                if (Mathf.Abs(P[i].y - (yTop - 0.05f)) < 0.02f && (rg == Region.Torso || rg == Region.UpperArm)) { x0 = Mathf.Max(x0, Mathf.Abs(P[i].x)); zb0 = Mathf.Min(zb0, P[i].z); zf = Mathf.Max(zf, P[i].z); }
             }
             if (x0 <= 0) return;
-            int rings = 18, segs = 48; var v = new List<Vector3>(); var idx = new List<int>();
-            for (int r = 0; r <= rings; r++)
+            const int NB = 40; var back = new float[NB + 1];
+            for (int k = 0; k <= NB; k++)
             {
-                float t = r / (float)rings, y = yTop - (yTop - yBot) * t;
-                float rx = x0 * (0.82f + 0.3f * t) + 0.05f, rz = ((z1 - z0) / 2 + 0.05f) * (1 + 0.6f * t), cz = (z0 + z1) / 2 - 0.015f - 0.05f * t;
-                for (int sg = 0; sg <= segs; sg++)
-                {
-                    float a = 2 * Mathf.PI * sg / segs;
-                    float fold = 1 + (0.01f + 0.05f * t) * Mathf.Sin(a * 7 + t * 2);
-                    v.Add(new Vector3(Mathf.Cos(a) * rx * fold, y, cz + Mathf.Sin(a) * rz * fold));
-                }
+                float y = yTop - (yTop - yBot) * k / NB, zb = 1;
+                for (int i = 0; i < h.n; i++)
+                    if (HumanDB.vpart[i] == 0 && Mathf.Abs(P[i].y - y) < 0.015f && Mathf.Abs(P[i].x) < 0.2f) zb = Mathf.Min(zb, P[i].z);
+                if (zb > 0.5f) zb = k > 0 ? back[k - 1] : zb0;
+                back[k] = zb - 0.075f;                                 // (clear of the plates)
+                if (k > 0) back[k] = Mathf.Min(back[k], back[k - 1] - 0.004f);      // it drapes: never back in under a bulge
             }
-            for (int r = 0; r < rings; r++) for (int sg = 0; sg < segs; sg++)
+            float W0 = 2 * (x0 + 0.03f), W1 = W0 * 1.7f, depth = (zf - zb0) * 0.5f;
+            System.Func<float, float, Vector3> pt = (u, v) =>
+            {
+                float y = yTop - (yTop - yBot) * v, W = Mathf.Lerp(W0, W1, v), half = W / 2, x = (u - 0.5f) * W;
+                float zc = back[Mathf.Clamp(Mathf.RoundToInt(v * NB), 0, NB)];
+                // round the body at the top (the edges come forward over the shoulders), flatter lower down
+                float rz = depth * Mathf.Lerp(0.95f, 0.25f, Mathf.Sqrt(v)), q = Mathf.Clamp01(Mathf.Abs(x) / (half * 1.06f));
+                float z = zc + rz * (1 - Mathf.Sqrt(1 - q * q));
+                z -= (0.006f + 0.03f * v) * (0.5f + 0.5f * Mathf.Cos(u * Mathf.PI * 2 * 3.5f));     // folds hanging from the gathers
+                return new Vector3(x, y, z);
+            };
+            capeShape = new Vector4(yTop, yBot, W0, W1);
+            capeRest = new Vector3[CAPE_C * CAPE_R]; capeNrm = new Vector3[CAPE_C * CAPE_R];
+            for (int r = 0; r < CAPE_R; r++) for (int c = 0; c < CAPE_C; c++)
                 {
-                    float am = 2 * Mathf.PI * (sg + 0.5f) / segs;
-                    if (Mathf.Sin(am) > 0.2f) continue;          // (the front of the grid is not drawn)
-                    int a = r * (segs + 1) + sg, b2 = a + segs + 1; idx.Add(a); idx.Add(b2); idx.Add(a + 1); idx.Add(a + 1); idx.Add(b2); idx.Add(b2 + 1);
+                    float u = c / (CAPE_C - 1f), v = r / (CAPE_R - 1f), e = 0.01f;
+                    var p0 = pt(u, v); capeRest[r * CAPE_C + c] = p0;
+                    var n = Vector3.Cross(pt(Mathf.Min(1, u + e), v) - pt(Mathf.Max(0, u - e), v), pt(u, Mathf.Min(1, v + e)) - pt(u, Mathf.Max(0, v - e))).normalized;
+                    if (Vector3.Dot(n, new Vector3(p0.x, 0, p0.z - (zf + zb0) / 2)) < 0) n = -n;          // outward, away from the body
+                    capeNrm[r * CAPE_C + c] = n;
                 }
-            var m = new Mesh(); m.SetVertices(v); m.SetTriangles(idx, 0); m.RecalculateNormals(); m.RecalculateBounds();
+            // the drawn cloth: a finer grid on the same shape
+            int MC = 26, MR = 40; var vs = new List<Vector3>(); var idx = new List<int>();
+            for (int r = 0; r <= MR; r++) for (int c = 0; c <= MC; c++) vs.Add(pt(c / (float)MC, r / (float)MR));
+            for (int r = 0; r < MR; r++) for (int c = 0; c < MC; c++)
+                { int a0 = r * (MC + 1) + c, b0 = a0 + MC + 1; idx.Add(a0); idx.Add(b0); idx.Add(a0 + 1); idx.Add(a0 + 1); idx.Add(b0); idx.Add(b0 + 1); }
+            var m = new Mesh(); m.SetVertices(vs); m.SetTriangles(idx, 0); m.RecalculateNormals(); m.RecalculateBounds();
             MeshGen.AddGlyphUV(m, true);
+            { var bb = m.bounds; bb.Expand(2f); m.bounds = bb; }        // (the simulation swings it well beyond its rest shape)
             var g = Group("Cape"); skirt = Part(m, "CAPE", g, Vector3.zero).transform;
-            skirtRest = v.ToArray(); skirtRings = rings; skirtSegs = segs;
             Attach("spine01", g, Vector3.zero, Quaternion.identity);
         }
 

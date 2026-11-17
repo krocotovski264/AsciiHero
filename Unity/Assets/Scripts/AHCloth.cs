@@ -13,13 +13,15 @@ using UnityEngine;
 
 namespace AsciiHero
 {
-    public class Cloak
+    public interface ICloth { void Update(float dt, Vector3 windW); void Apply(MaterialPropertyBlock mpb, System.Collections.Generic.IEnumerable<Renderer> rs); }
+
+    public class Cloak : ICloth
     {
         public const int COLS = 12, ROWS = 8;
         readonly Transform skirt, model; readonly Human H;
         readonly Vector3[] restL = new Vector3[COLS * ROWS];          // rest shape, skirt-local
         readonly Vector3[] x = new Vector3[COLS * ROWS], ox = new Vector3[COLS * ROWS], rest = new Vector3[COLS * ROWS];
-        readonly Vector4[] disp = new Vector4[COLS * ROWS];
+        readonly Vector4[] disp = new Vector4[CapeSim.GRID];          // (sized for the cloak's grid: the shaders' array is one size)
         struct Link { public int a, b; public float len, k; }
         readonly System.Collections.Generic.List<Link> links = new System.Collections.Generic.List<Link>();
         public readonly Vector4 map;
@@ -137,7 +139,174 @@ namespace AsciiHero
         public void Apply(MaterialPropertyBlock mpb, System.Collections.Generic.IEnumerable<Renderer> rs)
         {
             Shader.SetGlobalVectorArray("_ClothGrid", disp);
+            Shader.SetGlobalVector("_ClothMap", map); Shader.SetGlobalVectorArray("_ClothNrm", disp);
+            foreach (var r in rs)
+            {
+                if (r == null) continue;
+                r.GetPropertyBlock(mpb); mpb.SetFloat("_ClothSim", 1); r.SetPropertyBlock(mpb);
+            }
+        }
+    }
+
+    // ---- the knight's cloak ----
+    // Built the way game cloth for capes is usually set up (Unreal's Chaos Cloth: kinematic top, long-range attachments,
+    // max distance, backstop, anim drive; T.-Y. Kim, N. Chentanez, M. Mueller, "Long Range Attachments - A Method to
+    // Simulate Inextensible Clothing in Computer Games", SCA 2012):
+    //   * a 10 x 14 grid of particles on the cloak's rest shape; the top row is fixed to the shoulders;
+    //   * Verlet integration at 90 Hz: gravity, wind pressing on the cloth along its normal (so it bellies and flaps),
+    //     air drag; part of the body's own movement is carried straight into the cloth (inertia scale), so a sprint or a
+    //     dash does not leave it behind;
+    //   * distance constraints: stiff against stretching, soft against squashing (the cloth folds instead of bulging),
+    //     shear and bending links;
+    //   * long-range attachments: no particle may be further from its column's top than the cloth between them is long -
+    //     the cloth can never stretch, however fast the body goes;
+    //   * collisions with capsules round the chest, the hips, the upper arms and the legs, and a backstop: each particle
+    //     keeps out of a sphere lying on the body side of its rest place, so the cloak can swing out and round but never
+    //     into the armour (which is what happened after a dash);
+    //   * a max distance from the rest place growing down the cloak, and a weak pull back to it (anim drive).
+    // The grid's displacement and its normals go to the shaders, which move and light every vertex of the cloak.
+    public class CapeSim : ICloth
+    {
+        public const int C = Character.CAPE_C, R = Character.CAPE_R, GRID = 144;
+        readonly Transform cape, model; readonly Human H;
+        readonly Vector3[] restL, nrmL, rest = new Vector3[C * R], rn = new Vector3[C * R], x = new Vector3[C * R], ox = new Vector3[C * R];
+        readonly float[] tether = new float[C * R];
+        readonly Vector4[] disp = new Vector4[GRID], nrm = new Vector4[GRID];
+        struct Link { public int a, b; public float len, ks, kc; }
+        readonly System.Collections.Generic.List<Link> links = new System.Collections.Generic.List<Link>();
+        readonly Vector4 map, map2;
+        float acc; bool ready; Vector3 lastAnchor;
+        const float STEP = 1f / 90f;
+
+        public CapeSim(Character ch)
+        {
+            cape = ch.skirt; model = ch.model; H = ch.human; restL = ch.capeRest; nrmL = ch.capeNrm;
+            map = new Vector4(0, ch.capeShape.x, ch.capeShape.y, 1); map2 = new Vector4(ch.capeShape.z, ch.capeShape.w, C, R);
+            float sc = cape.lossyScale.y;
+            System.Action<int, int, float, float> add = (a, b, ks, kc) => links.Add(new Link { a = a, b = b, len = (restL[a] - restL[b]).magnitude * sc, ks = ks, kc = kc });
+            for (int r = 0; r < R; r++)
+                for (int c = 0; c < C; c++)
+                {
+                    int i = r * C + c;
+                    if (c + 1 < C) add(i, i + 1, 1f, 0.25f);                                   // across
+                    if (r + 1 < R) add(i, i + C, 1f, 0.5f);                                    // down
+                    if (r + 1 < R && c + 1 < C) { add(i, i + C + 1, 0.5f, 0.1f); add(i + 1, i + C, 0.5f, 0.1f); }   // shear
+                    if (c + 2 < C) add(i, i + 2, 0.2f, 0.02f);                                 // bend
+                    if (r + 2 < R) add(i, i + 2 * C, 0.3f, 0.05f);
+                }
+            // the length of cloth from each particle up its column to the shoulders (the tether's limit)
+            for (int c = 0; c < C; c++) { float L = 0; for (int r = 1; r < R; r++) { L += (restL[r * C + c] - restL[(r - 1) * C + c]).magnitude * sc; tether[r * C + c] = L * 1.02f; } }
+        }
+
+        // body capsules
+        readonly Vector3[] capA = new Vector3[10], capB = new Vector3[10]; readonly float[] capR = new float[10]; int nCap;
+        void Capsules()
+        {
+            nCap = 0;
+            System.Action<string, string, float> cap = (a, b, r) =>
+            {
+                var ta = H.Bone(a); var tb = H.Bone(b); if (ta == null || tb == null || ta.lossyScale.x < 0.01f) return;
+                capA[nCap] = ta.position; capB[nCap] = tb.position; capR[nCap] = r; nCap++;
+            };
+            cap("spine01", "spine04", 0.19f); cap("spine05", "root", 0.18f);
+            cap("upperarm01.L", "lowerarm01.L", 0.085f); cap("upperarm01.R", "lowerarm01.R", 0.085f);
+            cap("upperleg01.L", "lowerleg01.L", 0.11f); cap("upperleg01.R", "lowerleg01.R", 0.11f);
+            cap("lowerleg01.L", "foot.L", 0.08f); cap("lowerleg01.R", "foot.R", 0.08f);
+        }
+        void Collide(int i, int r)
+        {
+            for (int k = 0; k < nCap; k++)
+            {
+                Vector3 ab = capB[k] - capA[k]; float t = Mathf.Clamp01(Vector3.Dot(x[i] - capA[k], ab) / Mathf.Max(ab.sqrMagnitude, 1e-6f));
+                Vector3 p = capA[k] + ab * t, d = x[i] - p; float l = d.magnitude, rr = capR[k] + 0.025f;
+                if (l < rr) x[i] = p + (l > 1e-5f ? d / l : -model.forward) * rr;
+            }
+            // backstop: out of a sphere on the body side of the rest place
+            const float BR = 0.45f;
+            Vector3 cs = rest[i] - rn[i] * BR, e = x[i] - cs; float el = e.magnitude;
+            if (el < BR - 0.012f) x[i] = cs + (el > 1e-5f ? e / el : rn[i]) * (BR - 0.012f);
+            // max distance from the rest place
+            float v = r / (R - 1f), md = 0.06f + 0.85f * v;
+            Vector3 dr = x[i] - rest[i]; if (dr.sqrMagnitude > md * md) x[i] = rest[i] + dr.normalized * md;
+            float g = model.position.y + 0.02f; if (x[i].y < g) x[i].y = g;
+        }
+
+        public void Update(float dt, Vector3 windW)
+        {
+            if (cape == null || restL == null) return;
+            for (int i = 0; i < rest.Length; i++) { rest[i] = cape.TransformPoint(restL[i]); rn[i] = cape.TransformDirection(nrmL[i]).normalized; }
+            Vector3 anchor = cape.position;
+            if (!ready || (anchor - lastAnchor).sqrMagnitude > 4f)
+            {   // start, a respawn, a new place: the cloth at rest
+                for (int i = 0; i < x.Length; i++) x[i] = ox[i] = rest[i];
+                ready = true; lastAnchor = anchor;
+            }
+            // inertia scale: 60 % of the body's movement this frame goes straight into the cloth (positions and their
+            // history alike, so it brings no speed of its own) - the rest it has to catch up with
+            Vector3 mv = (anchor - lastAnchor) * 0.6f; lastAnchor = anchor;
+            for (int i = C; i < x.Length; i++) { x[i] += mv; ox[i] += mv; }
+            Capsules();
+            acc = Mathf.Min(acc + dt, STEP * 4);
+            float t = Time.time;
+            while (acc >= STEP)
+            {
+                acc -= STEP;
+                for (int i = 0; i < x.Length; i++)
+                {
+                    int r = i / C, c = i % C; float v = r / (R - 1f);
+                    if (r == 0) { ox[i] = x[i]; x[i] = rest[i]; continue; }                // pinned to the shoulders
+                    Vector3 vel = (x[i] - ox[i]) / STEP;
+                    // wind: the air pushes on the cloth along its normal, by how fast it meets it; it gusts and flutters
+                    Vector3 n = NormalAt(r, c);
+                    float fl = 0.7f + 0.6f * Mathf.PerlinNoise(t * 1.7f + c * 0.31f, r * 0.27f + t * 0.9f);
+                    Vector3 rel = windW * fl - vel;
+                    Vector3 a = Physics.gravity + n * (Vector3.Dot(rel, n) * 2.2f) + rel * 0.15f;
+                    Vector3 step = (x[i] - ox[i]) * 0.986f;                                 // drag
+                    ox[i] = x[i]; x[i] += step + a * (STEP * STEP);
+                    x[i] += (rest[i] - x[i]) * (0.003f + 0.03f * (1 - v) * (1 - v));       // anim drive, weak and weaker down
+                }
+                for (int it = 0; it < 5; it++)
+                {
+                    foreach (var L in links)
+                    {
+                        Vector3 d = x[L.b] - x[L.a]; float l = d.magnitude; if (l < 1e-6f) continue;
+                        float wa = L.a < C ? 0 : 1, wb = L.b < C ? 0 : 1; if (wa + wb == 0) continue;
+                        float k = l > L.len ? L.ks : L.kc;
+                        Vector3 corr = d * ((l - L.len) / l * k / (wa + wb));
+                        x[L.a] += corr * wa; x[L.b] -= corr * wb;
+                    }
+                    for (int i = C; i < x.Length; i++)
+                    {
+                        int r = i / C, c = i % C;
+                        // long-range attachment to its column's top
+                        Vector3 top = x[c], d = x[i] - top; float l = d.magnitude;
+                        if (l > tether[i]) x[i] = top + d * (tether[i] / l);
+                        Collide(i, r);
+                    }
+                }
+            }
+            for (int i = 0; i < x.Length; i++)
+            {
+                Vector3 d = x[i] - rest[i];
+                if (!(d.sqrMagnitude < 4f)) { d = Vector3.zero; x[i] = ox[i] = rest[i]; }      // (never flies off, never NaN)
+                disp[i] = d;
+                Vector3 n = NormalAt(i / C, i % C); nrm[i] = n;
+            }
+        }
+        Vector3 NormalAt(int r, int c)
+        {
+            int i = r * C + c;
+            Vector3 du = x[r * C + Mathf.Min(c + 1, C - 1)] - x[r * C + Mathf.Max(c - 1, 0)];
+            Vector3 dv = x[Mathf.Min(r + 1, R - 1) * C + c] - x[Mathf.Max(r - 1, 0) * C + c];
+            Vector3 n = Vector3.Cross(du, dv); float l = n.magnitude; if (l < 1e-7f) return rn[i];
+            n /= l; return Vector3.Dot(n, rn[i]) < 0 ? -n : n;
+        }
+        public void Apply(MaterialPropertyBlock mpb, System.Collections.Generic.IEnumerable<Renderer> rs)
+        {
+            Shader.SetGlobalVectorArray("_ClothGrid", disp);
+            Shader.SetGlobalVectorArray("_ClothNrm", nrm);
             Shader.SetGlobalVector("_ClothMap", map);
+            Shader.SetGlobalVector("_ClothMap2", map2);
             foreach (var r in rs)
             {
                 if (r == null) continue;
