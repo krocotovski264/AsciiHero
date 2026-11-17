@@ -28,68 +28,88 @@ namespace AsciiHero
         void BuildStory()
         {
             smap = StoryMap.Load("Maps/start");
-            // the inns: runs of tavern tiles joined side to side
-            var tavern = new Dictionary<long, StoryMap.Tile>(); var other = new HashSet<long>();
-            foreach (var t in smap.tiles) if (t.b == "tavern") tavern[StoryLocation.Key(t.i, t.j)] = t; else other.Add(StoryLocation.Key(t.i, t.j));
-            var regions = new List<HashSet<long>>(); var seen = new HashSet<long>();
-            foreach (var kv in tavern)
+            // the places: every run of tiles of one kind joined side to side - inns (tavern), caves (cave, the round
+            // arenas with them), the open land (everything else)
+            string Kind(string b) { return b == "tavern" ? "inn" : b == "cave" || b == "crystal" ? "cave" : "out"; }
+            var tileAt = new Dictionary<long, StoryMap.Tile>(); foreach (var t in smap.tiles) tileAt[StoryLocation.Key(t.i, t.j)] = t;
+            regionOf.Clear(); regionTiles.Clear(); regionKind.Clear();
+            int nIn = 0, nCave = 0, nOut = 0;
+            foreach (var kv in tileAt)
             {
-                if (seen.Contains(kv.Key)) continue;
-                var set = new HashSet<long>(); var q = new Queue<StoryMap.Tile>(); q.Enqueue(kv.Value); seen.Add(kv.Key);
+                if (regionOf.ContainsKey(kv.Key)) continue;
+                string kind = Kind(kv.Value.b); string name = kind == "inn" ? "inn" + nIn++ : kind == "cave" ? "cave" + nCave++ : "out" + nOut++;
+                var set = new HashSet<long>(); var q = new Queue<StoryMap.Tile>(); q.Enqueue(kv.Value); regionOf[kv.Key] = name;
                 while (q.Count > 0)
                 {
                     var t = q.Dequeue(); set.Add(StoryLocation.Key(t.i, t.j));
                     foreach (var d in new[] { new Vector2Int(1, 0), new Vector2Int(-1, 0), new Vector2Int(0, 1), new Vector2Int(0, -1) })
                     {
                         long nk = StoryLocation.Key(t.i + d.x, t.j + d.y); StoryMap.Tile nt;
-                        if (!seen.Contains(nk) && tavern.TryGetValue(nk, out nt)) { seen.Add(nk); q.Enqueue(nt); }
+                        if (!regionOf.ContainsKey(nk) && tileAt.TryGetValue(nk, out nt) && Kind(nt.b) == kind) { regionOf[nk] = name; q.Enqueue(nt); }
                     }
                 }
-                regions.Add(set);
+                regionTiles[name] = set; regionKind[name] = kind;
             }
-            // the ways in: where an inn's tile meets a tile of the dungeon - the middle edge of the longest shared run
+            // the ways between: for every two places that touch, the middle of their shared edges (one with no wall
+            // drawn across it). Inns keep their own door inside (the test world's tavern): its point is the door.
             sPass.Clear();
-            var byBiome = new Dictionary<long, string>(); foreach (var t in smap.tiles) byBiome[StoryLocation.Key(t.i, t.j)] = t.b;
-            for (int r = 0; r < regions.Count; r++)
-            {
-                var edges = new List<KeyValuePair<Vector2, Vector2>>(); var outerB = new List<string>();
-                foreach (var key in regions[r])
+            var pairs = new Dictionary<string, List<KeyValuePair<Vector2, Vector2>>>();
+            foreach (var kv in tileAt)
+                foreach (var d in new[] { new Vector2Int(1, 0), new Vector2Int(0, 1) })
                 {
-                    var t = tavern[key];
-                    foreach (var d in new[] { new Vector2Int(1, 0), new Vector2Int(-1, 0), new Vector2Int(0, 1), new Vector2Int(0, -1) })
-                    {
-                        long nk = StoryLocation.Key(t.i + d.x, t.j + d.y); string nb;
-                        if (!other.Contains(nk) || !byBiome.TryGetValue(nk, out nb)) continue;
-                        var c = new Vector2((t.i + 0.5f) * smap.tile, (t.j + 0.5f) * smap.tile) + new Vector2(d.x, d.y) * smap.tile * 0.5f;
-                        edges.Add(new KeyValuePair<Vector2, Vector2>(c, new Vector2(-d.x, -d.y))); outerB.Add(nb);      // n: from the dungeon into the inn
-                    }
+                    long nk = StoryLocation.Key(kv.Value.i + d.x, kv.Value.j + d.y); if (!tileAt.ContainsKey(nk)) continue;
+                    string ra = regionOf[kv.Key], rb = regionOf[nk]; if (ra == rb) continue;
+                    var c = new Vector2((kv.Value.i + 0.5f) * smap.tile, (kv.Value.j + 0.5f) * smap.tile) + new Vector2(d.x, d.y) * smap.tile * 0.5f;
+                    string key = string.CompareOrdinal(ra, rb) < 0 ? ra + "|" + rb : rb + "|" + ra; var n = new Vector2(d.x, d.y); if (string.CompareOrdinal(ra, rb) > 0) n = -n;
+                    List<KeyValuePair<Vector2, Vector2>> l; if (!pairs.TryGetValue(key, out l)) { l = new List<KeyValuePair<Vector2, Vector2>>(); pairs[key] = l; }
+                    l.Add(new KeyValuePair<Vector2, Vector2>(c, n));          // n: out of the first place of the pair
                 }
-                if (edges.Count == 0) continue;
-                // prefer an edge with no wall drawn across it, nearest the middle of them all
+            var innDoor = new Vector2(-3.7f, -3.6f); var innOut = new Vector2(0, -1);       // the tavern's door (map = mirrored local), the way out
+            foreach (var kv in pairs)
+            {
+                var ab = kv.Key.Split('|'); var edges = kv.Value;
                 Vector2 mid = Vector2.zero; foreach (var e in edges) mid += e.Key; mid /= edges.Count;
                 int best = 0; float bs = 1e9f;
                 for (int i = 0; i < edges.Count; i++)
                 {
-                    float s = (edges[i].Key - mid).magnitude;
-                    foreach (var w in smap.walls) if (SegDist(edges[i].Key, w.a, w.b) < 0.8f) s += 50;
-                    if (s < bs) { bs = s; best = i; }
+                    float sc = (edges[i].Key - mid).magnitude;
+                    foreach (var w in smap.walls) if (SegDist(edges[i].Key, w.a, w.b) < 0.8f) sc += 50;
+                    if (sc < bs) { bs = sc; best = i; }
                 }
-                sPass.Add(new StoryPassage { p = edges[best].Key, n = edges[best].Value, from = "main", to = "inn" + r, style = outerB[best] == "cave" ? "hole" : "door" });
+                string ka = regionKind[ab[0]], kb = regionKind[ab[1]];
+                var g = new StoryPassage { from = ab[0], to = ab[1], pA = edges[best].Key, nA = edges[best].Value, pB = edges[best].Key, nB = -edges[best].Value };
+                string Look(string mine, string other) { return mine == "inn" ? "inn" : mine == "cave" ? (other == "out" ? "hole" : "hole") : other == "inn" ? "house" : other == "cave" ? "mouth" : "door"; }
+                g.styleA = Look(ka, kb); g.styleB = Look(kb, ka);
+                if (ka == "inn") { g.pA = innDoor; g.nA = innOut; }
+                if (kb == "inn") { g.pB = innDoor; g.nB = innOut; }
+                sPass.Add(g);
             }
-            // the places, far from the test world (each one a little apart)
-            var mainSet = new HashSet<long>(other);
-            sLocs.Clear();
-            sMain = StoryLocation.Build(mats, smap, "main", mainSet, true, sPass, STORY_AT, 11);
-            sLocs.Add(sMain);
-            for (int r = 0; r < regions.Count; r++) sLocs.Add(StoryLocation.Build(mats, smap, "inn" + r, regions[r], false, sPass, STORY_AT + new Vector3(600 + 400 * r, 0, 0), 20 + r));
+            // the places, far from the test world and from each other
+            var caveTiles = new HashSet<long>(); foreach (var kv in regionKind) if (kv.Value == "cave") caveTiles.UnionWith(regionTiles[kv.Key]);
+            sLocs.Clear(); int k2 = 0;
+            foreach (var kv in regionKind)
+            {
+                var at = STORY_AT + new Vector3(500 * k2, 0, 0); k2++;
+                StoryLocation L;
+                if (kv.Value == "inn") L = StoryLocation.BuildInn(mats, smap, kv.Key, sPass, at, 20 + k2);
+                else
+                {
+                    bool circles = false; foreach (var c in smap.circles) { long ck = StoryLocation.Key(Mathf.FloorToInt(c.c.x / smap.tile), Mathf.FloorToInt(c.c.y / smap.tile)); if (regionTiles[kv.Key].Contains(ck)) circles = true; }
+                    L = StoryLocation.Build(mats, smap, kv.Key, regionTiles[kv.Key], circles, sPass, at, 11 + k2, kv.Value == "out", kv.Value == "out" ? caveTiles : null);
+                }
+                sLocs.Add(L);
+            }
+            sMain = null; foreach (var l in sLocs) if (l.outdoor && sMain == null) sMain = l;
             foreach (var l in sLocs)
             {
-                l.title = l == sMain ? "Подземелье" : "Трактир";
-                foreach (var g in l.passages) if (g.to == l.region) l.title = g.style == "hole" ? "Крысиный трактир" : "Трактир «Пьяный дракон»";
-                l.ambSky = Mats.Hex(0x40506a) * 0.16f; l.ambEq = Mats.Hex(0x303840) * 0.14f; l.ambGround = Mats.Hex(0x181410) * 0.12f; l.moonK = 0; l.heroLightK = 1.05f; l.exposure = 1.3f;
+                string kind = regionKind[l.region];
+                l.title = kind == "cave" ? "Пещеры" : kind == "out" ? "Поляна" : "Трактир";
+                if (kind == "inn") foreach (var g in l.passages) l.title = regionKind[g.Other(l.region)] == "cave" ? "Крысиный трактир" : "Трактир «Пьяный дракон»";
+                if (kind == "out") { l.ambSky = Mats.Hex(0x8fa4d8) * 0.55f; l.ambEq = Mats.Hex(0x4a5a58) * 0.55f; l.ambGround = Mats.Hex(0x1a2414) * 0.55f; l.moonK = 1; l.heroLightK = 1.6f; l.exposure = 1.3f; }
+                else { l.ambSky = Mats.Hex(0x40506a) * 0.16f; l.ambEq = Mats.Hex(0x303840) * 0.14f; l.ambGround = Mats.Hex(0x181410) * 0.12f; l.moonK = 0; l.heroLightK = 1.05f; l.exposure = 1.3f; }
+                if (kind == "inn") { l.ambSky = Mats.Hex(0x50465a) * 0.45f; l.ambEq = Mats.Hex(0x342b32) * 0.45f; l.ambGround = Mats.Hex(0x18100a) * 0.45f; l.heroLightK = 1f; }
                 GlyphLayer.Build(l.root);
                 CollectGlows(l.root);
-                foreach (var g in l.passages) if (g.to == l.region) l.spawn = l.ToWorld(g.p + g.n * 1.3f) - l.origin;     // (an inn: by its way in)
                 var LL = l; l.addRipple = (x, z, a) => AddRipple(x + LL.origin.x, z + LL.origin.z, a);
                 l.onDrip = (x, z) => Sound("drip", 0.5f, new Vector3(x + LL.origin.x, 0, z + LL.origin.z));
             }
@@ -97,6 +117,9 @@ namespace AsciiHero
             SpawnStoryThings();          // (while the places are on: the characters of what is switched off are not laid out)
             foreach (var l in sLocs) l.SetActive(false);
         }
+        readonly Dictionary<long, string> regionOf = new Dictionary<long, string>();
+        readonly Dictionary<string, HashSet<long>> regionTiles = new Dictionary<string, HashSet<long>>();
+        readonly Dictionary<string, string> regionKind = new Dictionary<string, string>();
         static float SegDist(Vector2 p, Vector2 a, Vector2 b)
         {
             var ab = b - a; float t = Mathf.Clamp01(Vector2.Dot(p - a, ab) / Mathf.Max(1e-6f, ab.sqrMagnitude)); return (a + ab * t - p).magnitude;
@@ -104,10 +127,22 @@ namespace AsciiHero
         /// which place a point of the map belongs to
         StoryLocation SLocAt(Vector2 m)
         {
-            foreach (var l in sLocs) if (l != sMain && l.Walk(m)) return l;
+            string r; long key = StoryLocation.Key(Mathf.FloorToInt(m.x / smap.tile), Mathf.FloorToInt(m.y / smap.tile));
+            if (!regionOf.TryGetValue(key, out r)) foreach (var c in smap.circles) if ((m - c.c).magnitude < c.r) { long ck = StoryLocation.Key(Mathf.FloorToInt(c.c.x / smap.tile), Mathf.FloorToInt(c.c.y / smap.tile)); regionOf.TryGetValue(ck, out r); }
+            foreach (var l in sLocs) if (l.region == r) return l;
             return sMain;
         }
-
+        /// where a point of the map stands in its place (in an inn: the same spot of the room, scaled into the tavern)
+        Vector3 SWorld(StoryLocation L, Vector2 m)
+        {
+            if (L.inn == null) return L.ToWorld(m);
+            float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+            foreach (var key in regionTiles[L.region]) { int i = (int)(key >> 32), j = (int)(key & 0xffffffff); x0 = Mathf.Min(x0, i * smap.tile); y0 = Mathf.Min(y0, j * smap.tile); x1 = Mathf.Max(x1, (i + 1) * smap.tile); y1 = Mathf.Max(y1, (j + 1) * smap.tile); }
+            float u = Mathf.InverseLerp(x0, x1, m.x), v = Mathf.InverseLerp(y0, y1, m.y);
+            var b = L.bounds; var lp = new Vector2(Mathf.Lerp(b.xMax - 1f, b.xMin + 1f, u), Mathf.Lerp(b.yMin + 1f, b.yMax - 1f, v));
+            lp = L.Collide(lp, 0.4f);
+            return new Vector3(lp.x, 0, lp.y) + L.origin;
+        }
         /// the new game (or the game going on, if one is): the hero wakes in the dungeon
         void StartStory(bool fresh)
         {
@@ -115,11 +150,11 @@ namespace AsciiHero
             catch (System.Exception e) { Debug.LogException(e); ShowToast("Не удалось собрать локацию"); return; }
             if (fresh && sDone.Count > 0) { ResetStory(); }
             bool first = !sDone.Contains("wake");
-            Vector3 at = sMain.SpawnW;
-            foreach (var e in smap.ents) if (e.type == "hero") { at = sMain.ToWorld(e.p); sMain.spawn = at - sMain.origin; }
+            var hl = sMain; Vector3 at = sMain.SpawnW;
+            foreach (var e in smap.ents) if (e.type == "hero") { hl = SLocAt(e.p); at = SWorld(hl, e.p); hl.spawn = at - hl.origin; }
             if (!first && sLast != null) { StoryGo(sLast, sLastPos, sLastHeading); return; }
             if (first) { RestoreBody(); if (player != null) player.SetLimbs(limbs); }
-            StoryGo(sMain, at, Mathf.PI * 0.5f);
+            StoryGo(hl, at, Mathf.PI * 0.5f);
             if (first) { player.PlayCut("wake", true); Play("wake"); }
         }
         StoryLocation sLast; Vector3 sLastPos; float sLastHeading; float visT;
@@ -151,33 +186,55 @@ namespace AsciiHero
             ShowToast(L.TitleAt(pos));
         }
         /// the light follows the ground under the hero: dark caves (his own glow), the night meadow, the warm inn
+        // ---- the clock: the game starts in the evening of the first day of summer ----
+        float gameClock = Sky.DAY_S * 0.585f;
+        public int GameDay => Mathf.FloorToInt(gameClock / Sky.DAY_S);
+        void StoryClock(float dt)
+        {
+            gameClock += dt;
+            float d = gameClock / Sky.DAY_S, ph = d - Mathf.Floor(d);
+            // morning to evening takes 16 of the day's 24 minutes: stretch the light part, squeeze the night
+            float lightFrac = Sky.LIGHT_S / Sky.DAY_S;
+            float keyPh = ph < lightFrac ? ph / lightFrac * 0.667f : 0.667f + (ph - lightFrac) / (1 - lightFrac) * 0.333f;
+            skyS.SetClock(keyPh);
+            skyS.season = (1 + GameDay / Sky.SEASON_DAYS) % 4;
+        }
+        /// the light follows the place: outside the sky (its clock, its season, its weather), the caves dark (the hero's
+        /// own glow), the inns warm
         void StoryLight(bool force)
         {
             var L = loc as StoryLocation; if (L == null) return;
-            string b = L.BiomeAtW(pos) ?? sBiome ?? "cave";
+            StoryClock(Time.deltaTime);
+            if (L.outdoor)
+            {
+                skyS.Update(Time.deltaTime);
+                Color atn = skyS.ambTint * skyS.ambK;
+                SetAmbient(L.ambSky * atn, L.ambEq * atn, L.ambGround * atn);
+                if (moonLight != null) { moonLight.intensity = skyS.sunK * L.moonK; moonLight.enabled = moonLight.intensity > 0.01f; moonLight.color = skyS.sunCol; moonLight.transform.rotation = Quaternion.LookRotation(-skyS.sunDir); }
+                heroLight.intensity = L.heroLightK * skyS.heroK; ascii.exposure = L.exposure * skyS.expK;
+                float amt = skyS.Rain + skyS.Snow;
+                if (precipGo == null && amt > 0.01f) precipGo = GlyphLayer.MakePrecip(4000);
+                if (precipGo != null)
+                {
+                    if (precipGo.activeSelf != amt > 0.01f) precipGo.SetActive(amt > 0.01f);
+                    Shader.SetGlobalVector("_AsciiPrecipW", new Vector4(skyS.Rain, skyS.Snow, skyS.DayK, 0));
+                    Shader.SetGlobalVector("_PrecipBox", new Vector4(camTgt.x, 0, camTgt.z, 34));
+                }
+                sBiome = "out";
+                return;
+            }
+            string b = L.inn != null ? "tavern" : "cave";
             if (!force && b == sBiome) return;
             sBiome = b;
-            Sky.Neutral();
-            if (b == "meadow")
-            {
-                if (moonLight != null) { moonLight.enabled = true; moonLight.intensity = 0.35f; moonLight.color = Mats.Hex(0x8aa6ff); moonLight.transform.rotation = Quaternion.LookRotation(-new Vector3(-0.3f, 0.75f, -0.5f).normalized); }
-                heroLight.intensity = 1.3f; SetAmbient(Mats.Hex(0x50607e) * 0.4f, Mats.Hex(0x343c44) * 0.35f, Mats.Hex(0x141a10) * 0.3f);
-            }
-            else if (b == "tavern")
-            {
-                if (moonLight != null) moonLight.enabled = false;
-                heroLight.intensity = 1.5f; SetAmbient(Mats.Hex(0x50465a) * 0.45f, Mats.Hex(0x342b32) * 0.45f, Mats.Hex(0x18100a) * 0.45f);
-            }
-            else
-            {
-                if (moonLight != null) moonLight.enabled = false;
-                heroLight.intensity = 1.6f * L.heroLightK; SetAmbient(L.ambSky, L.ambEq, L.ambGround);
-            }
+            Sky.Neutral(); ascii.exposure = L.exposure;
+            if (moonLight != null) moonLight.enabled = false;
+            heroLight.intensity = 1.6f * L.heroLightK; SetAmbient(L.ambSky, L.ambEq, L.ambGround);
             if (precipGo != null) precipGo.SetActive(false);
         }
         void StoryHide()
         {
             Shader.SetGlobalFloat("_VisOn", 0);
+            if (skyS != null) skyS.clock = false;
             foreach (var l in sLocs) l.SetActive(false);
             if (story && loc is StoryLocation) { sLast = (StoryLocation)loc; sLastPos = pos; sLastHeading = player != null ? player.heading : 0; }
             story = false; letter = 0; sDir = null;
@@ -190,14 +247,18 @@ namespace AsciiHero
             var m = L.ToMap(pos);
             foreach (var g in L.passages)
             {
-                if ((m - g.p).magnitude > 1.05f) continue;
-                bool fromHere = g.from == L.region; var into = fromHere ? g.n : -g.n;       // the way through, from this side
-                var v = player.Velocity; if (new Vector2(-v.x, v.z).sqrMagnitude > 0.01f && Vector2.Dot(new Vector2(-v.x, v.z).normalized, into) < 0.2f) continue;
-                var other = SLoc(fromHere ? g.to : g.from); if (other == null) continue;
+                var gp = g.P(L.region); var nOut = g.N(L.region);
+                if ((m - gp).magnitude > (L.inn != null ? 0.75f : 1.05f)) continue;
+                var v = player.Velocity; var vm = new Vector2(-v.x, v.z);
+                if (vm.sqrMagnitude > 0.01f && Vector2.Dot(vm.normalized, nOut) < 0.2f) continue;
+                var other = SLoc(g.Other(L.region)); if (other == null) continue;
                 passCd = 1.5f;
-                var target = other.ToWorld(g.p + into * 1.3f); float hd = Mathf.Atan2(-into.x, into.y);
+                var op = g.P(other.region); var on = g.N(other.region);
+                var into = -on;               // into the other place
+                var target = other.ToWorld(op + into * 1.3f); float hd = Mathf.Atan2(-into.x, into.y);
+                string st = g.Style(L.region);
                 Reprint(() => StoryGo(other, target, hd));
-                Sound(g.style == "hole" ? "hit_stone" : "door_open", 0.6f, pos);
+                Sound(st == "hole" || st == "mouth" ? "hit_stone" : "door_open", 0.6f, pos);
                 return;
             }
         }
@@ -207,7 +268,7 @@ namespace AsciiHero
         {
             public string id, name, kind; public Character ch; public MotionActor act; public StoryLocation L;
             public Vector3 p, home, goal; public int hp, maxHp; public float scale = 1;
-            public int state; public float t, cd, seenT, lostT, dodgeCd, parryCd, leapT, stagger, deadT, barkCd, guardT, strafe = 1, dmgK = 1, think;
+            public int state; public float t, cd, seenT, lostT, dodgeCd, parryCd, leapT, stagger, deadT, barkCd, guardT, strafe = 1, dmgK = 1, think, biteT = -1, biteCd = 2; public bool fortitudeUsed;
             public Vector2 leapV, step; public float stepT; public bool noticed, hurtBark, swingHit, raged; public int combo; public Vector3 lastSeen;
             public BoneArm bones;
             public bool Dead => hp <= 0;
@@ -225,7 +286,8 @@ namespace AsciiHero
             var R = new System.Random(5);
             foreach (var e in smap.ents)
             {
-                var L = SLocAt(e.p); var w = L.ToWorld(e.p);
+                var L = SLocAt(e.p); var w = SWorld(L, e.p);
+                if (e.type == "enemy" && e.name.Contains("Босс")) foreach (var c in smap.circles) if ((e.p - c.c).magnitude < c.r) w = L.ToWorld(c.c);      // the chief stands in the middle of his arena
                 try
                 {
                     if (e.type == "enemy")
@@ -238,7 +300,7 @@ namespace AsciiHero
                         skullL = L; skullGo = MeshGen.Obj(Cave.CaveMesh("skull", Vector3.one * 1.05f), mats["BONE"], L.root.transform, w - L.origin + Vector3.down * 0.015f, Quaternion.identity, true, "Yorick");
                         GlyphLayer.Build(skullGo);
                         // turned away from where the hero wakes
-                        Vector3 heroAt = w; foreach (var h in smap.ents) if (h.type == "hero") heroAt = L.ToWorld(h.p);
+                        Vector3 heroAt = w; foreach (var h in smap.ents) if (h.type == "hero") heroAt = SWorld(L, h.p);
                         var d = heroAt - w; skullYaw = skullYawT = Mathf.Atan2(-d.x, -d.z) * Mathf.Rad2Deg;
                     }
                     else if (e.type == "npc")
@@ -247,6 +309,7 @@ namespace AsciiHero
                         var f = drunk ? MakeFoe(e.id, e.name, "drunk", L, w, (float)R.NextDouble() * 6.28f) : null;
                         if (drunk) { foes.Add(f); continue; }
                         var cfgN = new CharConfig { sex = e.name.Contains("Хозяйка") ? 'f' : 'm', build = e.name.Contains("Хозяин") ? 3 : e.name.Contains("Пьяница") ? 0 : 1, height = e.name.Contains("Хозяйка") ? 166 : 176, armor = "cloth", weapon = "none" };
+                        if (e.name.Contains("Хозяин") && L.inn != null) w = L.inn.bartender + L.origin;          // behind his counter
                         var ch = Character.Build(cfgN, actorMats, e.name); ch.go.transform.SetParent(L.root.transform, true); ch.go.transform.position = w;
                         GlyphLayer.Build(ch.go);
                         var fo = new Folk { id = e.id, name = e.name, ch = ch, act = new MotionActor(ch), L = L, p = w, yaw = (float)R.NextDouble() * 6.28f, drunk = e.name.Contains("Пьяница") };
@@ -254,10 +317,9 @@ namespace AsciiHero
                         folk.Add(fo); L.colliders.Add(Collider2.Circle(w.x - L.origin.x, w.z - L.origin.z, 0.3f));
                     }
                     else if (e.type == "item" && e.name.StartsWith("Труп"))
-                    {
-                        var have = new List<int>();
-                        if (e.name.Contains("шлем")) have.Add(0); else if (e.name.Contains("нагрудник")) { have.Add(1); have.Add(2); } else if (e.name.Contains("наголенники")) { have.Add(3); have.Add(4); } else for (int l = 0; l < 5; l++) have.Add(l);
-                        L.piles.Add(NatureLib.Pile(mats, L.root.transform, w - L.origin, (float)R.NextDouble() * 360, have));
+                    {   // the knights' pieces by the waking place lie together: one knight in a full set, on his bones
+                        if (e.name.Contains(":") && !e.name.Contains("шлем")) continue;
+                        L.piles.Add(DeadKnight(L, w, (float)R.NextDouble() * 360, new List<int> { 0, 1, 2, 3, 4 }));
                     }
                     else if (e.type == "item") chests.Add(MakeChest(e, L, w, (float)R.NextDouble() * 360));
                 }
@@ -272,8 +334,7 @@ namespace AsciiHero
                     float a = 0.9f + k * 2.6f + (float)R.NextDouble() * 0.6f; var m = c.c + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * c.r * 0.55f;
                     if (!L.Walk(m)) continue;
                     var w = L.ToWorld(m) - L.origin; float yaw = (float)R.NextDouble() * 360;
-                    MeshGen.Obj(Cave.CaveMesh("anat_lie", Vector3.one), mats["BONE"], L.root.transform, w, Quaternion.Euler(0, yaw, 0), false, "ArenaSkeleton");
-                    L.piles.Add(NatureLib.Pile(mats, L.root.transform, w, yaw, new List<int> { 0, 1, 2, 3, 4 }));
+                    L.piles.Add(DeadKnight(L, L.ToWorld(m), yaw, new List<int> { 0, 1, 2, 3, 4 }));
                 }
             }
         }
@@ -368,9 +429,10 @@ namespace AsciiHero
                 {
                     var hp0 = head.position; head.localScale = Vector3.one * 0.02f;          // (the helmet goes with the head)
                     var sk = new GameObject("Skull").transform; sk.SetParent(ch.go.transform, false); sk.position = hp0 + Vector3.up * 0.1f; sk.rotation = ch.go.transform.rotation;
-                    KKObj("kkskull", sk, Vector3.zero, 0.2f, Quaternion.identity);
-                    var jaw = new GameObject("Jaw").transform; jaw.SetParent(sk, false); jaw.localPosition = new Vector3(0, -0.3f, -0.08f) * 0.2f; jaw.localRotation = Quaternion.Euler(14, 0, 0);       // hanging a little open
-                    KKObj("kkjaw", jaw, -new Vector3(0, -0.3f, -0.08f) * 0.2f, 0.2f, Quaternion.identity);
+                    var hinge = new Vector3(0, -0.127f, 0.147f) * 0.2f;
+                    KKObj("yskull", sk, Vector3.zero, 0.2f, Quaternion.identity);
+                    var jaw = new GameObject("Jaw").transform; jaw.SetParent(sk, false); jaw.localPosition = hinge; jaw.localRotation = Quaternion.Euler(14, 0, 0);       // hanging a little open
+                    KKObj("yjaw", jaw, -hinge, 0.2f, Quaternion.identity);
                     sk.SetParent(neck, true);
                 }
                 arm = BoneArm.Make(hb, "L", ch.go.transform, actorMats["BONE"]);
@@ -378,7 +440,7 @@ namespace AsciiHero
             ch.go.transform.SetParent(L.root.transform, true); ch.go.transform.position = w; ch.go.transform.rotation = Quaternion.Euler(0, heading * Mathf.Rad2Deg, 0);
             GlyphLayer.Build(ch.go);
             var f = new Foe { id = id, name = name, kind = kind, ch = ch, act = new MotionActor(ch), L = L, p = w, home = w, goal = w };
-            f.bones = arm; f.act.heading = heading; f.act.maxSpeed = boss ? 3.4f : zombie ? 1.6f : 2.8f;
+            f.bones = arm; f.act.heading = heading; f.act.maxSpeed = boss ? 3.7f : zombie ? 1.3f : 3.3f;
             f.maxHp = f.hp = boss ? 70 : zombie ? 40 : 30;
             f.think = Random.value * 2; f.cd = 1;
             if (kind == "drunk") { f.act.PlayCut("talk", false, true, 0.7f + 0.3f * Random.value); }
@@ -435,11 +497,13 @@ namespace AsciiHero
                 {   // they sway, mutter, turn to the hero when he stands near; never fight
                     if (dist < 3.5f) { f.act.heading = Mathf.LerpAngle(f.act.heading * Mathf.Rad2Deg, Mathf.Atan2(toH.x, toH.y) * Mathf.Rad2Deg, dt * 2) * Mathf.Deg2Rad; }
                     if (dist < 4f && !sDone.Contains("drunk_rats")) Play("drunk_rats");
+                    if (dist < 4f) BestMark("drunk", false);
                 }
                 else
                 {
                     // seeing: in front, near enough, nothing between (walls hide him); close by he is heard
                     bool sees = alive && dist < SEE_R && (Vector2.Dot(fwd, toH / Mathf.Max(dist, 0.01f)) > SEE_COS || dist < 2.2f) && L.SightW(f.p + Vector3.up, pos + Vector3.up);
+                    if (f.Boss && alive && dist < 7f) sees = true;          // (keen smell: the chief smells the hero through the rock)
                     if (sees) { if (!f.noticed) Notice(f); f.seenT = 0; f.lastSeen = pos; } else f.seenT += dt;
                     if (f.noticed && f.seenT > (f.Boss ? 15 : 6)) { f.noticed = false; f.goal = f.lastSeen; f.state = 2; }
                     if (!alive) f.noticed = false;
@@ -456,8 +520,9 @@ namespace AsciiHero
                 f.p = new Vector3(np.x, 0, np.y);
                 f.ch.go.transform.position = f.p; f.ch.go.transform.rotation = Quaternion.Euler(0, f.act.heading * Mathf.Rad2Deg, 0);
                 f.act.Animate(tNow, dt);
+                if (f.kind != "zombie") Hunch(f);
                 if (f.bones != null) f.bones.Follow();
-                if (f.kind != "drunk") StrikeHero(f, dist, toH);
+                if (f.kind != "drunk") { StrikeHero(f, dist, toH); Bite(f, dist, toH, dt); }
             }
             // the hero is pushed out of the living
             foreach (var f in foes)
@@ -479,6 +544,7 @@ namespace AsciiHero
         }
         void Notice(Foe f)
         {
+            BestMark(f.kind, false);
             f.noticed = true; f.cd = Mathf.Max(f.cd, 0.25f);
             if (f.Boss) { if (!sDone.Contains("boss_intro")) Play("boss_intro"); }
             else if (f.barkCd <= 0) { Bark(f.ch.go.transform, f.kind == "zombie" ? "zombie_moan" : Random.value < 0.5f ? "rat_notice" : "rat_notice2"); f.barkCd = 8; }
@@ -521,12 +587,24 @@ namespace AsciiHero
             {
                 // the simple ones: walk (run when far), strike when near; now and then a leap back from his blow
                 bool zomb = f.kind == "zombie";
-                if (dist > reach * 0.9f) { dir2 = toward.normalized; mag = zomb ? (dist > 4 ? 1.3f : 1f) : 2f; }          // the rats run at him
+                // pack tactics: with another rat already on him, this one comes round his side
+                Vector2 want = toward;
+                if (!zomb && dist < 4.5f)
+                    foreach (var o in foes)
+                        if (o != f && !o.Dead && o.noticed && o.L == f.L && o.kind == "rat" && (new Vector2(o.p.x - pos.x, o.p.z - pos.z)).magnitude < dist)
+                        { var side = new Vector2(-toH.y, toH.x).normalized * f.strafe; want = toH.normalized + side * 0.9f; break; }
+                if (dist > reach * 0.9f) { dir2 = want.normalized; mag = zomb ? (dist > 4 ? 1.3f : 1f) : 2f; }          // the rats run at him
+                // a bite in a leap (from a little further than the blade reaches)
+                f.biteCd -= dt;
+                if (!zomb && f.biteCd <= 0 && f.biteT < 0 && dist > 1.3f && dist < 2.6f && !f.act.Attacking && Random.value < dt * 1.2f)
+                { f.biteCd = 3.5f + Random.value * 2; f.biteT = 0.3f; Leap(f, toH, 7f); }
                 if (dist < reach * 1.05f && f.cd <= 0 && !f.act.Attacking) { f.act.StartAttack(); f.swingHit = false; f.cd = zomb ? 1.6f + Random.value * 0.8f : 0.9f + Random.value * 0.6f; }
-                if (heroSwinging && dist < 2.4f && f.dodgeCd <= 0 && f.kind != "zombie")
+                // nimble: a rat leaps back after its blow now and then, and out of the way of his
+                if (!zomb && f.act.Attacking && f.swingHit && f.dodgeCd <= 0 && Random.value < 0.35f) { f.dodgeCd = 1.5f; Leap(f, -toH.normalized, 5.5f); }
+                if (heroSwinging && dist < 2.4f && f.dodgeCd <= 0 && !zomb)
                 {
                     f.dodgeCd = 1.2f;
-                    if (Random.value < 0.15f) Leap(f, -toH.normalized, 5.5f);
+                    if (Random.value < 0.18f) Leap(f, -toH.normalized, 5.5f);
                 }
                 return;
             }
@@ -564,6 +642,7 @@ namespace AsciiHero
             {
                 if (dist < reach * 1.1f)
                 {   // a combination of two or three blows, a pause of his own choosing after it
+                    if (Random.value < 0.25f && f.biteT < 0) { f.biteT = 0.25f; Leap(f, toH, 6.5f); f.combo = 1; f.cd = 0.45f; return; }      // (the wererat's bite opens a combination)
                     f.act.StartAttack(); f.swingHit = false; f.combo = Random.value < 0.55f ? 1 : Random.value < 0.6f ? 2 : 0;
                     f.cd = (0.7f + Random.value * 0.7f) * tempo;
                 }
@@ -583,8 +662,24 @@ namespace AsciiHero
             if (f.stepT <= 0 || (f.L.ToWorld(f.step) - f.p).magnitude < 0.4f) { f.stepT = 0.5f + 0.2f * Random.value; f.step = f.L.NextStep(f.L.ToMap(f.p), f.L.ToMap(goal)); }
             return f.L.ToWorld(f.step);
         }
+        /// rats stoop: the back bent forward, the head lifted to look ahead (laid over whatever the motion did)
+        static void Hunch(Foe f)
+        {
+            var hb = f.ch.human; var ax = f.ch.go.transform.right; float k2 = f.Boss ? 0.8f : 1f;
+            void B(string n, float deg) { var b = hb.Bone(n); if (b != null) b.rotation = Quaternion.AngleAxis(deg * k2, ax) * b.rotation; }
+            B("spine04", 10); B("spine03", 12); B("spine01", 10); B("neck01", -18); B("head", -8);
+        }
         void Leap(Foe f, Vector2 d, float sp) { f.leapV = d.normalized * sp; f.leapT = 0.28f; SpawnPuff(f.p + Vector3.up * 0.3f, 0.04f, Vector3.zero, 0.4f); Sound("cloth", 0.5f, f.p); }
 
+        void Bite(Foe f, float dist, Vector2 toH, float dt)
+        {
+            if (f.biteT < 0) return;
+            f.biteT -= dt; if (f.biteT > 0) return; f.biteT = -1;
+            if (dist > 1.2f || hp <= 0 || respawnT > 0 || dashT < DASH_T + 0.15f) return;
+            var hf = new Vector2(Mathf.Sin(player.heading), Mathf.Cos(player.heading));
+            if (player.guardHeld && Vector2.Dot(hf, -toH / Mathf.Max(dist, 0.01f)) > 0.2f) { Sound("clash", 0.5f, f.p); f.stagger = 0.4f; return; }
+            Sound("hit_flesh", 0.6f, f.p); Damage(f.Boss ? 7 : 5);
+        }
         /// his blow reaches the hero: a guard facing it turns it (the chief's second blow of a combination breaks through),
         /// the dash goes under it
         void StrikeHero(Foe f, float dist, Vector2 toH)
@@ -633,11 +728,16 @@ namespace AsciiHero
                 if (!f.noticed) Notice(f);
                 f.lastSeen = pos; f.seenT = 0;
                 if (!f.Boss && !f.hurtBark && f.kind == "rat" && Random.value < 0.6f) { f.hurtBark = true; Bark(f.ch.go.transform, "rat_hurt"); }
+                if (f.Dead && f.kind == "zombie" && !f.fortitudeUsed && Random.value < 0.5f)
+                {   // undead fortitude: it should be down, and it is not (once)
+                    f.fortitudeUsed = true; f.hp = 1; f.stagger = 1.2f; Bark(f.ch.go.transform, "zombie_moan"); continue;
+                }
                 if (f.Dead) Die(f);
             }
         }
         void Die(Foe f)
         {
+            BestMark(f.kind, true);
             f.deadT = 0; f.act.guardHeld = false; f.act.PlayCut("die", false, false, 1, true); SpawnPuff(f.p + Vector3.up * 0.8f, 0.06f, Vector3.up * 0.4f, 0.8f);
             Sound("plates", 0.6f, f.p);
             if (f.Boss) Play("boss_dead");
@@ -715,7 +815,8 @@ namespace AsciiHero
             var m = L.ToMap(pos);
             foreach (var e in smap.ents)
             {
-                if (e.type != "trigger" || SLocAt(e.p) != L || (m - e.p).magnitude > 4.5f) continue;
+                if (e.type != "trigger" || SLocAt(e.p) != L) continue;
+                var tw = SWorld(L, e.p); if ((new Vector2(tw.x - pos.x, tw.z - pos.z)).magnitude > (L.inn != null ? 2.5f : 4.5f)) continue;
                 string s = e.name.Contains("черепом") ? "skull" : e.name.Contains("выбор") ? "choice" : e.name.Contains("трактире") ? "tavern_argument" : null;
                 if (s != null && !sDone.Contains(s)) Play(s);
             }
@@ -846,8 +947,9 @@ namespace AsciiHero
             visT -= dt;
             if (visT <= 0)
             {
-                visT = 0.1f; Vector4 vr; var tex = ((StoryLocation)loc).VisUpdate(pos, out vr);
-                Shader.SetGlobalTexture("_VisTex", tex); Shader.SetGlobalVector("_VisRect", vr); Shader.SetGlobalFloat("_VisOn", 1);
+                visT = 0.1f; var SL = (StoryLocation)loc;
+                if (SL.useVis) { Vector4 vr; var tex = SL.VisUpdate(pos, out vr); Shader.SetGlobalTexture("_VisTex", tex); Shader.SetGlobalVector("_VisRect", vr); Shader.SetGlobalFloat("_VisOn", 1); }
+                else Shader.SetGlobalFloat("_VisOn", 0);
             }
             HeroHitsFoes(); UpdateFoes(dt); UpdateFolk(dt); UpdateChests(dt); UpdateSkull(dt);
             StoryTriggers(); StoryPassages(dt); UpdateDirector(dt);
@@ -951,10 +1053,74 @@ namespace AsciiHero
                 int ci = Mathf.FloorToInt((w.x - mapWorld.x) * MAP_PPM), cj = Mathf.FloorToInt((w.z - mapWorld.y) * MAP_PPM), R = Mathf.CeilToInt(r * MAP_PPM);
                 for (int j = cj - R; j <= cj + R; j++) for (int i = ci - R; i <= ci + R; i++) { if (i < 0 || j < 0 || i >= W || j >= H || (i - ci) * (i - ci) + (j - cj) * (j - cj) > R * R) continue; var c = C32(col); c.a = (byte)(cls * 16); px[j * W + i] = c; }
             }
-            foreach (var g in L.passages) Spot(L.ToWorld(g.p), 1.1f, 0xe8b443u, 11);
+            foreach (var g in L.passages) Spot(L.ToWorld(g.P(L.region)), 1.1f, 0xe8b443u, 11);
             foreach (var c in chests) if (c.L == L) Spot(c.p, 0.5f, 0xb08860u, 8);
             mapTex = new Texture2D(W, H, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp, name = "StoryMap" };
             mapTex.SetPixels32(px); mapTex.Apply(false, true);
+        }
+        // ---- a knight who died here: the plate armour of the game lying as it fell on his bones. Each piece of the
+        // armour is the hero's own (baked from a knight in the pose of the fall); under it the skeleton - long bones
+        // between the joints, ribs, a pelvis, the skull in the helmet. A piece taken (for the limb it covers) shows
+        // the bones beneath. ----
+        ArmourPile DeadKnight(StoryLocation L, Vector3 w, float yaw, IList<int> have)
+        {
+            var pile = new ArmourPile { pos = w - L.origin, root = new GameObject("DeadKnight") };
+            var P = pile.root.transform; P.SetParent(L.root.transform, false); P.position = w; P.rotation = Quaternion.Euler(0, yaw, 0);
+            var ch = Character.Build(new CharConfig { sex = 'm', build = 0, height = 176, armor = "plate", weapon = "none" }, actorMats, "Fallen");
+            ch.go.transform.position = w; ch.go.transform.rotation = P.rotation;
+            var act = new MotionActor(ch); act.PlayCut("die", false, false, 1, true);
+            for (int i = 0; i < 100; i++) { act.Locomotion(1 / 30f, null, 0, null, new Vector2(w.x, w.z), null); act.Animate(i / 30f, 1 / 30f); }
+            var lob = Character.LimbOfBone(); HumanDB.Load();
+            int LimbOf(Transform b) { while (b != null) { int bi; if (HumanDB.BI.TryGetValue(b.name, out bi)) return lob[bi] - 1; b = b.parent; } return -1; }
+            var groups = new Transform[5]; Transform torso = new GameObject("Torso").transform; torso.SetParent(P, true);
+            for (int l = 0; l < 5; l++) { groups[l] = new GameObject("Limb" + l).transform; groups[l].SetParent(P, true); }
+            var skip = new HashSet<Material> { actorMats["SKIN"], actorMats["HAIR"], actorMats["EYE"], actorMats["SHADOW"] };
+            foreach (var r in ch.go.GetComponentsInChildren<Renderer>(true))
+            {
+                if (r.sharedMaterial == null || skip.Contains(r.sharedMaterial)) continue;
+                Mesh m; Transform at = r.transform; int limb;
+                var smr = r as SkinnedMeshRenderer;
+                if (smr != null)
+                {
+                    m = new Mesh(); smr.BakeMesh(m, true);
+                    // the limb most of its vertices hang on
+                    var cnt = new int[6]; var bw = smr.sharedMesh.boneWeights;
+                    foreach (var b in bw) { var bt = b.boneIndex0 < smr.bones.Length ? smr.bones[b.boneIndex0] : null; cnt[LimbOf(bt) + 1]++; }
+                    int best = 0; for (int q = 1; q < 6; q++) if (cnt[q] > cnt[best]) best = q; limb = best - 1;
+                }
+                else { var mf = r.GetComponent<MeshFilter>(); if (mf == null || mf.sharedMesh == null) continue; m = Instantiate(mf.sharedMesh); limb = LimbOf(r.transform); var v = m.vertices; var sc = r.transform.lossyScale; for (int i = 0; i < v.Length; i++) v[i] = Vector3.Scale(v[i], sc); m.vertices = v; }
+                m.RecalculateBounds(); MeshGen.AddGlyphUV(m, false);
+                var go = MeshGen.Obj(m, r.sharedMaterial, limb >= 0 ? groups[limb] : torso, Vector3.zero, Quaternion.identity, true, "Piece");
+                go.transform.position = at.position; go.transform.rotation = at.rotation;
+            }
+            // the skeleton under it
+            var hb = ch.human; var bone = mats["BONE"];
+            void Stick(string a, string b, float r0, Transform par)
+            {
+                Transform ta = hb.Bone(a), tb = hb.Bone(b); if (ta == null || tb == null) return;
+                var d = tb.position - ta.position; if (d.magnitude < 0.02f) return;
+                var g = MeshGen.Obj(MeshGen.Cylinder(r0, r0 * 0.75f, d.magnitude, 6), bone, par, Vector3.zero, Quaternion.identity, false, "Bone");
+                g.transform.position = ta.position; g.transform.rotation = Quaternion.FromToRotation(Vector3.up, d.normalized);
+            }
+            var skel = new GameObject("Bones").transform; skel.SetParent(P, true);
+            foreach (var sd in new[] { "L", "R" })
+            {
+                Stick("upperarm01." + sd, "lowerarm01." + sd, 0.022f, skel); Stick("lowerarm01." + sd, "wrist." + sd, 0.016f, skel);
+                Stick("upperleg01." + sd, "lowerleg01." + sd, 0.03f, skel); Stick("lowerleg01." + sd, "foot." + sd, 0.022f, skel);
+            }
+            Stick("spine05", "neck01", 0.025f, skel);
+            var sp = hb.Bone("spine03"); if (sp != null) { var rib = MeshGen.Obj(MeshGen.Sphere(0.14f, 10, 7), bone, skel, Vector3.zero, Quaternion.identity, false, "Ribs"); rib.transform.position = sp.position; rib.transform.localScale = new Vector3(1, 0.6f, 1.25f); }
+            Transform nk = hb.Bone("neck01"), hd = hb.Bone("head");
+            if (nk != null && hd != null) { var up = (hd.position - nk.position).normalized; var sk = KKObj("yskull", skel, Vector3.zero, 0.19f, Quaternion.identity); KKObj("yjaw", sk.transform, Vector3.zero, 0.19f, Quaternion.identity); sk.transform.position = hd.position + up * 0.08f; sk.transform.rotation = Quaternion.LookRotation(Vector3.up, up); }
+            foreach (var sd in new[] { "L", "R" })
+            {
+                var wr = hb.Bone("wrist." + sd); if (wr == null) continue;
+                for (int k = 0; k < 4; k++) { var f = MeshGen.Obj(MeshGen.Cylinder(0.006f, 0.004f, 0.08f, 5), bone, skel, Vector3.zero, Quaternion.identity, false, "Finger"); f.transform.position = wr.position + wr.right * ((k - 1.5f) * 0.014f); f.transform.rotation = wr.rotation; }
+            }
+            Destroy(ch.go);
+            for (int l = 0; l < 5; l++) { if (have.Contains(l)) pile.items[l] = groups[l].gameObject; else groups[l].gameObject.SetActive(false); }
+            GlyphLayer.Build(pile.root);
+            return pile;
         }
         // ---- KayKit pieces (CC0, Kay Lousberg): Resources/kaykit.bytes, each a few one-colour meshes, 1 m wide ----
         static Dictionary<string, List<KeyValuePair<Mesh, uint>>> KK;
@@ -1026,9 +1192,11 @@ namespace AsciiHero
             {
                 skullRig = new GameObject("YorickRig"); skullRig.transform.position = SKULL_AT;
                 skullHead = new GameObject("Head").transform; skullHead.SetParent(skullRig.transform, false);
-                KKObj("kkskull", skullHead, Vector3.zero, 0.25f, Quaternion.identity);
-                skullJaw = new GameObject("Jaw").transform; skullJaw.SetParent(skullHead, false); skullJaw.localPosition = new Vector3(0, -0.3f, -0.08f) * 0.25f;
-                KKObj("kkjaw", skullJaw, -new Vector3(0, -0.3f, -0.08f) * 0.25f, 0.25f, Quaternion.identity);
+                // a real skull (BodyParts3D, DBCLS), its lower jaw cut off at the hinge so it can speak
+                var hinge = new Vector3(0, -0.127f, 0.147f) * 0.22f;
+                KKObj("yskull", skullHead, Vector3.zero, 0.22f, Quaternion.identity);
+                skullJaw = new GameObject("Jaw").transform; skullJaw.SetParent(skullHead, false); skullJaw.localPosition = hinge;
+                KKObj("yjaw", skullJaw, -hinge, 0.22f, Quaternion.identity);
                 GlyphLayer.Build(skullRig);
                 var lg = new GameObject("SkullKey"); lg.transform.SetParent(skullRig.transform, false); lg.transform.localPosition = new Vector3(0.5f, 0.6f, 0.9f);
                 var l = lg.AddComponent<Light>(); l.type = LightType.Point; l.range = 4; l.intensity = 2.2f; l.color = Mats.Hex(0xffe6c8);
@@ -1050,7 +1218,54 @@ namespace AsciiHero
             skullAscii.SetSize(Mathf.Max(16, Mathf.RoundToInt(r.width)), Mathf.Max(16, Mathf.RoundToInt(r.height)), cellPx);
             skullAscii.SelfCheck();
         }
-        Rect SkullRect(Rect lp) { float r = lp.width * 0.27f; return new Rect(lp.x - r * 1.15f, lp.y + r * 0.1f, 2 * r, 2 * r); }
+        Rect SkullRect(Rect lp) { float r = lp.width * 0.27f; return new Rect(Mathf.Max(safe.x + 4 * k, lp.x - r * 1.55f), Mathf.Max(safe.y + 4 * k, lp.y - r * 0.55f), 2 * r, 2 * r); }
+        // ================= the bestiary: who has been met (and beaten), as text; after D&D 5e's monsters =================
+        class Beast { public string id, name, basis, look, ways, stats; }
+        static readonly Beast[] BEASTS = {
+            new Beast { id = "rat", name = "Крысолюд", basis = "по образу ратфолка (Tome of Beasts) и крысиного племени D&D",
+                look = "Невысокий, сутулый, весь в серо-бурой шерсти; длинная морда, голый хвост. Рваный капюшон, короткий меч.",
+                ways = "Бродит по норам, роется в хламе, оглядывается. Видит только то, что перед ним, но слышит шаги рядом. Заметив чужого — пищит и бежит на него. Вдвоём-втроём заходят с боков (тактика стаи), бьют мечом и кусают в прыжке, после удара часто отскакивают назад (ловкий отход).",
+                stats = "Скорость: быстрая · Здоровье: низкое · Атаки: короткий меч, укус в прыжке" },
+            new Beast { id = "boss", name = "Большая Крыса", basis = "по образу оборотня-крысы (вэрэрат, Monster Manual)",
+                look = "На голову выше других крысолюдов, чёрная шерсть, красные глаза. Шипастый железный шлем, меховой плащ, меч.",
+                ways = "Чует добычу носом даже за стеной. Бьёт сериями (меч и укус), отскакивает в сторону и назад, парирует и сразу отвечает. Против поднятого клинка ходит кругом и ждёт; последний удар серии пробивает защиту. Раненый — свирепеет: бьёт чаще, защищается хуже.",
+                stats = "Скорость: очень быстрая · Здоровье: среднее · Атаки: серия из двух, укус, парирование" },
+            new Beast { id = "zombie", name = "Воин-зомби", basis = "по образу зомби (Monster Manual)",
+                look = "Мёртвый рыцарь: латы с прорехами, голый череп с отвисшей челюстью, рука — одни кости.",
+                ways = "Медлителен и упрям. Бредёт к живому, бьёт тяжело и редко. Нежитская стойкость: смертельный удар его не всегда валит — иногда он поднимается ещё раз.",
+                stats = "Скорость: медленная · Здоровье: среднее · Атаки: удар мечом" },
+            new Beast { id = "drunk", name = "Пьяный крысолюд", basis = "крысолюд вне службы",
+                look = "Тот же крысолюд, только в рубахе и без меча; покачивается и машет лапами.",
+                ways = "Сидит в крысином трактире и болтает. Сам не нападает; ударишь — вспомнит, что он крысолюд.",
+                stats = "Мирный, пока его не трогают" },
+        };
+        readonly HashSet<string> seenBeasts = new HashSet<string>(), beatenBeasts = new HashSet<string>(); bool bestLoaded; float bestScroll;
+        void BestLoad() { if (bestLoaded) return; bestLoaded = true; foreach (var x in PlayerPrefs.GetString("best_seen", "").Split(',')) if (x.Length > 0) seenBeasts.Add(x); foreach (var x in PlayerPrefs.GetString("best_beaten", "").Split(',')) if (x.Length > 0) beatenBeasts.Add(x); }
+        void BestMark(string kind, bool beaten)
+        {
+            BestLoad(); bool ch = seenBeasts.Add(kind); if (beaten) ch |= beatenBeasts.Add(kind);
+            if (ch) { PlayerPrefs.SetString("best_seen", string.Join(",", seenBeasts)); PlayerPrefs.SetString("best_beaten", string.Join(",", beatenBeasts)); PlayerPrefs.Save(); if (seenBeasts.Count > 0 && !beaten) ShowToast("Бестиарий: " + BeastName(kind)); }
+        }
+        static string BeastName(string id) { foreach (var b in BEASTS) if (b.id == id) return b.name; return id; }
+        GUIStyle sBestT, sBestB;
+        void BestiaryUI(float x0, float y0, float pw, float bottom)
+        {
+            BestLoad();
+            if (sBestB == null || sBestB.fontSize != Mathf.RoundToInt(11 * k)) { sBestB = new GUIStyle(sBadge) { wordWrap = true, fontSize = Mathf.RoundToInt(11 * k), alignment = TextAnchor.UpperLeft }; sBestT = new GUIStyle(sBadge) { fontSize = Mathf.RoundToInt(14 * k), alignment = TextAnchor.UpperLeft }; }
+            GUI.Label(new Rect(x0, y0, pw, 22 * k), "БЕСТИАРИЙ · открыто " + seenBeasts.Count + " из " + BEASTS.Length, sTitle);
+            var area = new Rect(x0, y0 + 28 * k, pw, bottom - y0 - 34 * k); uiRects.Add(area);
+            foreach (var pt in InputHub.active.Values) if (pt.owner == "ui" && area.Contains(pt.start)) bestScroll = Mathf.Max(0, bestScroll - pt.Delta.y);
+            GUI.BeginGroup(area); float y = -bestScroll;
+            foreach (var b in BEASTS)
+            {
+                bool open = seenBeasts.Contains(b.id), won = beatenBeasts.Contains(b.id);
+                if (!open) { GUI.Label(new Rect(0, y, pw, 20 * k), "??? — ещё не встречен", sBestT); y += 30 * k; continue; }
+                GUI.Label(new Rect(0, y, pw, 20 * k), b.name + (won ? "  · побеждён" : ""), sBestT); y += 20 * k;
+                string txt = b.look + "\n" + b.ways + "\n" + b.stats + "\n(" + b.basis + ")";
+                float h = sBestB.CalcHeight(new GUIContent(txt), pw); GUI.Label(new Rect(0, y, pw, h), txt, sBestB); y += h + 14 * k;
+            }
+            GUI.EndGroup();
+        }
         string StoryTitle() { var L = loc as StoryLocation; return L != null ? L.TitleAt(pos) : null; }
     }
 }

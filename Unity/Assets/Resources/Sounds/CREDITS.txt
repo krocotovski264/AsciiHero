@@ -36,3 +36,7 @@ Other assets of AsciiHero (not sounds):
   Resources/kaykit.bytes   KayKit Character Packs (Skeletons 1.0, Adventurers 1.0) by Kay Lousberg, CC0 1.0
                            (www.kaylousberg.com): Skeleton_Rogue_Hood, Skeleton_Warrior_Helmet, Barbarian_Cape,
                            Skeleton_Warrior_Head and _Jaw - single pieces, rescaled, recoloured by their palette
+  Resources/kaykit.bytes   also "yskull"/"yjaw": the BodyParts3D skull (DBCLS, CC BY 4.0) of the cave set, its lower jaw
+                           cut off to move on its own (Yorick in the pocket, the risen, the fallen knights)
+  Creatures: their speeds, habits and kinds of attack follow D&D 5e monsters (wererat, zombie: SRD 5.1 under
+  CC BY 4.0; ratfolk: Tome of Beasts, Kobold Press) - in spirit, not in numbers

@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.75 · Unity";
+        public const string VERSION = "beta 0.76 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -1081,7 +1081,8 @@ namespace AsciiHero
             "Звуки: Kenney (CC0); freesound: felix.blume, inchadney, sengjinn, BlueDelta, straget (CC0);",
             "mystiscool, Corsica_S, D W, inchadney, gregswinford, Benboncan (CC BY);", "шаги по воде: Citadel Station 13 (CC BY-SA 3.0)", "",
             "Голова крысолюда: модель rat из набора 3moji (CC BY-SA 4.0), изменена", "Анимации сцен и падения: CMU Graphics Lab Motion Capture Database (mocap.cs.cmu.edu)",
-            "Капюшоны и шлем крысолюдов, плащ, череп Ёрика: KayKit, Kay Lousberg (CC0)" };
+            "Капюшоны и шлем крысолюдов, плащ: KayKit, Kay Lousberg (CC0)",
+            "Существа по мотивам D&D 5e (SRD, OGL 1.0a / CC BY 4.0), ратфолк — Tome of Beasts" };
         void LoadSettings()
         {
             bool phone = Application.isMobilePlatform;
@@ -1138,13 +1139,15 @@ namespace AsciiHero
                 if (Button(new Rect(cx - bw / 2, y, bw, bh), "ИГРАТЬ")) inMenu = false;
                 if (Button(new Rect(cx - bw / 2, y + bh + 12 * k, bw, bh), "СОХРАНЕНИЯ")) { menuPage = 3; saveMode = 0; saveInfoDirty = true; }
                 if (Button(new Rect(cx - bw / 2, y + 2 * (bh + 12 * k), bw, bh), "НАСТРОЙКИ")) menuPage = 1;
-                if (Button(new Rect(cx - bw / 2, y + 3 * (bh + 12 * k), bw, bh), "ВЫХОД")) Application.Quit();
+                if (Button(new Rect(cx - bw / 2, y + 3 * (bh + 12 * k), bw, bh), "БЕСТИАРИЙ")) { menuPage = 4; bestScroll = 0; }
+                if (Button(new Rect(cx - bw / 2, y + 4 * (bh + 12 * k), bw, bh), "ВЫХОД")) Application.Quit();
                 if (Button(new Rect(safe.xMax - 124 * k, bottom - 26 * k, 114 * k, 24 * k), "Разработчики")) menuPage = 2;
                 GUI.Label(new Rect(safe.x + 10 * k, bottom - 22 * k, 200 * k, 22 * k), VERSION, sSmall);
                 return;
             }
             float pw = 460 * k, x0 = cx - pw / 2, y0 = top + 56 * k;
             if (menuPage == 3) { SavesUI(cx, top, bottom); return; }
+            if (menuPage == 4) { BestiaryUI(x0, y0, pw, bottom); return; }
             if (menuPage == 2)
             {
                 GUI.Label(new Rect(x0, y0, pw, 22 * k), "РАЗРАБОТЧИКИ", sTitle);
@@ -3025,7 +3028,7 @@ namespace AsciiHero
         [System.Serializable] class SaveData
         {
             public string version, date, loc, sex, armor, weapon; public float x, z, heading, height; public int hp, build;
-            public bool[] limbs; public float[] body; public string[] items;
+            public bool[] limbs; public float[] body; public string[] items; public float clock;
         }
         static string SavePath(int i) { return System.IO.Path.Combine(Application.persistentDataPath, "save" + (i + 1) + ".json"); }
         void RefreshSaveInfo()
@@ -3062,7 +3065,7 @@ namespace AsciiHero
                 version = VERSION, date = System.DateTime.Now.ToString("dd.MM.yyyy HH:mm"), loc = loc is StoryLocation ? "story:" + ((StoryLocation)loc).region : tav ? "tavern" : cv ? "cave" : fo ? "forest" : loc is Mockup ? ((Mockup)loc).kind : "field",
                 x = loc != null ? pos.x : 0, z = loc != null ? pos.z : 1.5f, heading = player != null ? player.heading : Mathf.PI, hp = hp,
                 limbs = (bool[])limbs.Clone(), sex = cfg.sex.ToString(), build = cfg.build, height = cfg.height, armor = cfg.armor, weapon = cfg.weapon,
-                body = cfg.body != null ? (float[])cfg.body.Clone() : null, items = inventory.ToArray()
+                body = cfg.body != null ? (float[])cfg.body.Clone() : null, items = inventory.ToArray(), clock = gameClock
             };
             try { System.IO.File.WriteAllText(SavePath(i), JsonUtility.ToJson(d)); ShowToast("Сохранено: ячейка " + (i + 1)); Debug.Log("Игра сохранена: " + SavePath(i)); }
             catch (System.Exception e) { ShowToast("Не удалось сохранить"); Debug.LogException(e); }
@@ -3089,6 +3092,7 @@ namespace AsciiHero
             if (d.loc != null && d.loc.StartsWith("story:") || !setDev)
             {   // the story: its place, where he stood (without the developer's mode an old save of the test world starts the story)
                 StartStory(false); if (!story) return;
+                if (d.clock > 0) gameClock = d.clock;
                 var sl = d.loc != null && d.loc.StartsWith("story:") ? SLoc(d.loc.Substring(6)) : null;
                 if (sl != null) { if (!sDone.Contains("wake")) { sDone.Add("wake"); sDone.Add("letter"); player.StopCut(); sDir = null; letterOn = false; } StoryGo(sl, new Vector3(d.x, 0, d.z), d.heading); }
                 ShowToast("Загружено: ячейка " + (i + 1)); return;

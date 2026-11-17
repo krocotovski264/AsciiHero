@@ -20,6 +20,22 @@ namespace AsciiHero
         public static readonly string[] LEVEL = { "Лёгкие", "Средние", "Сильные" };
         // precipitation: on or off and how strong; what falls follows the season - snow in winter, rain the rest of the year
         public int tod = 3, season = 1, level = 1; public bool precip;
+        // the story's clock: the time of day runs on its own (a day of 24 minutes: 16 from morning to evening, 8 of night,
+        // the light easing from one part into the next); 20 days a season, 80 a year
+        public bool clock; public readonly float[] todT = { 0, 0, 1, 0 };
+        public const float DAY_S = 1440f, LIGHT_S = 960f; public const int SEASON_DAYS = 20;
+        /// the weights of morning, day, evening and night at a moment of the day (0 = dawn .. 1 = the next dawn)
+        public void SetClock(float ph)
+        {
+            // keys along the day: dawn, morning, noon, afternoon, evening, dusk, night, (the next dawn)
+            float[] at = { 0f, 0.06f, 0.24f, 0.45f, 0.60f, 0.667f, 0.72f, 0.97f, 1f };
+            float[][] w = { new[] { .6f, 0, 0, .4f }, new[] { 1f, 0, 0, 0 }, new[] { 0, 1f, 0, 0 }, new[] { 0, 1f, 0, 0 }, new[] { 0, 0, 1f, 0 }, new[] { 0, 0, .55f, .45f }, new[] { 0, 0, 0, 1f }, new[] { 0, 0, 0, 1f }, new[] { .6f, 0, 0, .4f } };
+            ph = ph - Mathf.Floor(ph); int k = 0; while (k < at.Length - 2 && ph > at[k + 1]) k++;
+            float u = Mathf.SmoothStep(0, 1, Mathf.InverseLerp(at[k], at[k + 1], ph));
+            for (int i = 0; i < 4; i++) todT[i] = Mathf.Lerp(w[k][i], w[k + 1][i], u);
+            int best = 0; for (int i = 1; i < 4; i++) if (todT[i] > todT[best]) best = i; tod = best;
+            clock = true;
+        }
         static readonly float[] AMOUNT = { 0.35f, 0.65f, 1f };
         int weather => !precip ? 0 : season == 3 ? 3 : level == 2 ? 2 : 1;
 
@@ -47,7 +63,7 @@ namespace AsciiHero
         public void Update(float dt)
         {
             float k = 1 - Mathf.Exp(-dt / 0.8f), kSlow = 1 - Mathf.Exp(-dt / 2.5f);
-            for (int i = 0; i < 4; i++) { todW[i] += ((i == tod ? 1 : 0) - todW[i]) * k; seasW[i] += ((i == season ? 1 : 0) - seasW[i]) * k; }
+            for (int i = 0; i < 4; i++) { todW[i] = clock ? todT[i] : todW[i] + ((i == tod ? 1 : 0) - todW[i]) * k; seasW[i] += ((i == season ? 1 : 0) - seasW[i]) * k; }
             float amt = precip ? AMOUNT[Mathf.Clamp(level, 0, 2)] : 0;
             float rT = weather == 1 || weather == 2 ? amt : 0, sT = weather == 3 ? amt : 0;
             rain += (rT - rain) * k; snow += (sT - snow) * k;

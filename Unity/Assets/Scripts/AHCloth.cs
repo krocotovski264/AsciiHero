@@ -251,6 +251,15 @@ namespace AsciiHero
             return true;
         }
 
+        /// the cloak stays on the back: no particle comes further forward than a little past where it hangs at rest
+        /// (more slack down the hem, so it still swings out to the sides and flaps)
+        void Behind(int i, int r)
+        {
+            float v = r / (R - 1f); Vector3 f = model.forward; f.y = 0; if (f.sqrMagnitude < 1e-6f) return; f.Normalize();
+            float ahead = Vector3.Dot(x[i] - rest[i], f), lim = 0.12f + 0.3f * v;
+            if (ahead <= lim) return;
+            var push = -f * (ahead - lim); x[i] += push; ox[i] += push;
+        }
         public void Update(float dt, Vector3 windW)
         {
             if (cape == null || restL == null) return;
@@ -263,7 +272,10 @@ namespace AsciiHero
             }
             // inertia scale: 60 % of the body's movement this frame goes straight into the cloth (positions and their
             // history alike, so it brings no speed of its own) - the rest it has to catch up with
-            Vector3 mv = (anchor - lastAnchor) * 0.6f; lastAnchor = anchor;
+            // (a dash, a leap: the body jumps faster than any wind; the cloak goes with it whole, or it would be left
+            // hanging in front of him when he dashes backwards or aside)
+            float jump = dt > 1e-5f ? (anchor - lastAnchor).magnitude / dt : 0;
+            Vector3 mv = (anchor - lastAnchor) * Mathf.Lerp(0.6f, 1f, Mathf.InverseLerp(4f, 9f, jump)); lastAnchor = anchor;
             for (int i = C; i < x.Length; i++) { x[i] += mv; ox[i] += mv; }
             Capsules();
             acc = Mathf.Min(acc + dt, STEP * 4);
@@ -304,10 +316,11 @@ namespace AsciiHero
                         if (l > tether[i]) x[i] = top + d * (tether[i] / l);
                         Collide(i, r);
                         Envelope(i);
+                        Behind(i, r);
                     }
                 }
             }
-            for (int i = C; i < x.Length; i++) Envelope(i);
+            for (int i = C; i < x.Length; i++) { Envelope(i); Behind(i, i / C); }
             for (int i = 0; i < x.Length; i++)
             {
                 Vector3 d = x[i] - rest[i];
