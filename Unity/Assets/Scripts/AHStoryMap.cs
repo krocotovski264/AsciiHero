@@ -241,6 +241,7 @@ namespace AsciiHero
             L.Grid();
             L.Geometry(mats);
             L.PlaceAt(at);
+            L.CollectCull();
             return L;
         }
         public static long Key(int i, int j) { return ((long)i << 32) ^ (uint)j; }
@@ -296,6 +297,7 @@ namespace AsciiHero
         class MB { public List<Vector3> v = new List<Vector3>(); public List<int> t = new List<int>(); }
         readonly Dictionary<string, MB> blocks = new Dictionary<string, MB>();
         MB Block(string mat, Vector2 m) { string k = mat + ":" + Mathf.FloorToInt(m.x / 10) + ":" + Mathf.FloorToInt(m.y / 10); MB b; if (!blocks.TryGetValue(k, out b)) { b = new MB(); blocks[k] = b; } return b; }
+        static void TriUp(MB b, Vector3 p0, Vector3 p1, Vector3 p2) { if (Vector3.Cross(p1 - p0, p2 - p0).y < 0) Tri(b, p0, p2, p1); else Tri(b, p0, p1, p2); }
         static void Tri(MB b, Vector3 p0, Vector3 p1, Vector3 p2) { int o = b.v.Count; b.v.Add(p0); b.v.Add(p1); b.v.Add(p2); b.t.Add(o); b.t.Add(o + 1); b.t.Add(o + 2); }
         // a quad facing toward 'face' (the triangles are wound so their normal points that way)
         static void Quad(MB b, Vector3 a, Vector3 bb, Vector3 c, Vector3 d, Vector3 face)
@@ -313,7 +315,7 @@ namespace AsciiHero
             foreach (var t in myTiles)
             {
                 var poly = map.Poly(t); var mb = Block(FloorMat(t.b), poly[0]);
-                for (int k = 1; k + 1 < poly.Count; k++) Tri(mb, L3(poly[0]), L3(poly[k + 1]), L3(poly[k]));
+                for (int k = 1; k + 1 < poly.Count; k++) TriUp(mb, L3(poly[0]), L3(poly[k + 1]), L3(poly[k]));
             }
             foreach (var c in myCircles)
             {
@@ -328,8 +330,8 @@ namespace AsciiHero
                         if (TileBiomeAt(mid) != null) continue;
                         Vector2 P(float a, float rr) { return c.c + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * rr; }
                         var mb = Block(FloorMat(c.b), mid);
-                        Tri(mb, L3(P(a0, r0)), L3(P(a1, r1)), L3(P(a0, r1)));
-                        if (r0 > 0) Tri(mb, L3(P(a0, r0)), L3(P(a1, r0)), L3(P(a1, r1)));
+                        TriUp(mb, L3(P(a0, r0)), L3(P(a1, r1)), L3(P(a0, r1)));
+                        if (r0 > 0) TriUp(mb, L3(P(a0, r0)), L3(P(a1, r0)), L3(P(a1, r1)));
                     }
                 }
             }
@@ -431,7 +433,7 @@ namespace AsciiHero
                     for (float s = 1.2f; s < len; s += Rr(5.5f, 8f))
                     {
                         var p = Vector2.Lerp(a, b, s / len) + outN * Rr(1.6f, 2.8f); if (InGap(p)) continue;
-                        try { NatureLib.Place(Rr(0, 1) < 0.65f ? "oak1" : "birch", mats, root.transform, L3(p), Rr(0, 360), Rr(0.8f, 1.15f)); } catch (Exception) { }
+                        try { NatureLib.Place(Rr(0, 1) < 0.65f ? "oak1" : "oak5", mats, root.transform, L3(p), Rr(0, 360), Rr(0.8f, 1.15f)); } catch (Exception) { }
                     }
             }
         }
@@ -512,6 +514,28 @@ namespace AsciiHero
                 }
             }
         }
+        // ---- only what is near the hero is on (the place is far bigger than the screen) ----
+        struct Cull { public GameObject go; public Vector3 c; public float r; }
+        readonly List<Cull> cull = new List<Cull>(); float cullT;
+        void CollectCull()
+        {
+            foreach (Transform ch in root.transform)
+            {
+                Bounds b = new Bounds(ch.position, Vector3.one * 2); bool any = false;
+                foreach (var r in ch.GetComponentsInChildren<Renderer>(true)) { if (!any) { b = r.bounds; any = true; } else b.Encapsulate(r.bounds); }
+                cull.Add(new Cull { go = ch.gameObject, c = b.center - origin, r = new Vector2(b.extents.x, b.extents.z).magnitude });
+            }
+        }
+        public override void Update(float t)
+        {
+            cullT -= Time.deltaTime; if (cullT > 0) return; cullT = 0.2f;
+            foreach (var c in cull)
+            {
+                bool on = (new Vector2(c.c.x - focus.x, c.c.z - focus.z)).magnitude - c.r < 24f;
+                if (c.go.activeSelf != on) c.go.SetActive(on);
+            }
+        }
+        public void CullNow() { cullT = 0; Update(0); }
         public string TitleAt(Vector3 w) { return map.ChunkName(ToMap(w)) ?? title; }
     }
 }

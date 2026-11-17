@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.73 · Unity";
+        public const string VERSION = "beta 0.74 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -2805,6 +2805,7 @@ namespace AsciiHero
         }
         void DrawMap(Rect r, bool big, bool live)
         {
+            StoryMapCheck();
             if (mapTex == null) { try { BuildMapTex(); } catch (System.Exception e) { Debug.LogException(e); return; } }
             if (mapMat == null) { var sh = Shader.Find("Hidden/AsciiHero/Map"); if (sh != null) mapMat = new Material(sh); if (mapMat == null) return; }
             if (mapMpp < 0) mapMpp = 0.07f;

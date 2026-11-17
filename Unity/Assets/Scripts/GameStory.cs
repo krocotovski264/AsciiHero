@@ -144,6 +144,7 @@ namespace AsciiHero
             camTgt = new Vector3(pos.x, 0.6f, pos.z);
             sceneCam.fieldOfView = 30; ascii.exposure = 1.3f; ascii.actorBoost = 1; Shader.SetGlobalFloat("_AsciiLod", ISO_LOD); Shader.SetGlobalFloat("_GlyphFarRef", GLYPH_FAR);
             SetShadowDistance(26);
+            L.focus = pos - L.origin; L.CullNow();
             StoryLight(true);
             ShowToast(L.TitleAt(pos));
         }
@@ -204,7 +205,7 @@ namespace AsciiHero
             public string id, name, kind; public Character ch; public MotionActor act; public StoryLocation L;
             public Vector3 p, home, goal; public int hp, maxHp; public float scale = 1;
             public int state; public float t, cd, seenT, lostT, dodgeCd, parryCd, leapT, stagger, deadT, barkCd, guardT, strafe = 1, dmgK = 1, think;
-            public Vector2 leapV; public bool noticed, hurtBark, swingHit, raged; public int combo; public Vector3 lastSeen;
+            public Vector2 leapV, step; public float stepT; public bool noticed, hurtBark, swingHit, raged; public int combo; public Vector3 lastSeen;
             public bool Dead => hp <= 0;
             public bool Boss => kind == "boss";
         }
@@ -382,6 +383,10 @@ namespace AsciiHero
             for (int i = 0; i < foes.Count; i++)
             {
                 var f = foes[i]; if (f.L != L) continue;
+                // far from the hero they sleep (switched off: no thinking, no skinning)
+                bool near = (new Vector2(f.p.x - pos.x, f.p.z - pos.z)).magnitude < 30f || f.noticed && !f.Dead;
+                if (f.ch.go.activeSelf != near) f.ch.go.SetActive(near);
+                if (!near) continue;
                 if (f.Dead) { DeadPose(f, dt); continue; }
                 f.t += dt; f.cd -= dt; f.dodgeCd -= dt; f.parryCd -= dt; f.barkCd -= dt; f.stagger -= dt; f.think -= dt; f.guardT -= dt;
                 var me = new Vector2(f.p.x, f.p.z); var toH = hp2 - me; float dist = toH.magnitude;
@@ -446,7 +451,7 @@ namespace AsciiHero
             var me = new Vector2(f.p.x, f.p.z); var g = new Vector2(f.goal.x, f.goal.z);
             if ((g - me).magnitude > 0.5f && f.state != 0)
             {
-                var step = f.L.NextStep(f.L.ToMap(f.p), f.L.ToMap(f.goal)); var sw = f.L.ToWorld(step); var d = new Vector2(sw.x - f.p.x, sw.z - f.p.z);
+                var sw = PathStep(f, f.goal, dt); var d = new Vector2(sw.x - f.p.x, sw.z - f.p.z);
                 if (d.magnitude > 0.05f) { dir2 = d.normalized; mag = f.state == 2 ? 0.9f : 0.55f; }
                 if (f.think < -12) f.state = 0;           // stuck: give up
                 return;
@@ -472,7 +477,7 @@ namespace AsciiHero
             bool heroSwinging = player.Attacking && player.combatT > 0;
             // the walk to him (round the walls, if he is out of sight)
             Vector2 toward = toH;
-            if (f.seenT > 0.2f) { var st = f.L.NextStep(f.L.ToMap(f.p), f.L.ToMap(f.lastSeen)); var sw = f.L.ToWorld(st); toward = new Vector2(sw.x - f.p.x, sw.z - f.p.z); }
+            if (f.seenT > 0.2f) { var sw = PathStep(f, f.lastSeen, dt); toward = new Vector2(sw.x - f.p.x, sw.z - f.p.z); }
             if (!f.Boss)
             {
                 // the simple ones: walk (run when far), strike when near; now and then a leap back from his blow
@@ -530,6 +535,13 @@ namespace AsciiHero
                 float want = reach * 1.25f; dir2 = (side * 0.8f + toH.normalized * Mathf.Clamp(dist - want, -1, 1)).normalized; mag = 0.7f;
                 if (Random.value < dt * 0.3f) f.strafe = -f.strafe;
             }
+        }
+        /// the next point on the way (the search is made at most twice a second per creature)
+        Vector3 PathStep(Foe f, Vector3 goal, float dt)
+        {
+            f.stepT -= dt;
+            if (f.stepT <= 0 || (f.L.ToWorld(f.step) - f.p).magnitude < 0.4f) { f.stepT = 0.5f + 0.2f * Random.value; f.step = f.L.NextStep(f.L.ToMap(f.p), f.L.ToMap(goal)); }
+            return f.L.ToWorld(f.step);
         }
         void Leap(Foe f, Vector2 d, float sp) { f.leapV = d.normalized * sp; f.leapT = 0.28f; SpawnPuff(f.p + Vector3.up * 0.3f, 0.04f, Vector3.zero, 0.4f); Sound("cloth", 0.5f, f.p); }
 
@@ -865,6 +877,49 @@ namespace AsciiHero
             GUI.Label(new Rect(c.x - r, c.y - r * 0.75f, 2 * r, r * 1.5f), string.Join("\n", SKULL[f]), sSkull);
             GUI.Label(new Rect(c.x - r, c.y + r * 0.62f, 2 * r, r * 0.4f), "Ёрик", sSmall);
             GUI.color = old;
+        }
+        // ---- the pocket map of a story place: its ground by biome, its walls, its ways out, chests ----
+        Location mapFor;
+        void StoryMapCheck()
+        {
+            var L = story ? loc as StoryLocation : null;
+            if (L == mapFor) return;
+            if (mapTex != null) Destroy(mapTex); mapTex = null; mapFor = L;
+            if (L == null) return;          // (the test world builds its own)
+            mapWorld = L.WorldRect;
+            int W = Mathf.Max(4, Mathf.CeilToInt(mapWorld.width * MAP_PPM)), H = Mathf.Max(4, Mathf.CeilToInt(mapWorld.height * MAP_PPM));
+            var px = new Color32[W * H]; var walk = new bool[W * H]; var bio = new string[W * H];
+            for (int j = 0; j < H; j++) for (int i = 0; i < W; i++)
+                {
+                    var w = new Vector3(mapWorld.x + (i + 0.5f) / MAP_PPM, 0, mapWorld.y + (j + 0.5f) / MAP_PPM); var m = L.ToMap(w);
+                    walk[j * W + i] = L.Walk(m); bio[j * W + i] = L.BiomeAt(m);
+                }
+            for (int j = 0; j < H; j++) for (int i = 0; i < W; i++)
+                {
+                    int ix = j * W + i; Color32 c;
+                    if (walk[ix])
+                    {
+                        string b = bio[ix]; float n = Mathf.PerlinNoise(i * 0.18f, j * 0.18f);
+                        c = C32(b == "meadow" ? 0x1c3319u : b == "tavern" ? 0x5e5044u : 0x3a3836u); c.a = (byte)((b == "meadow" && n > 0.42f ? 2 : 1) * 16);
+                    }
+                    else
+                    {
+                        bool edge = false;
+                        for (int dj = -2; dj <= 2 && !edge; dj++) for (int di = -2; di <= 2; di++) { int a = i + di, bb = j + dj; if (a >= 0 && bb >= 0 && a < W && bb < H && walk[bb * W + a]) { edge = true; break; } }
+                        if (!edge) continue;
+                        c = C32(0x6a6670u); c.a = 9 * 16;
+                    }
+                    px[ix] = c;
+                }
+            void Spot(Vector3 w, float r, uint col, int cls)
+            {
+                int ci = Mathf.FloorToInt((w.x - mapWorld.x) * MAP_PPM), cj = Mathf.FloorToInt((w.z - mapWorld.y) * MAP_PPM), R = Mathf.CeilToInt(r * MAP_PPM);
+                for (int j = cj - R; j <= cj + R; j++) for (int i = ci - R; i <= ci + R; i++) { if (i < 0 || j < 0 || i >= W || j >= H || (i - ci) * (i - ci) + (j - cj) * (j - cj) > R * R) continue; var c = C32(col); c.a = (byte)(cls * 16); px[j * W + i] = c; }
+            }
+            foreach (var g in L.passages) Spot(L.ToWorld(g.p), 1.1f, 0xe8b443u, 11);
+            foreach (var c in chests) if (c.L == L) Spot(c.p, 0.5f, 0xb08860u, 8);
+            mapTex = new Texture2D(W, H, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp, name = "StoryMap" };
+            mapTex.SetPixels32(px); mapTex.Apply(false, true);
         }
         string StoryTitle() { var L = loc as StoryLocation; return L != null ? L.TitleAt(pos) : null; }
     }
