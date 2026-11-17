@@ -51,7 +51,7 @@ namespace AsciiHero
             { "DARK", new MatDef(MatId.DARK, 0x101014, 1, 0) },
             { "RED", new MatDef(MatId.RED, 0xb02828, 0.85f, 0) },
             { "ROBE", new MatDef(MatId.ROBE, 0x3f4fb8, 0.85f, 0, 0, false, true) },
-            { "CAPE", new MatDef(MatId.RED, 0x6e1a20, 0.9f, 0, 0, false, true) },            // the knight's cloak
+            { "CAPE", new MatDef(MatId.RED, 0xa8343c, 0.75f, 0, 0, false, true) },            // the knight's cloak
             { "ROBED", new MatDef(MatId.ROBED, 0x28306e, 0.9f, 0) },
             { "PLANK", new MatDef(MatId.PLANK, 0xffffff, 0.85f, 0) },
             { "FLOOR", new MatDef(MatId.FLOOR, 0x5e5044, 1, 0, 0, true) },

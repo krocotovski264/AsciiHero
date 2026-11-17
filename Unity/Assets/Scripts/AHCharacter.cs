@@ -333,8 +333,8 @@ namespace AsciiHero
         /// (-Th..+Th, Th growing narrower from the neck to the elbows), down it (v) the height (rows closer together at the
         /// top, where it bends over the shoulders). The shaders find a vertex's place on the grid the same way (AHCloth).
         public Vector3[] capeRest, capeNrm; public Vector4 capeMap, capeMap2, capeMap3; public GameObject hoodDown;
-        public const int CAPE_C = 12, CAPE_R = 12; const float CAPE_EXP = 1.45f;
-        float capeTop, capeBot, capeCz, capeVs, capeVe, capeTh0, capeTh1, capeTh2; float[] capeBack, capeRx, capeRz;
+        public const int CAPE_C = 12, CAPE_R = 12; public const float CAPE_EXP = 1.45f;
+        public float capeTop, capeBot, capeCz; float capeVs, capeVe; public float[] capeRx, capeRz;
         public static float CapeTheta(Vector4 m2, Vector4 m3, float v) { return v < m2.w ? Mathf.Lerp(m2.x, m2.y, v / m2.w) : Mathf.Lerp(m2.y, m2.z, Mathf.SmoothStep(0, 1, Mathf.InverseLerp(m2.w, m3.x, v))); }
         Vector3 CapePt(float u, float v)
         {

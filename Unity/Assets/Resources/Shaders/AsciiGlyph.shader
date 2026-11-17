@@ -218,9 +218,10 @@ Shader "AsciiHero/Glyph"
                 float sceneZ = dz > 1e-4 ? dz * 12.0 : 1e5;
                 float myZ = -pVS.z;
                 bool inside = all(suv >= 0.0) && all(suv <= 1.0);
+                bool capeTwo = _GlyphCloth > 0.5 && _GlyphCloth < 1.5 && _ClothSim > 0.5 && _ClothMap.w > 0.5;     // the cloak: cloth, seen from either side (its rest normals say nothing once it moves)
                 float seeK = _GlyphSee > 0.5 ? SeeK(pWS) : 0.0;
                 bool seeGone = frac(i.seed.x * 13.37 + 0.21) < seeK * 1.02 || frac(i.seed.x * 7.13 + 0.53) < _GlyphFade * 1.02;      // (_GlyphFade: dissolving away)
-                bool vis = !seeGone && ((scat || smkA > 0.03) ? (lodKeep && !gone && inside) : lodKeep && !gone && ember < 0.999 && dot(nVS, toCam) > -0.05 - ember - _GlyphPuff * 4.0 - (_DashSpin.w != 0.0 ? 4.0 : 0.0) && myZ <= sceneZ + 0.008 + (0.0035 + 0.007 * (lod - 1.0)) * myZ && inside);
+                bool vis = !seeGone && ((scat || smkA > 0.03) ? (lodKeep && !gone && inside) : lodKeep && !gone && ember < 0.999 && (capeTwo || dot(nVS, toCam) > -0.05 - ember - _GlyphPuff * 4.0 - (_DashSpin.w != 0.0 ? 4.0 : 0.0)) && myZ <= sceneZ + 0.008 + (0.0035 + 0.007 * (lod - 1.0)) * myZ && inside);
                 float3 lit = SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, sampler_AsciiLitTex, suv, 0).rgb;
                 float3 col = _AsciiLinear > 0.5 ? pow(max(lit, 0.0), 1.0 / 2.2) : max(lit, 0.0);
                 float lum = dot(col, float3(0.299, 0.587, 0.114));

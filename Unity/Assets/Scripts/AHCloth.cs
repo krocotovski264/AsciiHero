@@ -174,14 +174,14 @@ namespace AsciiHero
         readonly Vector4[] disp = new Vector4[GRID], nrm = new Vector4[GRID];
         struct Link { public int a, b; public float len, ks, kc; }
         readonly System.Collections.Generic.List<Link> links = new System.Collections.Generic.List<Link>();
-        readonly Vector4 map, map2, map3;
+        readonly Vector4 map, map2, map3; readonly Character chr;
         float acc; bool ready; Vector3 lastAnchor;
         const float STEP = 1f / 90f;
 
         public CapeSim(Character ch)
         {
             cape = ch.skirt; model = ch.model; H = ch.human; restL = ch.capeRest; nrmL = ch.capeNrm;
-            map = ch.capeMap; map2 = ch.capeMap2; map3 = ch.capeMap3;
+            map = ch.capeMap; map2 = ch.capeMap2; map3 = ch.capeMap3; chr = ch;
             float sc = cape.lossyScale.y;
             System.Action<int, int, float, float> add = (a, b, ks, kc) => links.Add(new Link { a = a, b = b, len = (restL[a] - restL[b]).magnitude * sc, ks = ks, kc = kc });
             for (int r = 0; r < R; r++)
@@ -229,6 +229,26 @@ namespace AsciiHero
             float v = r / (R - 1f), md = 0.05f + 1.15f * v;
             Vector3 dr = x[i] - rest[i]; if (dr.sqrMagnitude > md * md) x[i] = rest[i] + dr.normalized * md;
             float g = model.position.y + 0.02f; if (x[i].y < g) x[i].y = g;
+        }
+        /// the check that keeps the cloak out of the armour: round the body's axis, at the particle's height, the armour's
+        /// outline (the cloak's own rest outline, a little smaller) - a particle inside it is put back on it, along its
+        /// angle from the axis; one that has got deep inside (a dash, a fall) goes back where it should hang
+        bool Envelope(int i)
+        {
+            Vector3 l = cape.InverseTransformPoint(x[i]);
+            float H = chr.capeTop - chr.capeBot; if (H <= 0) return false;
+            float f = (chr.capeTop - l.y) / H; if (f < 0.02f || f > 1.05f) return false;
+            float v = Mathf.Pow(Mathf.Clamp01(f), 1f / Character.CAPE_EXP);
+            int k = Mathf.Clamp(Mathf.RoundToInt(v * (chr.capeRx.Length - 1)), 0, chr.capeRx.Length - 1);
+            float sh = Mathf.Lerp(0.9f, 0.82f, v);
+            float rx = chr.capeRx[k] * sh, rz = chr.capeRz[k] * sh;
+            float dx = l.x, dz = l.z - chr.capeCz, e = (dx / rx) * (dx / rx) + (dz / rz) * (dz / rz);
+            if (e >= 1) return false;
+            if (e < 0.25f) { x[i] = rest[i]; ox[i] = rest[i]; return true; }
+            float s = 1f / Mathf.Sqrt(e);
+            l.x = dx * s; l.z = chr.capeCz + dz * s;
+            var w = cape.TransformPoint(l); ox[i] += w - x[i]; x[i] = w;      // (no speed gained from the push)
+            return true;
         }
 
         public void Update(float dt, Vector3 windW)
@@ -283,9 +303,11 @@ namespace AsciiHero
                         Vector3 top = x[c], d = x[i] - top; float l = d.magnitude;
                         if (l > tether[i]) x[i] = top + d * (tether[i] / l);
                         Collide(i, r);
+                        Envelope(i);
                     }
                 }
             }
+            for (int i = C; i < x.Length; i++) Envelope(i);
             for (int i = 0; i < x.Length; i++)
             {
                 Vector3 d = x[i] - rest[i];
