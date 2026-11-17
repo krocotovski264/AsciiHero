@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.71 · Unity";
+        public const string VERSION = "beta 0.72 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -111,6 +111,7 @@ namespace AsciiHero
 
         // world camera
         // MOBA camera: fixed (no rotation), high and far, looking down at about 55 degrees
+        const float GLYPH_FAR = 14f;      // (m from the camera: farther scenery gets fewer, larger characters - see AsciiGlyph)
         const float ISO_LOD = 2.5f / 1.5f; float isoYaw = 0, isoPitch = 0.96f, isoYawT = 0, isoPitchT = 0.96f; const float ISO_DIST = 7.6f * ISO_LOD;
         Vector3 pos, camTgt; bool lockOn; float labelT; string animLabel = "idle";
         // controls (0.38): left half - an invisible stick that appears under the finger, a double tap (tap, then press
@@ -1020,7 +1021,7 @@ namespace AsciiHero
             pos = at ?? loc.SpawnW; heroTrail = pos; player.heading = Mathf.PI; player.ResetSim(); player.noLock = false;
             hero.go.transform.position = pos; hero.go.transform.rotation = Quaternion.Euler(0, 180, 0);
             camTgt = new Vector3(pos.x, 0.6f, pos.z);
-            sceneCam.fieldOfView = 30; ascii.exposure = 1.3f; ascii.actorBoost = 1; Shader.SetGlobalFloat("_AsciiLod", ISO_LOD);
+            sceneCam.fieldOfView = 30; ascii.exposure = 1.3f; ascii.actorBoost = 1; Shader.SetGlobalFloat("_AsciiLod", ISO_LOD); Shader.SetGlobalFloat("_GlyphFarRef", GLYPH_FAR);
             SetShadowDistance(26);      // (the view reaches about 21 m from the camera; a shorter range keeps the shadow map sharp at half its old size)
             if (where == 0)
             {
@@ -1047,7 +1048,7 @@ namespace AsciiHero
             for (int i = 0; i < 4; i++) pushPts[i] = FAR; Shader.SetGlobalVectorArray("_AsciiPush", pushPts);
             hero.go.transform.position = Vector3.zero; hero.go.transform.rotation = Quaternion.identity;
             player.speed = 0; player.heading = 0; player.ResetSim(); lockOn = false;
-            sceneCam.fieldOfView = 36; ascii.exposure = 1; ascii.actorBoost = 0; Shader.SetGlobalFloat("_AsciiLod", 1);
+            sceneCam.fieldOfView = 36; ascii.exposure = 1; ascii.actorBoost = 0; Shader.SetGlobalFloat("_AsciiLod", 1); Shader.SetGlobalFloat("_GlyphFarRef", 0);
             ApplyEditorAmbient();
             SetShadowDistance(14);
         }
@@ -1081,7 +1082,8 @@ namespace AsciiHero
         void LoadSettings()
         {
             bool phone = Application.isMobilePlatform;
-            setQuality = PlayerPrefs.GetInt("set_quality", phone ? 1 : 2); setGrass = PlayerPrefs.GetInt("set_grass", 4); setRes = PlayerPrefs.GetInt("set_res", 4);
+            setQuality = PlayerPrefs.GetInt("set_quality", phone ? 1 : 2); setGrass = PlayerPrefs.GetInt("set_grass", 4); setRes = PlayerPrefs.GetInt("set_res", 3);
+            if (PlayerPrefs.GetInt("set_res_v072", 0) == 0) { PlayerPrefs.SetInt("set_res_v072", 1); if (setRes == 4) { setRes = 3; PlayerPrefs.SetInt("set_res", 3); } PlayerPrefs.Save(); }      // 0.72: 85 % by default (the load test: 100 % costs ~2-2.5 ms of GPU on a 2340-wide phone, hardly seen)
             setFps = PlayerPrefs.GetInt("set_fps", 1); setBloom = PlayerPrefs.GetInt("set_bloom", 1) == 1; setShowFps = PlayerPrefs.GetInt("set_showfps", 0) == 1;
             setMusic = PlayerPrefs.GetInt("set_music", 70); setSound = PlayerPrefs.GetInt("set_sound", 80); setDev = PlayerPrefs.GetInt("set_dev", 0) == 1; setOutline = PlayerPrefs.GetInt("set_outline", 1) == 1;
         }
@@ -1185,7 +1187,7 @@ namespace AsciiHero
         //      measured before the sky; the player's sky is put back at the end.)
         // At the end a table: every biome with its result and whether it holds 60 and 30 frames a second.
         static readonly string[] PERF = { "всё включено", "без травы", "без символов (только 3D-сцена)", "без героя", "без анимации и ткани", "без теней", "без свечения",
-            "без интерфейса", "без обводки", "с отдельной камерой глубины (как до 0.35)", "герой: все символы (как в 0.34)", "разрешение 67 %", "герой без слоя символов", "без деревьев, камней и брони (только земля и трава)" };
+            "без интерфейса", "без обводки", "с отдельной камерой глубины (как до 0.35)", "герой: все символы (как в 0.34)", "разрешение 67 %", "герой без слоя символов", "без деревьев, камней и брони (только земля и трава)", "символы вдали без прореживания (как до 0.72)" };
         // part 3: name, time of day, season, precipitation, its strength
         static readonly (string n, int tod, int season, bool pr, int lvl)[] PERF_SKY = {
             ("ночь, лето, ясно (база)", 3, 1, false, 1), ("утро, ясно", 0, 1, false, 1), ("день, ясно", 1, 1, false, 1), ("вечер, ясно", 2, 1, false, 1),
@@ -1257,6 +1259,7 @@ namespace AsciiHero
                 case 10: perfFullActors = on; break;
                 case 11: if (on) { int old = setRes; setRes = 1; ApplySettings(false); setRes = old; } else ApplySettings(false); break;
                 case 12: if (hero != null) foreach (var r in hero.glyphs) if (r != null) r.enabled = !on; break;
+                case 14: Shader.SetGlobalFloat("_GlyphFarRef", on ? 0f : GLYPH_FAR); break;
                 case 13: if (loc != null && loc.root != null) foreach (Transform c in loc.root.transform) if (c.name != "Ground" && c.name != "Grass" && c.name != "Path") c.gameObject.SetActive(!on); break;
             }
             if (perfRun) { QualitySettings.vSyncCount = 0; Application.targetFrameRate = 240; }
@@ -1348,7 +1351,7 @@ namespace AsciiHero
             int ok60 = 0, ok30 = 0;
             foreach (var r in perfRows)
             {
-                bool a60 = r.ms <= 17.2f && r.miss < 5, a30 = r.ms <= 33.5f;      // (60: the mean within a hair of 1/60 s, hardly a frame missed)
+                bool a60 = r.ms <= 17.6f && r.miss < 12, a30 = r.ms <= 33.5f;      // (60: 57 frames a second or more, few frames over 1/60 s - a hair under 60 is not "30")
                 if (a60) ok60++; if (a30) ok30++;
                 sb.Append("\n  ").Append(a60 ? "[60] " : a30 ? "[30] " : "[<30] ").Append(r.name).Append(": ").Append(r.ms.ToString("0.0")).Append(" мс, ").Append((1000f / r.ms).ToString("0")).Append(" к/с, худший ").Append(r.worst.ToString("0"))
                   .Append(" мс, >1/60: ").Append(r.miss.ToString("0")).Append(" %").Append(r.gpu >= 0 ? ", GPU " + r.gpu.ToString("0.0") + " мс" : "").Append(", символов ").Append(r.glyphs);

@@ -139,6 +139,7 @@ Shader "AsciiHero/Glyph"
                 return ws + _DashShift.xyz;
             }
             float _AsciiLod;      // far camera: fewer, larger characters (how many times further than the close-up distance)
+            float _GlyphFarRef;   // scenery beyond this view distance (m) gets fewer, larger characters, the same size on the screen (0 = off)
             float _GlyphPuff;     // per renderer: 0..1, a burst of smoke flying apart
             float _GlyphBurn;     // per renderer: 0..1, a torn-off limb burning away
             float _LimbGone[6];   // per renderer: 1 = this limb is torn off (index from seed.y)
@@ -218,6 +219,11 @@ Shader "AsciiHero/Glyph"
                 float sceneZ = dz > 1e-4 ? dz * 12.0 : 1e5;
                 float myZ = -pVS.z;
                 bool inside = all(suv >= 0.0) && all(suv <= 1.0);
+                // far scenery: past _GlyphFarRef the characters keep their size on the screen - fewer of them, each larger
+                // (thinned on the same even lattice as the zoom; they were the dearest part of the frame)
+                float farL = (_AsciiActor > 0.5 || _GlyphFarRef <= 0.0) ? 1.0 : max(1.0, myZ / _GlyphFarRef);
+                bool farKeep = farL < 1.01 || (i.seed.y < 0.0 ? -i.seed.y < 1.12 / (farL * farL) : frac(i.seed.x * 31.7 + 0.37) < 1.7 / (farL * farL));
+                lodKeep = lodKeep && farKeep;
                 bool capeTwo = _GlyphCloth > 0.5 && _GlyphCloth < 1.5 && _ClothSim > 0.5 && _ClothMap.w > 0.5;     // the cloak: cloth, seen from either side (its rest normals say nothing once it moves)
                 float seeK = _GlyphSee > 0.5 ? SeeK(pWS) : 0.0;
                 bool seeGone = frac(i.seed.x * 13.37 + 0.21) < seeK * 1.02 || frac(i.seed.x * 7.13 + 0.53) < _GlyphFade * 1.02;      // (_GlyphFade: dissolving away)
@@ -251,7 +257,7 @@ Shader "AsciiHero/Glyph"
                 float4 ink = _GlyphInk[(int)(clamp(_AsciiRow, 0.0, 13.0) * 16.0 + clamp(gi, 0.0, 15.0) + 0.5)];
                 float2 lc = lerp(ink.xy, ink.zw, i.corner + 0.5);
                 o.local = lc;
-                pVS.xy += (lc - 0.5) * _GlyphCell.xy * GLYPH_SCALE * (_AsciiActor > 0.5 ? 1.18 * max(1.0, _AsciiActorLod) : lod);   // upright character in the view plane; on characters dense and overlapping so no gaps show
+                pVS.xy += (lc - 0.5) * _GlyphCell.xy * GLYPH_SCALE * (_AsciiActor > 0.5 ? 1.18 * max(1.0, _AsciiActorLod) : lod * farL);   // upright character in the view plane; on characters dense and overlapping so no gaps show
                 o.positionCS = vis ? TransformWViewToHClip(pVS) : float4(2, 2, 2, 1);
                 return o;
             }

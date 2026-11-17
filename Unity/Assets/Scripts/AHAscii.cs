@@ -327,7 +327,7 @@ namespace AsciiHero
                 RenderTexture.active = small; tex.ReadPixels(new Rect(0, 0, 32, 32), 0, 0, false); tex.Apply(false);
                 var px = tex.GetPixels(); float lo = 1e9f, hi = -1e9f; int non0 = 0;
                 foreach (var c in px) { float a = Mathf.Abs(c.a); if (a > 1e-4f) { non0++; lo = Mathf.Min(lo, a); hi = Mathf.Max(hi, a); } }
-                if (non0 < 8) { if (checksLeft > 0) checkFrames = 30; else Fail("в кадре не нашлось поверхностей"); }
+                if (non0 < 8) { checksLeft++; checkFrames = 90; }      // (an empty frame - the loading screen, a menu - proves nothing: look again later; it used to give up and switch the outline off for good)
                 else if (hi - lo < 1e-3f) Fail("альфа одинакова по всему кадру (" + lo.ToString("0.###") + ")");
                 else { checksLeft = 0; Debug.Log("Глубина сцены берётся из альфы цвета (отдельная камера глубины выключена): проверка пройдена, " + non0 + " точек, " + (lo * 12).ToString("0.0") + "–" + (hi * 12).ToString("0.0") + " м"); }
             }
