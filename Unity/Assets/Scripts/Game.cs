@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.70 · Unity";
+        public const string VERSION = "beta 0.71 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -1170,7 +1170,7 @@ namespace AsciiHero
             Row("Громкость звуков", setSound + " %", () => setSound -= 10, () => setSound += 10);
             Row("Режим разработчика", setDev ? "вкл" : "выкл", () => setDev = !setDev, () => setDev = !setDev);
             if (changed) ApplySettings();
-            if (Button(new Rect(x0, y1 + row * rh + 4 * k, pw, 26 * k), "ТЕСТ НАГРУЗКИ ПО ВСЕМ БИОМАМ (около 2 мин, результат — в логе)")) StartPerfTest();
+            if (Button(new Rect(x0, y1 + row * rh + 4 * k, pw, 26 * k), "ТЕСТ НАГРУЗКИ: БИОМЫ И ПОГОДА (около 3 мин, результат — в логе)")) StartPerfTest();
         }
 
         // ---------- the load test ----------
@@ -1180,9 +1180,20 @@ namespace AsciiHero
         //      with everything on; for each: mean and worst frame, the share of frames over 1/60 s, CPU and GPU times,
         //      the characters in the scene and how many locations are switched on round it.
         //   2. In the heaviest biome: everything on, then one part off at a time - what each part of the frame costs.
+        //   3. In the same biome: the sky - the times of day, rain and snow at each strength, a downpour by day - what
+        //      the weather costs against a clear night. (Parts 1 and 2 run under a clear summer night, as the game was
+        //      measured before the sky; the player's sky is put back at the end.)
         // At the end a table: every biome with its result and whether it holds 60 and 30 frames a second.
         static readonly string[] PERF = { "всё включено", "без травы", "без символов (только 3D-сцена)", "без героя", "без анимации и ткани", "без теней", "без свечения",
             "без интерфейса", "без обводки", "с отдельной камерой глубины (как до 0.35)", "герой: все символы (как в 0.34)", "разрешение 67 %", "герой без слоя символов", "без деревьев, камней и брони (только земля и трава)" };
+        // part 3: name, time of day, season, precipitation, its strength
+        static readonly (string n, int tod, int season, bool pr, int lvl)[] PERF_SKY = {
+            ("ночь, лето, ясно (база)", 3, 1, false, 1), ("утро, ясно", 0, 1, false, 1), ("день, ясно", 1, 1, false, 1), ("вечер, ясно", 2, 1, false, 1),
+            ("ночь, дождь лёгкий", 3, 1, true, 0), ("ночь, дождь средний", 3, 1, true, 1), ("ночь, ливень с молниями", 3, 1, true, 2), ("день, ливень", 1, 1, true, 2),
+            ("осень, дождь средний", 3, 2, true, 1), ("зима, без осадков (снег на земле)", 3, 3, false, 1),
+            ("зима, снег лёгкий", 3, 3, true, 0), ("зима, снег средний", 3, 3, true, 1), ("зима, снег сильный", 3, 3, true, 2), ("день, зима, снег сильный", 1, 3, true, 2) };
+        (int tod, int season, bool pr, int lvl) perfSkySaved; float perfSkyBase, perfSkyMs; Location perfSkyLoc;
+        void PerfSky(int tod, int season, bool pr, int lvl) { skyS.tod = tod; skyS.season = season; skyS.precip = pr; skyS.level = lvl; skyS.Update(30f); }     // (30 s at once: the sky settles before the measurement)
         bool perfRun, perfNoAnim, perfNoGui, perfFullActors, perfWalk; int perfIx; float perfT, perfBase, pWorst; int pN, pFt, savedVsync;
         double pSum, pMain, pRender, pGpu, accU, accA, accG; readonly FrameTiming[] ftBuf = new FrameTiming[1];
         double fMain, fGpu; int fFt;
@@ -1214,6 +1225,7 @@ namespace AsciiHero
             if (!world || loc != field) EnterWorld(true);
             if (!world) return;
             worldZoomT = 1; perfRun = true; perfIx = 0; PerfReset();
+            perfSkySaved = (skyS.tod, skyS.season, skyS.precip, skyS.level); PerfSky(3, 1, false, 1);
             savedVsync = QualitySettings.vSyncCount; QualitySettings.vSyncCount = 0; Application.targetFrameRate = 240;
             Debug.Log("ТЕСТ НАГРУЗКИ · " + VERSION + " · " + SystemInfo.deviceModel + " · " + SystemInfo.graphicsDeviceName + " · экран " + Screen.width + "×" + Screen.height +
                       " @" + Screen.currentResolution.refreshRateRatio.value.ToString("0") + " Гц · качество " + QUALITY[setQuality] + ", трава " + GRASS[setGrass] + " %, разрешение " + RES[setRes] + " %, ограничение в игре " + FPS[setFps] + " к/с (тест идёт без ограничения)");
@@ -1223,7 +1235,7 @@ namespace AsciiHero
             perfLocs.Add(null);         // (null: the tavern, built when it is reached)
             // part 0: a quick round of every place first, not measured - the first time anything is shown the device
             // prepares its shaders and uploads its meshes (that cost 0.2 s a frame in the first place measured)
-            perfPhase = 0; perfLocIx = 0; perfWalk = true; perfHeavy = null; perfHeavyMs = 0;
+            perfPhase = 0; perfLocIx = 0; perfWalk = true; perfHeavy = null; perfHeavyMs = 0; perfSkyLoc = null; perfSkyMs = 0;
             PerfGo(perfLocs[0]);
         }
         int pMiss, pHitch; float perfBaseGpu;
@@ -1284,6 +1296,7 @@ namespace AsciiHero
                 if (pHitch > 0) line += " · рывков от 0,5 с (не в счёт): " + pHitch;
                 Debug.Log(line);
                 if (ms > perfHeavyMs && loc != tavern) { perfHeavyMs = ms; perfHeavy = loc; }
+                if (ms > perfSkyMs && loc != tavern && loc != cave) { perfSkyMs = ms; perfSkyLoc = loc; }      // (the weather: under the open sky)
                 perfLocIx++;
                 if (perfLocIx < perfLocs.Count)
                 {
@@ -1294,6 +1307,22 @@ namespace AsciiHero
                 // part 2: the parts of the frame, in the heaviest biome
                 Debug.Log("ТЕСТ · самый тяжёлый биом — " + LocTitle(perfHeavy) + ": по частям кадра");
                 perfPhase = 2; perfIx = 0; PerfGo(perfHeavy); PerfReset(); return;
+            }
+            if (perfPhase == 3)
+            {
+                // ---- part 3: one sky done ----
+                var sk = PERF_SKY[perfIx];
+                if (perfIx == 0) perfSkyBase = ms;
+                string lw = "ТЕСТ · погода · " + LocTitle(perfSkyLoc) + " · " + sk.n + ": " + ms.ToString("0.0") + " мс (" + (1000f / ms).ToString("0") + " к/с), худший кадр " + pWorst.ToString("0") + " мс, кадров дольше 1/60 с: " + miss.ToString("0") + " %";
+                if (perfIx > 0) lw += ", к ясной ночи " + (ms - perfSkyBase).ToString("+0.0;-0.0") + " мс";
+                if (pFt > 0) lw += " · главный поток " + (pMain / pFt).ToString("0.0") + ", GPU " + (pGpu / pFt).ToString("0.0") + " мс";
+                lw += " · осадков в кадре " + (precipGo != null && precipGo.activeInHierarchy ? "да" : "нет");
+                Debug.Log(lw);
+                perfRows.Add(new PerfRow { name = "погода: " + sk.n, ms = ms, worst = pWorst, miss = miss, gpu = pFt > 0 ? (float)(pGpu / pFt) : -1, glyphs = GlyphLayer.count });
+                perfIx++;
+                if (perfIx < PERF_SKY.Length) { var nx = PERF_SKY[perfIx]; PerfSky(nx.tod, nx.season, nx.pr, nx.lvl); PerfGo(perfSkyLoc); PerfReset(); return; }
+                PerfSky(perfSkySaved.tod, perfSkySaved.season, perfSkySaved.pr, perfSkySaved.lvl);
+                PerfFinish(); return;
             }
             // ---- part 2: one stage done ----
             if (perfIx == 0) perfBase = ms;
@@ -1306,9 +1335,16 @@ namespace AsciiHero
             Debug.Log(ln);
             PerfSet(perfIx, false); perfIx++;
             if (perfIx < PERF.Length) { PerfGo(perfHeavy); PerfSet(perfIx, true); PerfReset(); return; }      // (back to the same spot for every stage)
+            // part 3: the weather, in the same biome
+            if (perfSkyLoc == null) perfSkyLoc = field;
+            Debug.Log("ТЕСТ · погода и осадки в самом тяжёлом биоме под открытым небом — " + LocTitle(perfSkyLoc) + " (время суток, дождь и снег по силе)");
+            perfPhase = 3; perfIx = 0; { var s0 = PERF_SKY[0]; PerfSky(s0.tod, s0.season, s0.pr, s0.lvl); } PerfGo(perfSkyLoc); PerfReset();
+        }
+        void PerfFinish()
+        {
             // ---- the end: the table ----
             perfRun = false; perfWalk = false; QualitySettings.vSyncCount = savedVsync; ApplySettings(false);
-            var sb = new System.Text.StringBuilder("ТЕСТ · ИТОГ по биомам (60 к/с = кадр до 16,7 мс; 30 к/с = до 33,3 мс):");
+            var sb = new System.Text.StringBuilder("ТЕСТ · ИТОГ по биомам и погоде (60 к/с = кадр до 16,7 мс; 30 к/с = до 33,3 мс):");
             int ok60 = 0, ok30 = 0;
             foreach (var r in perfRows)
             {
