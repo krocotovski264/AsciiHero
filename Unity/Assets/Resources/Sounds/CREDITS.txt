@@ -40,3 +40,6 @@ Other assets of AsciiHero (not sounds):
                            cut off to move on its own (Yorick in the pocket, the risen, the fallen knights)
   Creatures: their speeds, habits and kinds of attack follow D&D 5e monsters (wererat, zombie: SRD 5.1 under
   CC BY 4.0; ratfolk: Tome of Beasts, Kobold Press) - in spirit, not in numbers
+  Item icons (Game.cs ITEM_ICONS): game-icons.net, CC BY 3.0 - death-skull (Sbed), scroll-unfurled, visored-helm,
+                           cut-diamond, swap-bag (Lorc), beer-bottle (Delapouite); redrawn as 10 x 5 characters
+  Resources/Voice/*.ogg    voiced lines made with Voicebox (github.com/jamiepine/voicebox) by tools/voicebox_voices.py

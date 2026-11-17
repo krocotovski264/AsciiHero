@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.76 · Unity";
+        public const string VERSION = "beta 0.77 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -48,10 +48,24 @@ namespace AsciiHero
         // integrity instead of a health bar: five limbs (head, armL, armR, legL, legR), each worth 20 %
         readonly Vector4[] pushPts = new Vector4[4]; static readonly Vector4 FAR = new Vector4(9999, 0, 9999, 0);
         int hp = 100; readonly bool[] limbs = { true, true, true, true, true }; float respawnT; Vector3 heroTrail;
+        // each piece of the armour has its own strength: the first time it is beaten to nothing it falls off and lies
+        // there (picked up again, it is whole); the second time it is gone for good
+        readonly int[] limbHp = { 100, 100, 100, 100, 100 }; readonly bool[] limbBroken = new bool[5];
+        static readonly float[] LIMB_HIT = { 0.15f, 0.25f, 0.25f, 0.175f, 0.175f };     // where blows land: the arms most
+        void HpFromLimbs() { int s = 0; for (int l = 0; l < 5; l++) s += limbs[l] ? limbHp[l] : 0; hp = Mathf.CeilToInt(s / 5f); if (LimbCount() == 0) hp = 0; else hp = Mathf.Max(1, hp); }
         int LimbCount() { int n = 0; foreach (var b in limbs) if (b) n++; return n; }
         GameObject editorRoot, worldLightsRoot; Light key, rim, fill, heroLight;
         GameObject floor;
-        bool rebuildPending;
+        bool rebuildPending; GUIStyle sLimb, sIcon;
+        // the things in the backpack, drawn in characters (after the icons of game-icons.net, CC BY 3.0: Lorc, Delapouite, Sbed)
+        static readonly Dictionary<string, string> ITEM_ICONS = new Dictionary<string, string> {
+            { "Череп Ёрика", " -*%@@%#= \n*@@@@@@@@*\n.@- %% .@-\n @@@=-@@@ \n  =@@@@+. " },  // game-icons.net: death-skull
+            { "Записка о Большой Крысе", ".-+###%%* \n :=@@@@@# \n  #@@@@@: \n #@@@@@.  \n +**+@@@%-" },  // game-icons.net: scroll-unfurled
+            { "Шлем крысолюдов", "   *%@*.  \n  #%%%%%  \n :#%%@%#: \n  :=@@+-  \n  ==**++  " },  // game-icons.net: visored-helm
+            { "Драгоценности", "          \n.#**##**#.\n.*@#@@#@#.\n  .*%@*:  \n    ..    " },  // game-icons.net: cut-diamond
+            { "Бутыль крысиного пойла", "    ==    \n   .=*.   \n   +=++   \n   #**%   \n   -::-   " },  // game-icons.net: beer-bottle
+            { "Вещица из трактира", "     ++#. \n   :=+=-. \n  =@@@%   \n =@@@@@=  \n :%@@%#.  " },  // game-icons.net: swap-bag
+        };
         // body customisation UI
         Rect bodyList; readonly List<Rect> bodyTracks = new List<Rect>(); readonly List<int> bodyTrackIx = new List<int>(); Rect bodyTrackHit;
         float bodyScroll, bodyScrollMax, bodyBuiltAt; bool bodyDirty, setDev, presetOpen; int presetIx = 2; readonly string[] devText = new string[64]; readonly string[] devShown = new string[64];
@@ -303,23 +317,32 @@ namespace AsciiHero
             if (hp <= 0 || !ready) return;
             if (player != null) player.PokeIdle();
             if (sfx != null) { sfx.Play("hit_armor", 0.7f); sfx.Play("clash", 0.35f); }
-            hp = Mathf.Max(0, hp - pct);
+            // the blow falls on one piece (of those still on), it takes four times the old share of the whole
+            float tot = 0; for (int l = 0; l < 5; l++) if (limbs[l]) tot += LIMB_HIT[l];
+            if (tot <= 0) return;
+            float r = Random.value * tot; int hit = 0;
+            for (int l = 0; l < 5; l++) { if (!limbs[l]) continue; hit = l; r -= LIMB_HIT[l]; if (r <= 0) break; }
+            limbHp[hit] = Mathf.Max(0, limbHp[hit] - pct * 4);
             string lost = "";
-            while (LimbCount() > Mathf.CeilToInt(hp / 20f))
+            if (limbHp[hit] <= 0)
             {
-                var have = new List<int>(); for (int l = 0; l < 5; l++) if (limbs[l]) have.Add(l);
-                int pick = have[Random.Range(0, have.Count)]; SpawnDebris(pick); limbs[pick] = false;
-                lost += (lost.Length > 0 ? ", " : "") + Character.LIMB_NAME[pick];
+                limbs[hit] = false; lost = Character.LIMB_NAME[hit];
+                bool second = limbBroken[hit];
+                SpawnDebris(hit, !second);                  // the first time it lies there to be picked up; the second it burns away
+                limbBroken[hit] = true;
+                StoryLimbLost(hit, second);
             }
             player.SetLimbs(limbs);
+            HpFromLimbs();
             if (hp <= 0) { ShowToast("Доспех разрушен — тень рассеялась"); respawnT = 1.8f; }
-            else ShowToast("Урон −" + pct + "% · целостность " + hp + "%" + (lost.Length > 0 ? "\nОторвано: " + lost : ""));
+            else ShowToast(Character.LIMB_NAME[hit] + ": −" + (pct * 4) + "% · осталось " + limbHp[hit] + "%" + (lost.Length > 0 ? "\n" + (limbBroken[hit] && limbHp[hit] <= 0 && !keptDrop.ContainsKey(hit) ? "Разбито: " : "Отвалилось: ") + lost : ""));
+            StoryHurt();
         }
         // a torn-off limb flies off, tumbles, lies for a moment and burns away
         readonly List<Debris> debris = new List<Debris>();
         // a torn-off limb bursts out of the body in a cloud of smoke and comes apart at the joints: every piece flies
         // its own way, tumbles, bounces, lies for a moment and burns away
-        class Debris { public GameObject go; public Vector3 v, w; public float r, t, trail = 0.12f, life = 5f; public bool rest, spark; public List<Renderer> glyphs = new List<Renderer>(); public MaterialPropertyBlock mpb = new MaterialPropertyBlock(); }
+        class Debris { public GameObject go; public Vector3 v, w; public float r, t, trail = 0.12f, life = 5f; public bool rest, spark, keep; public List<Renderer> glyphs = new List<Renderer>(); public MaterialPropertyBlock mpb = new MaterialPropertyBlock(); }
         class Puff { public GameObject go; public Vector3 v; public float t, life; public List<Renderer> glyphs = new List<Renderer>(); public MaterialPropertyBlock mpb = new MaterialPropertyBlock(); }
         readonly List<Puff> puffs = new List<Puff>();
         struct Seg { public string a, b; public float r; public int kind; public Seg(string a, string b, float r, int kind) { this.a = a; this.b = b; this.r = r; this.kind = kind; } }
@@ -376,8 +399,10 @@ namespace AsciiHero
             f.mpb.SetFloat("_GlyphPuff", 0.001f); foreach (var r in f.glyphs) if (r != null) r.SetPropertyBlock(f.mpb);
             puffs.Add(f);
         }
-        void SpawnDebris(int l)
+        void SpawnDebris(int l) { SpawnDebris(l, false); }
+        void SpawnDebris(int l, bool keep)
         {
+            if (keep) { List<Debris> old; if (keptDrop.TryGetValue(l, out old)) foreach (var d0 in old) if (d0.go != null) { debris.Remove(d0); Destroy(d0.go); } keptDrop[l] = new List<Debris>(); }
             if (hero == null || !world) return;
             var segs = DEBRIS_SEGS[l];
             var b0 = hero.human.Bone(segs[0].a); if (b0 == null) return;
@@ -401,7 +426,8 @@ namespace AsciiHero
                 else { m = MeshGen.Box(0.095f, 0.075f, 0.25f); c.y -= 0.04f; }
                 var go = MeshGen.Obj(m, actorMats["PLATE"], null, c, q, true, "Debris");
                 GlyphLayer.Build(go);
-                var d = new Debris { go = go, r = sg.r, life = 5f + Random.value * 0.8f }; GlyphsOf(go, d.glyphs);
+                var d = new Debris { go = go, r = sg.r, life = 5f + Random.value * 0.8f, keep = keep }; GlyphsOf(go, d.glyphs);
+                if (keep) { keptDrop[l].Add(d); if (loc != null && loc.root != null) go.transform.SetParent(loc.root.transform, true); }
                 // each piece gets its own direction (a wide fan around "outwards"), speed and spin
                 float ang = (Random.value - 0.5f) * 2.2f, cs = Mathf.Cos(ang), sn = Mathf.Sin(ang), sp = 1.2f + Random.value * 2.2f;
                 d.v = new Vector3((o.x * cs - o.z * sn) * sp, 2.2f + Random.value * 2.6f + (sg.kind == 1 ? 1.2f : 0f), (o.x * sn + o.z * cs) * sp) + hv * 0.6f;
@@ -429,6 +455,7 @@ namespace AsciiHero
                     // smoke keeps pouring out of the piece while it flies
                     d.trail -= dt; if (d.trail <= 0 && d.t < 0.75f) { d.trail = 0.22f; SpawnPuff(tr.position, 0.05f, d.v * 0.25f); }
                 }
+                if (d.keep) { if (d.rest && d.t > 3) { debris.RemoveAt(i); } continue; }      // (his own piece: it stays where it lies)
                 d.mpb.SetFloat("_GlyphBurn", d.spark ? 0.3f + 0.7f * d.t / d.life : Mathf.Clamp01((d.t - 1.6f) / (d.life - 2f)));     // lies for a moment, then burns for about three seconds
                 foreach (var r in d.glyphs) if (r != null) r.SetPropertyBlock(d.mpb);
                 if (d.t > d.life) { Destroy(d.go); debris.RemoveAt(i); }
@@ -578,17 +605,36 @@ namespace AsciiHero
             var old = GUI.color; GUI.color = new Color(0.85f, 0.06f, 0.06f, Mathf.Clamp01(kd * (0.35f + 0.45f * kd) + heart * 0.14f * kd));
             GUI.DrawTexture(new Rect(0, 0, W, H), texVig, ScaleMode.StretchToFill, true); GUI.color = old;
         }
-        void RestoreBody() { hp = 100; for (int l = 0; l < 5; l++) limbs[l] = true; if (player != null) player.SetLimbs(limbs); }
+        void RestoreBody()
+        {
+            hp = 100; for (int l = 0; l < 5; l++) { limbs[l] = true; limbHp[l] = 100; limbBroken[l] = false; }
+            foreach (var kv in keptDrop) foreach (var d in kv.Value) if (d.go != null) { debris.Remove(d); Destroy(d.go); }
+            keptDrop.Clear();
+            if (player != null) player.SetLimbs(limbs);
+        }
+        /// a fallen piece lying where it fell (for its limb): picked up, the limb is whole again
+        readonly Dictionary<int, List<Debris>> keptDrop = new Dictionary<int, List<Debris>>();
         void Pickups()
         {
             if (loc == null || hp <= 0) return;
+            // his own pieces, fallen off: whole again when picked up (but broken once already)
+            foreach (var kv in keptDrop)
+            {
+                int l = kv.Key; if (limbs[l]) continue; bool near = false;
+                foreach (var d in kv.Value) if (d.go != null && d.rest && (new Vector2(d.go.transform.position.x - pos.x, d.go.transform.position.z - pos.z)).magnitude < 0.9f) near = true;
+                if (!near) continue;
+                foreach (var d in kv.Value) if (d.go != null) { debris.Remove(d); Destroy(d.go); }
+                keptDrop.Remove(l); limbs[l] = true; limbHp[l] = 100; player.SetLimbs(limbs); HpFromLimbs();
+                ShowToast("Подобрано: " + Character.LIMB_NAME[l] + " (цела, но уже разбивалась)\nЦелостность " + hp + "%"); Sound("cloth", 0.5f, pos);
+                break;
+            }
             foreach (var p in loc.piles)
             {
                 if ((new Vector2(pos.x - p.pos.x - loc.origin.x, pos.z - p.pos.z - loc.origin.z)).magnitude > 0.95f) continue;
                 string got = "";
                 for (int l = 0; l < 5; l++)
-                    if (!limbs[l] && p.Take(l)) { limbs[l] = true; hp = Mathf.Min(100, hp + 20); got += (got.Length > 0 ? ", " : "") + Character.LIMB_NAME[l]; }
-                if (got.Length > 0) { player.SetLimbs(limbs); ShowToast("Подобрано: " + got + "\nЦелостность " + hp + "%"); }
+                    if (!limbs[l] && p.Take(l)) { limbs[l] = true; limbHp[l] = 100; limbBroken[l] = false; got += (got.Length > 0 ? ", " : "") + Character.LIMB_NAME[l]; }      // (a new piece: whole, never broken)
+                if (got.Length > 0) { player.SetLimbs(limbs); HpFromLimbs(); ShowToast("Подобрано: " + got + "\nЦелостность " + hp + "%"); }
             }
         }
 
@@ -1073,7 +1119,7 @@ namespace AsciiHero
         }
 
         // ---------- main menu and settings ----------
-        bool inMenu = true; int menuPage;   // 0 main, 1 settings, 2 developers
+        bool inMenu = true, confirmNew; int menuPage;   // 0 main, 1 settings, 2 developers
         int setQuality, setGrass, setRes, setFps, setMusic, setSound; bool setBloom, setShowFps, setOutline = true;
         static readonly string[] QUALITY = { "Низкое", "Среднее", "Высокое" };
         static readonly int[] GRASS = { 0, 25, 50, 75, 100 }, RES = { 50, 67, 75, 85, 100 }, FPS = { 30, 60, 90, 120 };
@@ -1082,7 +1128,8 @@ namespace AsciiHero
             "mystiscool, Corsica_S, D W, inchadney, gregswinford, Benboncan (CC BY);", "шаги по воде: Citadel Station 13 (CC BY-SA 3.0)", "",
             "Голова крысолюда: модель rat из набора 3moji (CC BY-SA 4.0), изменена", "Анимации сцен и падения: CMU Graphics Lab Motion Capture Database (mocap.cs.cmu.edu)",
             "Капюшоны и шлем крысолюдов, плащ: KayKit, Kay Lousberg (CC0)",
-            "Существа по мотивам D&D 5e (SRD, OGL 1.0a / CC BY 4.0), ратфолк — Tome of Beasts" };
+            "Существа по мотивам D&D 5e (SRD, OGL 1.0a / CC BY 4.0), ратфолк — Tome of Beasts",
+            "Иконки вещей: game-icons.net — Lorc, Delapouite, Sbed (CC BY 3.0), перерисованы символами", "Озвучка: Voicebox (jamiepine/voicebox, MIT)" };
         void LoadSettings()
         {
             bool phone = Application.isMobilePlatform;
@@ -1136,7 +1183,17 @@ namespace AsciiHero
             if (menuPage == 0)
             {
                 float bw = 230 * k, bh = 40 * k, y = top + 80 * k;
-                if (Button(new Rect(cx - bw / 2, y, bw, bh), "ИГРАТЬ")) inMenu = false;
+                if (saveInfoDirty) RefreshSaveInfo();
+                bool any = autoHas; foreach (var hs in saveHas) any |= hs;
+                if (confirmNew) { NewGameConfirm(cx, y, bw, bh); return; }
+                if (any)
+                {   // a game is going: go on with the newest save, or start again (asked first)
+                    float hw = (bw - 8 * k) / 2;
+                    if (Button(new Rect(cx - bw / 2, y, hw, bh), "ПРОДОЛЖИТЬ")) { int ns = NewestSave(); if (ns != -2) LoadGame(ns); }
+                    if (Button(new Rect(cx - bw / 2 + hw + 8 * k, y, hw, bh), "НОВАЯ ИГРА")) confirmNew = true;
+                }
+                else if (Button(new Rect(cx - bw / 2, y, bw, bh), "ИГРАТЬ")) NewGame();
+                if (setDev && Button(new Rect(cx + bw / 2 + 10 * k, y, 120 * k, bh), "ТЕСТ. МИР", false, sSmallBtn())) inMenu = false;
                 if (Button(new Rect(cx - bw / 2, y + bh + 12 * k, bw, bh), "СОХРАНЕНИЯ")) { menuPage = 3; saveMode = 0; saveInfoDirty = true; }
                 if (Button(new Rect(cx - bw / 2, y + 2 * (bh + 12 * k), bw, bh), "НАСТРОЙКИ")) menuPage = 1;
                 if (Button(new Rect(cx - bw / 2, y + 3 * (bh + 12 * k), bw, bh), "БЕСТИАРИЙ")) { menuPage = 4; bestScroll = 0; }
@@ -1588,7 +1645,7 @@ namespace AsciiHero
         const float DASH_DIST = 2.0f, DASH_T = 0.1f; float dashAnim = 0.4f, dashSettle = 0;
         float dashT = 9, dashCd, dashMist, dashLen = 2; readonly Vector4[] dashObst = new Vector4[8], dashBox = new Vector4[4]; Vector3 dashFrom, dashDir; Vector2? moveDir; bool dashShifted;
         Rect atkRect, defRect, dashRect;
-        void DoAttack() { if (world && player != null && dashT >= DASH_T && !StoryLock()) player.StartAttack(); }
+        void DoAttack() { if (world && player != null && dashT >= DASH_T && !StoryLock()) { player.StartAttack(); StoryFight(); } }
         void DoDash(Vector2? swipe = null)
         {
             if (StoryLock()) return;
@@ -2231,7 +2288,7 @@ namespace AsciiHero
             if (sTitle == null || Mathf.Abs(sTitle.fontSize - Mathf.Max(8, Mathf.RoundToInt(15 * k))) > 0) Styles();
             uiRects.Clear();
             float W = Screen.width, H = Screen.height;
-            if (LogHub.errors > seenErrors) { seenErrors = LogHub.errors; consoleOpen = true; }
+            if (LogHub.errors > seenErrors) { seenErrors = LogHub.errors; if (setDev) consoleOpen = true; }
             if (!ready || ascii == null) { LoadingScreen(W, H); ConsoleUI(W, H, true); FinishGui(); return; }
             var vr = ViewRect();
             if (!ascii.plain)
@@ -2283,6 +2340,7 @@ namespace AsciiHero
         void ConsoleUI(float W, float H, bool loading)
         {
             float top = safe.y + (loading ? 140 : 40) * k;
+            if (!setDev && !loading) { consoleOpen = false; consoleRect = Rect.zero; return; }      // (the log is the developer's)
             if (!consoleOpen)
             {
                 consoleRect = Rect.zero;
@@ -2425,7 +2483,7 @@ namespace AsciiHero
             if (Button(new Rect(x0, bottom, setDev ? (cw - 30 * k) / 6 : bw3, 32 * k), "СЛУЧ.")) Randomize();
             if (!setDev)
             {   // the game: the first location (the test places are the developer's)
-                if (Button(new Rect(x0 + bw3 + 6 * k, bottom, cw - bw3 - 6 * k, 32 * k), sLast != null || sDone.Count > 0 ? "ПРОДОЛЖИТЬ ▶" : "В ПУТЬ ▶", true)) StartStory(false);
+                if (Button(new Rect(x0 + bw3 + 6 * k, bottom, cw - bw3 - 6 * k, 32 * k), "В ПУТЬ ▶", true)) { PlayerPrefs.SetInt("char_made", 1); PlayerPrefs.Save(); StartStory(false); }
                 return;
             }
             float bw4 = (cw - 30 * k) / 6;
@@ -2929,6 +2987,16 @@ namespace AsciiHero
                     if (projAscii != null && projAscii.final != null && keyMat != null) { keyMat.SetFloat("_KeyAlpha", small); Graphics.DrawTexture(lp, projAscii.final, keyMat); }
                     MissingLimbDots(lp);
                     PocketSkull(lp, small);
+                    {   // each piece of the armour and what is left of it
+                        if (sLimb == null || sLimb.fontSize != Mathf.RoundToInt(10 * k)) { sLimb = new GUIStyle(sSmall) { fontSize = Mathf.RoundToInt(10 * k), alignment = TextAnchor.UpperLeft, richText = true }; }
+                        float ly = lp.yMax - 5 * 14 * k;
+                        for (int l = 0; l < 5; l++)
+                        {
+                            string c = !limbs[l] ? "#a04040" : limbHp[l] < 35 ? "#e0a050" : "#b8b0d0";
+                            string v = !limbs[l] ? (keptDrop.ContainsKey(l) ? "лежит" : "нет") : limbHp[l] + "%" + (limbBroken[l] ? " ·" : "");
+                            GUI.Label(new Rect(lp.xMax - 2 * k, ly + l * 14 * k, 160 * k, 14 * k), "<color=" + c + ">" + Character.LIMB_NAME[l] + "  " + v + "</color>", sLimb);
+                        }
+                    }
                     // right: the page (it slides in from the side it was swiped to)
                     float cell; var gr = PocketGrid(W, H, out cell); uiRects.Add(gr);
                     float slide = pocketSlideFrom * (1 - Mathf.SmoothStep(0, 1, pocketPageT)) * gr.width * 0.6f;
@@ -2939,7 +3007,9 @@ namespace AsciiHero
                         foreach (var pt in InputHub.active.Values)
                             if (pt.owner == "ui" && gr.Contains(pt.start) && live) pocketScroll -= pt.Delta.y / cell;
                         pocketScroll = Mathf.Clamp(pocketScroll, 0, 5);
-                        var lineC = new Color(0.4f, 0.36f, 0.52f, 0.9f); var fillC = new Color(0.03f, 0.025f, 0.05f, 0.85f);
+                        var lineC = new Color(0.4f, 0.36f, 0.52f, 0.16f); var fillC = new Color(0.03f, 0.025f, 0.05f, 0.1f);      // (the grid barely there)
+                        int ifs = Mathf.Max(5, Mathf.FloorToInt(cell / 6.4f));
+                        if (sIcon == null || sIcon.fontSize != ifs) { sIcon = new GUIStyle(sMono) { richText = false, alignment = TextAnchor.MiddleCenter, fontSize = ifs, wordWrap = false }; sIcon.normal.textColor = new Color(0.86f, 0.74f, 1f); }
                         int fs = Mathf.Max(8, Mathf.RoundToInt(cell * 0.5f));
                         if (sBag == null || sBag.fontSize != fs) { sBag = new GUIStyle(sMono) { richText = false, alignment = TextAnchor.MiddleCenter, fontSize = fs, wordWrap = false }; sBag.normal.textColor = new Color(0.82f, 0.66f, 1f); }
                         GUI.BeginGroup(pg);
@@ -2950,7 +3020,10 @@ namespace AsciiHero
                                 var cr = new Rect(cc * cell + 2, (r - r0) * cell - off + 2, cell - 4, cell - 4);
                                 Fill(cr, fillC); Frame(cr, lineC, Mathf.Max(1, k));
                                 int ii = r * 5 + cc;
-                                if (ii < inventory.Count && inventory[ii].Length > 0) GUI.Label(cr, inventory[ii].Substring(0, 1), sBag);
+                                if (ii < inventory.Count && inventory[ii].Length > 0)
+                                {
+                                    string ic; if (ITEM_ICONS.TryGetValue(inventory[ii], out ic)) GUI.Label(cr, ic, sIcon); else GUI.Label(cr, inventory[ii].Substring(0, 1), sBag);
+                                }
                             }
                         GUI.EndGroup();
                         var sb = new Rect(pg.xMax + 4 * k, pg.y, 2 * k, pg.height); Fill(sb, new Color(0.25f, 0.22f, 0.32f, 0.6f));
@@ -2977,7 +3050,7 @@ namespace AsciiHero
                         if (b2 == 0) { saveMode = 1; menuPage = 3; menuFromWorld = true; saveInfoDirty = true; }
                         else if (b2 == 1) { saveMode = 2; menuPage = 3; menuFromWorld = true; saveInfoDirty = true; }
                         else if (b2 == 2) { menuPage = 1; menuFromWorld = true; }
-                        else { invOpen = false; pocketClose = -1; LeaveWorld(); inMenu = true; menuPage = 0; return; }
+                        else { lastAuto = -99; AutoSave(); invOpen = false; pocketClose = -1; LeaveWorld(); inMenu = true; menuPage = 0; saveInfoDirty = true; return; }
                     }
                 }
                 if (big > 0.01f && pocketBigShown > 0)
@@ -3028,12 +3101,19 @@ namespace AsciiHero
         [System.Serializable] class SaveData
         {
             public string version, date, loc, sex, armor, weapon; public float x, z, heading, height; public int hp, build;
-            public bool[] limbs; public float[] body; public string[] items; public float clock;
+            public bool[] limbs; public float[] body; public string[] items; public float clock; public int[] limbHp; public bool[] limbBroken;
+            public string[] storyDone, storyFlags, deadFoes, openChests; public bool skull; public int yorickIdle;
         }
-        static string SavePath(int i) { return System.IO.Path.Combine(Application.persistentDataPath, "save" + (i + 1) + ".json"); }
+        const int AUTO = -1;
+        static string SavePath(int i) { return System.IO.Path.Combine(Application.persistentDataPath, i == AUTO ? "autosave.json" : "save" + (i + 1) + ".json"); }
+        static string SlotName(int i) { return i == AUTO ? "автосохранение" : "ячейка " + (i + 1); }
+        string autoInfo = "пусто"; bool autoHas;
         void RefreshSaveInfo()
         {
             saveInfoDirty = false;
+            autoHas = false; autoInfo = "пусто";
+            try { if (System.IO.File.Exists(SavePath(AUTO))) { var d = JsonUtility.FromJson<SaveData>(System.IO.File.ReadAllText(SavePath(AUTO))); if (d != null) { autoHas = true; autoInfo = d.date + " · " + LocName(d.loc) + " · целостность " + d.hp + " %"; } } }
+            catch (System.Exception) { autoInfo = "не читается"; }
             for (int i = 0; i < SAVE_SLOTS; i++)
             {
                 saveHas[i] = false; saveInfo[i] = "пусто";
@@ -3065,9 +3145,10 @@ namespace AsciiHero
                 version = VERSION, date = System.DateTime.Now.ToString("dd.MM.yyyy HH:mm"), loc = loc is StoryLocation ? "story:" + ((StoryLocation)loc).region : tav ? "tavern" : cv ? "cave" : fo ? "forest" : loc is Mockup ? ((Mockup)loc).kind : "field",
                 x = loc != null ? pos.x : 0, z = loc != null ? pos.z : 1.5f, heading = player != null ? player.heading : Mathf.PI, hp = hp,
                 limbs = (bool[])limbs.Clone(), sex = cfg.sex.ToString(), build = cfg.build, height = cfg.height, armor = cfg.armor, weapon = cfg.weapon,
-                body = cfg.body != null ? (float[])cfg.body.Clone() : null, items = inventory.ToArray(), clock = gameClock
+                body = cfg.body != null ? (float[])cfg.body.Clone() : null, items = inventory.ToArray(), clock = gameClock, limbHp = (int[])limbHp.Clone(), limbBroken = (bool[])limbBroken.Clone()
             };
-            try { System.IO.File.WriteAllText(SavePath(i), JsonUtility.ToJson(d)); ShowToast("Сохранено: ячейка " + (i + 1)); Debug.Log("Игра сохранена: " + SavePath(i)); }
+            StorySaveInto(d);
+            try { System.IO.File.WriteAllText(SavePath(i), JsonUtility.ToJson(d)); if (i != AUTO) ShowToast("Сохранено: " + SlotName(i)); Debug.Log("Игра сохранена: " + SavePath(i)); }
             catch (System.Exception e) { ShowToast("Не удалось сохранить"); Debug.LogException(e); }
             saveInfoDirty = true;
         }
@@ -3086,32 +3167,59 @@ namespace AsciiHero
             SaveCfg();
             for (int l = 0; l < 5; l++) limbs[l] = d.limbs == null || l >= d.limbs.Length || d.limbs[l];
             hp = Mathf.Clamp(d.hp, 0, 100); if (hp <= 0) { hp = 100; for (int l = 0; l < 5; l++) limbs[l] = true; }
+            for (int l = 0; l < 5; l++) { limbHp[l] = d.limbHp != null && l < d.limbHp.Length ? Mathf.Clamp(d.limbHp[l], 0, 100) : (limbs[l] ? 100 : 0); limbBroken[l] = d.limbBroken != null && l < d.limbBroken.Length && d.limbBroken[l]; if (limbs[l] && limbHp[l] <= 0) limbHp[l] = 100; }
+            keptDrop.Clear();
             inventory.Clear(); if (d.items != null) inventory.AddRange(d.items);
             invOpen = false; menuFromWorld = false; inMenu = false; respawnT = 0; dashT = 99; presetIx = -1;
             Rebuild();
             if (d.loc != null && d.loc.StartsWith("story:") || !setDev)
             {   // the story: its place, where he stood (without the developer's mode an old save of the test world starts the story)
-                StartStory(false); if (!story) return;
+                StoryLoadFrom(d); if (!story) return;
                 if (d.clock > 0) gameClock = d.clock;
                 var sl = d.loc != null && d.loc.StartsWith("story:") ? SLoc(d.loc.Substring(6)) : null;
                 if (sl != null) { if (!sDone.Contains("wake")) { sDone.Add("wake"); sDone.Add("letter"); player.StopCut(); sDir = null; letterOn = false; } StoryGo(sl, new Vector3(d.x, 0, d.z), d.heading); }
-                ShowToast("Загружено: ячейка " + (i + 1)); return;
+                ShowToast("Загружено: " + SlotName(i)); return;
             }
             EnterWorld(d.loc == "tavern" ? 0 : d.loc == "cave" ? 2 : d.loc == "forest" ? 3 : 1);
             pos = new Vector3(d.x, 0, d.z); heroTrail = pos; player.heading = d.heading; player.ResetSim();
             hero.go.transform.position = pos; hero.go.transform.rotation = Quaternion.Euler(0, d.heading * Mathf.Rad2Deg, 0);
             camTgt = new Vector3(pos.x, 0.6f, pos.z);
-            ShowToast("Загружено: ячейка " + (i + 1));
+            ShowToast("Загружено: " + SlotName(i));
+        }
+        /// the newest of the saves (the autosave or a slot), -2 if there is none
+        int NewestSave()
+        {
+            int best = -2; System.DateTime bt = System.DateTime.MinValue;
+            for (int i = AUTO; i < SAVE_SLOTS; i++)
+            {
+                var pth = SavePath(i); if (!System.IO.File.Exists(pth)) continue;
+                var t = System.IO.File.GetLastWriteTime(pth); if (t > bt) { bt = t; best = i; }
+            }
+            return best;
+        }
+        void NewGameConfirm(float cx, float y, float bw, float bh)
+        {
+            var panel = new Rect(cx - 220 * k, y - 10 * k, 440 * k, 150 * k); Smoke(panel, false, 0, 0.97f);
+            GUI.Label(new Rect(panel.x + 14 * k, panel.y + 10 * k, panel.width - 28 * k, 70 * k), "Начать новую игру?\nСохранения в ячейках останутся, перезапишется только автосохранение.", sDesc);
+            if (Button(new Rect(panel.x + 20 * k, panel.yMax - 50 * k, 190 * k, 36 * k), "НАЧАТЬ", true)) { confirmNew = false; NewGame(); }
+            if (Button(new Rect(panel.xMax - 210 * k, panel.yMax - 50 * k, 190 * k, 36 * k), "ОТМЕНА")) confirmNew = false;
         }
         void SavesUI(float cx, float top, float bottom)
         {
             if (saveInfoDirty) RefreshSaveInfo();
             float pw = Mathf.Min(540 * k, Screen.width - 40 * k), x0 = cx - pw / 2, y0 = top + 56 * k;      // (inside the page's cloud)
             GUI.Label(new Rect(x0, y0, pw, 22 * k), saveMode == 1 ? "СОХРАНИТЬ ИГРУ" : saveMode == 2 ? "ЗАГРУЗИТЬ ИГРУ" : "СОХРАНЕНИЯ", sTitle);
-            float rh = Mathf.Min(54 * k, (bottom - y0 - 40 * k) / SAVE_SLOTS - 6 * k);
+            float rh = Mathf.Min(54 * k, (bottom - y0 - 40 * k) / (SAVE_SLOTS + 1) - 6 * k);
+            {   // the autosave, on top (it is only loaded)
+                var r = new Rect(x0, y0 + 32 * k, pw, rh); Smoke(r); float bwid = 120 * k;
+                GUI.Label(new Rect(r.x + 10 * k, r.y + 4 * k, r.width - bwid - 28 * k, 20 * k), "Автосохранение", sName);
+                GUI.Label(new Rect(r.x + 10 * k, r.y + 24 * k, r.width - bwid - 28 * k, rh - 26 * k), autoInfo, sDesc);
+                var br = new Rect(r.xMax - 8 * k - bwid, r.y + (rh - 30 * k) / 2, bwid, 30 * k);
+                if (saveMode != 1 && autoHas) { if (Button(br, "ЗАГРУЗИТЬ")) { LoadGame(AUTO); return; } } else GUI.Label(br, "—", sBtn);
+            }
             for (int i = 0; i < SAVE_SLOTS; i++)
             {
-                var r = new Rect(x0, y0 + 32 * k + i * (rh + 6 * k), pw, rh);
+                var r = new Rect(x0, y0 + 32 * k + (i + 1) * (rh + 6 * k), pw, rh);
                 Smoke(r);
                 float bwid = 120 * k, nb = (saveMode == 0 ? 2 : 1);
                 GUI.Label(new Rect(r.x + 10 * k, r.y + 4 * k, r.width - nb * (bwid + 8 * k) - 20 * k, 20 * k), "Ячейка " + (i + 1), sName);

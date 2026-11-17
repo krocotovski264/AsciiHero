@@ -84,6 +84,18 @@ namespace AsciiHero
                 if (kb == "inn") { g.pB = innDoor; g.nB = innOut; }
                 sPass.Add(g);
             }
+            // a round arena belongs to the place whose tiles it touches (its centre may lie where no tile is)
+            circleRegion.Clear();
+            foreach (var c in smap.circles)
+            {
+                string best = null; float bd = 1e9f;
+                foreach (var kv in tileAt)
+                {
+                    var tc = new Vector2((kv.Value.i + 0.5f) * smap.tile, (kv.Value.j + 0.5f) * smap.tile); float d = (tc - c.c).magnitude;
+                    if (d < c.r + smap.tile && d < bd && (Kind(kv.Value.b) == "cave" || Kind(c.b) != "cave")) { bd = d; best = regionOf[kv.Key]; }
+                }
+                circleRegion.Add(best);
+            }
             // the places, far from the test world and from each other
             var caveTiles = new HashSet<long>(); foreach (var kv in regionKind) if (kv.Value == "cave") caveTiles.UnionWith(regionTiles[kv.Key]);
             sLocs.Clear(); int k2 = 0;
@@ -94,7 +106,7 @@ namespace AsciiHero
                 if (kv.Value == "inn") L = StoryLocation.BuildInn(mats, smap, kv.Key, sPass, at, 20 + k2);
                 else
                 {
-                    bool circles = false; foreach (var c in smap.circles) { long ck = StoryLocation.Key(Mathf.FloorToInt(c.c.x / smap.tile), Mathf.FloorToInt(c.c.y / smap.tile)); if (regionTiles[kv.Key].Contains(ck)) circles = true; }
+                    bool circles = circleRegion.Contains(kv.Key);
                     L = StoryLocation.Build(mats, smap, kv.Key, regionTiles[kv.Key], circles, sPass, at, 11 + k2, kv.Value == "out", kv.Value == "out" ? caveTiles : null);
                 }
                 sLocs.Add(L);
@@ -117,7 +129,7 @@ namespace AsciiHero
             SpawnStoryThings();          // (while the places are on: the characters of what is switched off are not laid out)
             foreach (var l in sLocs) l.SetActive(false);
         }
-        readonly Dictionary<long, string> regionOf = new Dictionary<long, string>();
+        readonly Dictionary<long, string> regionOf = new Dictionary<long, string>(); readonly List<string> circleRegion = new List<string>();
         readonly Dictionary<string, HashSet<long>> regionTiles = new Dictionary<string, HashSet<long>>();
         readonly Dictionary<string, string> regionKind = new Dictionary<string, string>();
         static float SegDist(Vector2 p, Vector2 a, Vector2 b)
@@ -127,8 +139,9 @@ namespace AsciiHero
         /// which place a point of the map belongs to
         StoryLocation SLocAt(Vector2 m)
         {
-            string r; long key = StoryLocation.Key(Mathf.FloorToInt(m.x / smap.tile), Mathf.FloorToInt(m.y / smap.tile));
-            if (!regionOf.TryGetValue(key, out r)) foreach (var c in smap.circles) if ((m - c.c).magnitude < c.r) { long ck = StoryLocation.Key(Mathf.FloorToInt(c.c.x / smap.tile), Mathf.FloorToInt(c.c.y / smap.tile)); regionOf.TryGetValue(ck, out r); }
+            string r = null; long key = StoryLocation.Key(Mathf.FloorToInt(m.x / smap.tile), Mathf.FloorToInt(m.y / smap.tile));
+            for (int i = 0; i < smap.circles.Count; i++) if ((m - smap.circles[i].c).magnitude < smap.circles[i].r && circleRegion[i] != null) { r = circleRegion[i]; break; }
+            if (r == null) regionOf.TryGetValue(key, out r);
             foreach (var l in sLocs) if (l.region == r) return l;
             return sMain;
         }
@@ -257,7 +270,7 @@ namespace AsciiHero
                 var into = -on;               // into the other place
                 var target = other.ToWorld(op + into * 1.3f); float hd = Mathf.Atan2(-into.x, into.y);
                 string st = g.Style(L.region);
-                Reprint(() => StoryGo(other, target, hd));
+                Reprint(() => { StoryGo(other, target, hd); autoT = 0; autoAfterScene = true; });          // (a new place: saved as he comes in)
                 Sound(st == "hole" || st == "mouth" ? "hit_stone" : "door_open", 0.6f, pos);
                 return;
             }
@@ -270,7 +283,7 @@ namespace AsciiHero
             public Vector3 p, home, goal; public int hp, maxHp; public float scale = 1;
             public int state; public float t, cd, seenT, lostT, dodgeCd, parryCd, leapT, stagger, deadT, barkCd, guardT, strafe = 1, dmgK = 1, think, biteT = -1, biteCd = 2; public bool fortitudeUsed;
             public Vector2 leapV, step; public float stepT; public bool noticed, hurtBark, swingHit, raged; public int combo; public Vector3 lastSeen;
-            public BoneArm bones;
+            public BoneArm bones; public bool gone; public Quaternion[] hunchRest, hunchPre, hunchSet; public bool hunchOn;
             public bool Dead => hp <= 0;
             public bool Boss => kind == "boss";
         }
@@ -482,7 +495,7 @@ namespace AsciiHero
             var hp2 = new Vector2(pos.x, pos.z);
             for (int i = 0; i < foes.Count; i++)
             {
-                var f = foes[i]; if (f.L != L) continue;
+                var f = foes[i]; if (f.L != L || f.gone) continue;
                 // far from the hero they sleep (switched off: no thinking, no skinning)
                 bool near = (new Vector2(f.p.x - pos.x, f.p.z - pos.z)).magnitude < 30f || f.noticed && !f.Dead;
                 if (f.ch.go.activeSelf != near) f.ch.go.SetActive(near);
@@ -519,6 +532,7 @@ namespace AsciiHero
                 var np = FoeCollide(f, me + dd);
                 f.p = new Vector3(np.x, 0, np.y);
                 f.ch.go.transform.position = f.p; f.ch.go.transform.rotation = Quaternion.Euler(0, f.act.heading * Mathf.Rad2Deg, 0);
+                if (f.kind != "zombie") HunchReset(f);
                 f.act.Animate(tNow, dt);
                 if (f.kind != "zombie") Hunch(f);
                 if (f.bones != null) f.bones.Follow();
@@ -546,7 +560,7 @@ namespace AsciiHero
         {
             BestMark(f.kind, false);
             f.noticed = true; f.cd = Mathf.Max(f.cd, 0.25f);
-            if (f.Boss) { if (!sDone.Contains("boss_intro")) Play("boss_intro"); }
+            if (f.Boss) { if (!sDone.Contains("boss_intro")) { AutoSave(); Play("boss_intro"); } }
             else if (f.barkCd <= 0) { Bark(f.ch.go.transform, f.kind == "zombie" ? "zombie_moan" : Random.value < 0.5f ? "rat_notice" : "rat_notice2"); f.barkCd = 8; }
             Sound("draw", 0.35f, f.p);
         }
@@ -663,11 +677,34 @@ namespace AsciiHero
             return f.L.ToWorld(f.step);
         }
         /// rats stoop: the back bent forward, the head lifted to look ahead (laid over whatever the motion did)
+        static readonly string[] HUNCH_B = { "spine04", "spine03", "spine01", "neck01", "head" };
+        static readonly float[] HUNCH_D = { 10, 12, 10, -18, -8 };
+        /// (the motion does not set every one of these bones each frame: the bend is laid over the pose they had before
+        /// it, kept from the last frame - laid over itself frame after frame it turned the body round and round)
+        static void HunchReset(Foe f)
+        {
+            var hb = f.ch.human;
+            if (f.hunchRest == null) { f.hunchRest = new Quaternion[HUNCH_B.Length]; for (int i = 0; i < HUNCH_B.Length; i++) { var b = hb.Bone(HUNCH_B[i]); f.hunchRest[i] = b != null ? b.localRotation : Quaternion.identity; } }
+            if (f.hunchSet == null) f.hunchSet = new Quaternion[HUNCH_B.Length];
+            for (int i = 0; i < HUNCH_B.Length; i++)
+            {
+                var b = hb.Bone(HUNCH_B[i]); if (b == null) continue;
+                // the motion left it as we bent it: put back what it was before the bend
+                if (f.hunchOn) b.localRotation = f.hunchPre[i];
+            }
+        }
         static void Hunch(Foe f)
         {
             var hb = f.ch.human; var ax = f.ch.go.transform.right; float k2 = f.Boss ? 0.8f : 1f;
-            void B(string n, float deg) { var b = hb.Bone(n); if (b != null) b.rotation = Quaternion.AngleAxis(deg * k2, ax) * b.rotation; }
-            B("spine04", 10); B("spine03", 12); B("spine01", 10); B("neck01", -18); B("head", -8);
+            if (f.hunchPre == null) f.hunchPre = new Quaternion[HUNCH_B.Length];
+            for (int i = 0; i < HUNCH_B.Length; i++)
+            {
+                var b = hb.Bone(HUNCH_B[i]); if (b == null) continue;
+                f.hunchPre[i] = b.localRotation;
+                b.rotation = Quaternion.AngleAxis(HUNCH_D[i] * k2, ax) * b.rotation;
+                f.hunchSet[i] = b.localRotation;
+            }
+            f.hunchOn = true;
         }
         void Leap(Foe f, Vector2 d, float sp) { f.leapV = d.normalized * sp; f.leapT = 0.28f; SpawnPuff(f.p + Vector3.up * 0.3f, 0.04f, Vector3.zero, 0.4f); Sound("cloth", 0.5f, f.p); }
 
@@ -740,7 +777,7 @@ namespace AsciiHero
             BestMark(f.kind, true);
             f.deadT = 0; f.act.guardHeld = false; f.act.PlayCut("die", false, false, 1, true); SpawnPuff(f.p + Vector3.up * 0.8f, 0.06f, Vector3.up * 0.4f, 0.8f);
             Sound("plates", 0.6f, f.p);
-            if (f.Boss) Play("boss_dead");
+            if (f.Boss) { Play("boss_dead"); autoAfterScene = true; }
         }
         /// he falls (backwards, with a twist) and stays where he fell
         void DeadPose(Foe f, float dt)
@@ -867,12 +904,13 @@ namespace AsciiHero
             if (s.tier == 0) { sDone.Add(id); return; }
             sDone.Add(id);
             if (sDir != null) { queue.Enqueue(id); return; }
+            AutoSave();                    // (at the start of a scene)
             sDir = new Running { s = s, tier = s.tier }; Next();
         }
         void Bark(Transform at, string id)
         {
             DScene s; if (!scenes.TryGetValue(id, out s)) return;
-            foreach (var l in s.lines) if (l.text != null) { barks.Add(new BarkLine { at = at, who = l.who, text = l.text, dur = 1.6f + 0.05f * l.text.Length }); break; }
+            foreach (var l in s.lines) if (l.text != null) { barks.Add(new BarkLine { at = at, who = l.who, text = l.text, dur = 1.6f + 0.05f * l.text.Length }); PlayVoice(l.who, l.text); break; }
             if (id == "corpse_hint") sDone.Add(id);
         }
         void Next()
@@ -891,12 +929,13 @@ namespace AsciiHero
                 sDir.line = l; sDir.lineT = 0;
                 if (l.choice != null) { sDir.choosing = true; sDir.choiceT = 0; sDir.dur = 6; return; }
                 sDir.dur = 1.4f + 0.055f * l.text.Length * (sDir.tier >= 2 ? 1.1f : 1);
+                PlayVoice(l.who, l.text);
                 return;
             }
         }
         void End()
         {
-            string id = sDir.s.id; sDir = null;
+            string id = sDir.s.id; sDir = null; autoAfterScene = true;
             if (id == "wake") { letter = Mathf.Min(letter, 1); Play("letter"); }
             if (queue.Count > 0) { var n = queue.Dequeue(); sDone.Remove(n); Play(n); }
         }
@@ -951,8 +990,10 @@ namespace AsciiHero
                 if (SL.useVis) { Vector4 vr; var tex = SL.VisUpdate(pos, out vr); Shader.SetGlobalTexture("_VisTex", tex); Shader.SetGlobalVector("_VisRect", vr); Shader.SetGlobalFloat("_VisOn", 1); }
                 else Shader.SetGlobalFloat("_VisOn", 0);
             }
+            autoT += dt; if (autoT > 300f) { autoT = 0; AutoSave(); }          // every five minutes
+            if (autoAfterScene && sDir == null) { autoAfterScene = false; AutoSave(); }
             HeroHitsFoes(); UpdateFoes(dt); UpdateFolk(dt); UpdateChests(dt); UpdateSkull(dt);
-            StoryTriggers(); StoryPassages(dt); UpdateDirector(dt);
+            StoryTriggers(); StoryPassages(dt); UpdateDirector(dt); StoryIdleTalk(dt);
             hero.go.transform.position = pos + Vector3.down * heroSink;
         }
 
@@ -1197,28 +1238,151 @@ namespace AsciiHero
                 KKObj("yskull", skullHead, Vector3.zero, 0.22f, Quaternion.identity);
                 skullJaw = new GameObject("Jaw").transform; skullJaw.SetParent(skullHead, false); skullJaw.localPosition = hinge;
                 KKObj("yjaw", skullJaw, -hinge, 0.22f, Quaternion.identity);
+                // black in the eye sockets and inside the mouth
+                foreach (float ex in new[] { -0.17f, 0.17f })
+                { var e = MeshGen.Obj(MeshGen.Sphere(0.085f * 0.22f, 10, 8), actorMats["DARK"], skullHead, new Vector3(ex, 0.07f, 0.62f) * 0.22f, Quaternion.identity, false, "Eye"); e.transform.localScale = new Vector3(1, 0.85f, 0.7f); }
+                { var mo = MeshGen.Obj(MeshGen.Sphere(0.16f * 0.22f, 10, 8), actorMats["DARK"], skullHead, new Vector3(0, -0.25f, 0.58f) * 0.22f, Quaternion.identity, false, "Mouth"); mo.transform.localScale = new Vector3(1.3f, 0.45f, 0.9f); }
+                var noseD = MeshGen.Obj(MeshGen.Sphere(0.05f * 0.22f, 8, 6), actorMats["DARK"], skullHead, new Vector3(0, -0.07f, 0.66f) * 0.22f, Quaternion.identity, false, "Nose"); noseD.transform.localScale = new Vector3(0.8f, 1.2f, 0.6f);
                 GlyphLayer.Build(skullRig);
                 var lg = new GameObject("SkullKey"); lg.transform.SetParent(skullRig.transform, false); lg.transform.localPosition = new Vector3(0.5f, 0.6f, 0.9f);
                 var l = lg.AddComponent<Light>(); l.type = LightType.Point; l.range = 4; l.intensity = 2.2f; l.color = Mats.Hex(0xffe6c8);
                 skullCam = new GameObject("SkullCamera").AddComponent<Camera>(); skullCam.transform.SetParent(skullRig.transform, false);
                 skullCam.nearClipPlane = 0.05f; skullCam.farClipPlane = 6; skullCam.fieldOfView = 30; skullCam.allowMSAA = false; skullCam.allowHDR = false;
-                skullCam.transform.localPosition = new Vector3(0, 0.03f, 0.75f); skullCam.transform.LookAt(SKULL_AT);
+                skullCam.transform.localPosition = new Vector3(0, 0.02f, 0.62f); skullCam.transform.LookAt(SKULL_AT);
                 skullAscii = new AsciiRenderer(skullCam) { surfaceGlyphs = true, actorBoost = 1 };
             }
             skullRig.SetActive(true); skullAscii.SetEnabled(true);
             // it looks about; the jaw clacks when Yorick speaks, and now and then on its own
             float t = Time.unscaledTime;
             skullHead.localRotation = Quaternion.Euler(6 * Mathf.Sin(t * 0.7f), 28 * Mathf.Sin(t * 0.45f), 4 * Mathf.Sin(t * 0.9f));
-            bool talking = sDir != null && sDir.line != null && sDir.line.who == "Череп";
+            bool talking = (sDir != null && sDir.line != null && sDir.line.who == "Череп") || yorickTalkT > 0;
             float open = talking ? (0.5f + 0.5f * Mathf.Sin(t * 13f)) * 16f : (Mathf.PerlinNoise(t * 0.8f, 3.3f) > 0.72f ? (0.5f + 0.5f * Mathf.Sin(t * 11f)) * 9f : 0);
             skullJaw.localRotation = Quaternion.Euler(open, 0, 0);
             var r = SkullRect(PocketProjRect(Screen.width, Screen.height));
             skullCam.aspect = 1;
             skullAscii.exposure = ascii.exposure; skullAscii.bloom = ascii.bloom; skullAscii.outline = ascii.outline; skullAscii.litDiv = ascii.litDiv; skullAscii.depthRef = 0.75f;
-            skullAscii.SetSize(Mathf.Max(16, Mathf.RoundToInt(r.width)), Mathf.Max(16, Mathf.RoundToInt(r.height)), cellPx);
+            skullAscii.depthRef = 0.62f;
+            skullAscii.SetSize(Mathf.Max(16, Mathf.RoundToInt(r.width)), Mathf.Max(16, Mathf.RoundToInt(r.height)), cellPx * 0.7f);       // (finer characters: a sharper skull)
             skullAscii.SelfCheck();
         }
-        Rect SkullRect(Rect lp) { float r = lp.width * 0.27f; return new Rect(Mathf.Max(safe.x + 4 * k, lp.x - r * 1.55f), Mathf.Max(safe.y + 4 * k, lp.y - r * 0.55f), 2 * r, 2 * r); }
+        Rect SkullRect(Rect lp) { float r = lp.width * 0.27f * 1.2f; return new Rect(Mathf.Max(safe.x + 4 * k, lp.x - r * 1.55f), Mathf.Max(safe.y + 4 * k, lp.y - r * 0.55f), 2 * r, 2 * r); }
+        // ================= saving =================
+        float autoT, lastAuto = -99; bool autoAfterScene;
+        void AutoSave()
+        {
+            if (!story || !world || hp <= 0 || Time.time - lastAuto < 3f) return;
+            lastAuto = Time.time; SaveGame(AUTO);
+        }
+        /// what the story keeps in a save: the scenes seen, the choices made, the dead, the chests opened, the skull
+        void StorySaveInto(SaveData d)
+        {
+            if (smap == null) return;
+            d.storyDone = new List<string>(sDone).ToArray(); d.storyFlags = new List<string>(sFlags).ToArray();
+            var dead = new List<string>(); foreach (var f in foes) if (f.Dead) dead.Add(f.id); d.deadFoes = dead.ToArray();
+            var op = new List<string>(); foreach (var c in chests) if (c.open) op.Add(c.id); d.openChests = op.ToArray();
+            d.skull = sHasSkull; d.yorickIdle = yorickIdleN;
+        }
+        void StoryLoadFrom(SaveData d)
+        {
+            try { if (tavern == null) SetupWorld(); if (smap == null) BuildStory(); else ResetStory(); }
+            catch (System.Exception e) { Debug.LogException(e); ShowToast("Не удалось собрать локацию"); return; }
+            inventory.Clear(); if (d.items != null) inventory.AddRange(d.items);
+            if (d.storyDone != null) foreach (var x in d.storyDone) sDone.Add(x);
+            if (d.storyFlags != null) foreach (var x in d.storyFlags) sFlags.Add(x);
+            if (d.deadFoes != null) foreach (var f in foes) if (System.Array.IndexOf(d.deadFoes, f.id) >= 0) { f.hp = 0; f.gone = true; f.ch.go.SetActive(false); }
+            if (d.openChests != null) foreach (var c in chests) if (System.Array.IndexOf(d.openChests, c.id) >= 0) { c.open = true; c.openT = 1; }
+            sHasSkull = d.skull; if (sHasSkull && skullGo != null) skullGo.SetActive(false);
+            yorickIdleN = d.yorickIdle;
+            StartStory(false);
+        }
+        /// a new game: the story from its start, a new hero to make (the saves in the slots stay)
+        void NewGame()
+        {
+            if (smap != null) ResetStory();
+            sLast = null; gameClock = Sky.DAY_S * 0.585f; inventory.Clear(); RestoreBody();
+            yorickIdleN = 0; yorickFirstLimb = false; yorickLost2.Clear(); autoT = 0;
+            PlayerPrefs.SetInt("char_made", 0); PlayerPrefs.Save();
+            inMenu = false; menuPage = 0;
+        }
+
+        // ================= Yorick talks (only while he is with the hero) =================
+        static readonly string[] Y_FIGHT = {
+            "Я всё понимаю - сражения, кровь, мясо, веселье. Но ты бы не мог поменьше меня трясти.",
+            "Давай! Да! Ура! Даа! Давай!",
+            "Смотри как у него кишки вывалились.",
+            "Я когда-то тоже так мечом махал, пока мне... Ладно, не важно." };
+        static readonly string[] Y_HURT = {
+            "Ты будешь его бить, не?",
+            "Ты если хочешь умереть, сразу скажи, я не буду к тебе привязываться.",
+            "Ты точно рыцарь? Где вас таких учат?" };
+        // per limb (1 left arm, 2 right arm, 3 left leg, 4 right leg): the first piece he ever loses; a piece lost for good
+        static readonly string[] Y_LOST1 = { null, "Ты решил стать пиратом? Крюк есть?", "О, мне как-то раз тоже руку отрезали.", "Одна нога здесь, другая там.", "Забавно ты прыгаешь. Научишь?" };
+        static readonly string[] Y_LOST2 = { null, "Всё-таки идея с пиратом понравилась?", "Ээээх... как же ты ночью-то будешь...", "Ножки в одну кучку, тушки в другую...", "Помнится, кто-то обещал меня научить так же прыгать..." };
+        static readonly string[] Y_IDLE = {
+            "Помнится, мы куда-то собирались. Не подскажешь?",
+            "Ты пытаешься карту зарисовать или просто любуешься пейзажами?",
+            "Я понял, ты решил бегать по вечерам! Молодец, так держать!.. А теперь, пошли уже отсюда.",
+            "Ладно, если тебе так понравилось здесь, можешь дальше тут побегать, а я пока вздремну... Только сильно не тряси, меня укачивает." };
+        float yorickCd, yorickIdleT; int yorickIdleN; bool yorickFirstLimb; readonly HashSet<string> yorickLost2 = new HashSet<string>();
+        /// a line of Yorick's: over the hero's head (he is in the pocket), voiced when there is a voice for it
+        void YorickSay(string text)
+        {
+            if (!sHasSkull || !story || string.IsNullOrEmpty(text)) return;
+            barks.Add(new BarkLine { at = hero.go.transform, who = "Череп", text = text, dur = 2.2f + 0.055f * text.Length });
+            yorickTalkT = 1.2f + 0.06f * text.Length; yorickCd = 8;
+            PlayVoice("Череп", text);
+        }
+        float yorickTalkT;
+        /// the hero swings at something (in a fight)
+        void StoryFight()
+        {
+            if (!story || yorickCd > 0 || NearestEntity(5f) == null) return;
+            if (Random.value < 0.4f) YorickSay(Y_FIGHT[Random.Range(0, Y_FIGHT.Length)]); else yorickCd = 4;
+        }
+        void StoryHurt()
+        {
+            if (!story || yorickCd > 0) return;
+            if (Random.value < 0.25f) YorickSay(Y_HURT[Random.Range(0, Y_HURT.Length)]); else yorickCd = 3;
+        }
+        void StoryLimbLost(int l, bool second)
+        {
+            if (!story || l == 0) return;
+            if (!second && !yorickFirstLimb) { yorickFirstLimb = true; yorickCd = 0; YorickSay(Y_LOST1[l]); return; }
+            if (second && loc != null && yorickLost2.Add(loc.id + ":" + l)) { yorickCd = 0; YorickSay(Y_LOST2[l]); }
+        }
+        /// wandering about a place that is quiet now: every two minutes or so, in order, each once
+        void StoryIdleTalk(float dt)
+        {
+            yorickCd -= dt; yorickTalkT -= dt;
+            var L = loc as StoryLocation; if (L == null || !sHasSkull || yorickIdleN >= Y_IDLE.Length) return;
+            bool hostile = false; foreach (var f in foes) if (f.L == L && !f.Dead && f.kind != "drunk") { hostile = true; break; }
+            bool fighting = player.combatT > 0 || player.Attacking;
+            bool moving = player.Velocity.sqrMagnitude > 0.3f;
+            if (hostile || fighting || sDir != null) { yorickIdleT = 0; return; }
+            if (moving) yorickIdleT += dt;
+            if (yorickIdleT > 120f) { yorickIdleT = 0; YorickSay(Y_IDLE[yorickIdleN++]); }
+        }
+
+        // ================= voices (made with Voicebox, see tools/voicebox_voices.py): Resources/Voice/<key>.ogg =================
+        AudioSource voiceSrc; readonly Dictionary<string, AudioClip> voiceCache = new Dictionary<string, AudioClip>();
+        public static string VoiceKey(string who, string text)
+        {
+            using (var md5 = System.Security.Cryptography.MD5.Create())
+            {
+                var h = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes((who ?? "") + "|" + text));
+                var sb = new System.Text.StringBuilder(); for (int i = 0; i < 6; i++) sb.Append(h[i].ToString("x2")); return sb.ToString();
+            }
+        }
+        void PlayVoice(string who, string text)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            string key = VoiceKey(who, text); AudioClip c;
+            if (!voiceCache.TryGetValue(key, out c)) { c = Resources.Load<AudioClip>("Voice/" + key); voiceCache[key] = c; }
+            if (c == null) return;
+            if (voiceSrc == null) { voiceSrc = gameObject.AddComponent<AudioSource>(); voiceSrc.playOnAwake = false; voiceSrc.spatialBlend = 0; }
+            voiceSrc.Stop(); voiceSrc.clip = c; voiceSrc.volume = setSound / 100f; voiceSrc.Play();
+        }
+
         // ================= the bestiary: who has been met (and beaten), as text; after D&D 5e's monsters =================
         class Beast { public string id, name, basis, look, ways, stats; }
         static readonly Beast[] BEASTS = {
