@@ -1,0 +1,26 @@
+Sounds of AsciiHero - where they come from
+
+CC0 1.0 (public domain, no attribution required) - Kenney (www.kenney.nl):
+  Impact Sounds   step_grass, step_snow, step_wood, step_stone, step_mud, hit_flesh
+  RPG Audio       step_dirt, draw, cloth, door_open, door_close
+  Foley Sounds    swing, blade, clash, hit_armor, hit_stone, drip, plates
+  (taken from the mirror github.com/series-ai/jam-ready-assets)
+
+CC0 1.0 - freesound.org:
+  amb_wind        "Wind" by felix.blume (sound 139337)
+  amb_fire        "Fireplace" by inchadney (sound 132534)
+  amb_crickets    "Ambience Night Field Cricket 01" by sengjinn (sound 175020)
+  thunder         "Heavy Thunder Strike" by BlueDelta (sound 446753)
+  step_gravel     "Going on a forest road gravel and grass.wav" by straget (sound 411206), cut into steps
+
+CC BY - freesound.org (credit required; keep these lines in the game's credits):
+  amb_stream      "Stream" by mystiscool (sound 7138), CC BY
+  amb_rain        "Forest Rain" by Corsica_S (sound 169031), CC BY
+  amb_rain_heavy  "Heavy Rain" by D W (sound 136971), CC BY
+  amb_birds       "Morning in the country" by inchadney (sound 56611), CC BY 4.0
+  amb_eerie       "eerie_forest" by gregswinford (sound 70100), "Tawny Owls" and "Owls" by Benboncan
+                  (sounds 63842, 63220), CC BY 4.0
+  (collected from github.com/muges/ambientsounds and github.com/rivea0/ambient-sounds-web-components)
+
+Made for the game: step_water, splash (noise and bubbles).
+All the loops were trimmed, made seamless (cross-faded end into start), mixed to mono and levelled.

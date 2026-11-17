@@ -35,6 +35,19 @@ Shader "AsciiHero/Grass"
             float _AsciiGrassThin;     // settings: the share of blades that is not drawn (0 = all)
             float4 _AsciiWind;         // wind: xy = direction (world xz), z = strength 0..1.5, w = unused
 
+            // the season over the foliage (_AsciiSeason: x autumn, y winter, z spring, w snow lying)
+            float4 _AsciiSeason;
+            float3 SeasonGreen(float3 g, float s)
+            {
+                float l = dot(g, float3(0.3, 0.5, 0.2));
+                float3 aut = lerp(float3(0.85, 0.40, 0.10), float3(0.80, 0.62, 0.14), frac(s * 5.3)) * (l * 2.0 + 0.08);
+                if (frac(s * 2.7) > 0.8) aut = float3(0.62, 0.18, 0.08) * (l * 2.0 + 0.08);
+                g = lerp(g, aut, _AsciiSeason.x);
+                float3 win = lerp(float3(0.42, 0.40, 0.36) * (l * 1.6 + 0.06), float3(0.86, 0.9, 0.98) * (l * 1.2 + 0.22), _AsciiSeason.w * step(0.45, frac(s * 4.1)));
+                g = lerp(g, win, _AsciiSeason.y);
+                float3 spr = frac(s * 9.7) > 0.86 ? float3(0.95, 0.62, 0.78) * (l * 2.0 + 0.12) : g * 1.12 + float3(0.02, 0.05, 0.0);
+                return lerp(g, spr, _AsciiSeason.z);
+            }
             float WHash(float2 p) { p = frac(p * float2(123.34, 456.21)); p += dot(p, p + 45.32); return frac(p.x * p.y); }
             float WNoise(float2 p)      // smooth value noise, 0..1
             {
@@ -95,14 +108,14 @@ Shader "AsciiHero/Grass"
                 float dz = _AsciiDepthLit > 0.5 ? abs(SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, ascii_point_clamp_sampler, suv, 0).a) : SAMPLE_TEXTURE2D_LOD(_AsciiNDTex, sampler_AsciiNDTex, suv, 0).b;
                 float sceneZ = dz > 1e-4 ? dz * 12.0 : 1e5;
                 float myZ = -pVS.z;
-                bool vis = myZ <= sceneZ + 0.3 && all(suv >= 0.0) && all(suv <= 1.0) && frac(s * 7.31) >= _AsciiGrassThin;
+                bool vis = myZ <= sceneZ + 0.3 && all(suv >= 0.0) && all(suv <= 1.0) && frac(s * 7.31) >= _AsciiGrassThin && frac(s * 5.17) >= _AsciiSeason.w * 0.7;
                 float lv = TransformWorldToViewDir(float3(lean.x, 0, lean.y), false).x;
                 o.gi = push > 0.8 ? 4.0 : (lv > 0.2 ? 2.0 : (lv < -0.2 ? 3.0 : 0.0));
                 float3 lit = SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, sampler_AsciiLitTex, suv, 0).rgb;
                 lit = _AsciiLinear > 0.5 ? pow(max(lit, 0.0), 1.0 / 2.2) : max(lit, 0.0);
                 float lum = saturate(dot(lit, float3(0.299, 0.587, 0.114)) * 2.6 * _AsciiExposure);
                 float depthK = clamp(1.0 - (myZ - _AsciiDepthRef) * 0.09, 0.5, 1.2);
-                float3 green = lerp(_GrassA.rgb, _GrassB.rgb, frac(s * 13.7));
+                float3 green = SeasonGreen(lerp(_GrassA.rgb, _GrassB.rgb, frac(s * 13.7)), s);
                 o.col = (green * (0.22 + 0.95 * lum) + lit * 0.5) * depthK * (1.0 - 0.35 * push);
                 o.col *= 1.0 + 0.5 * wave;       // a pressed-down band shows lighter (the blades turn their sides to the light)
                 // the quad covers only the part of the cell the stroke is in (an upright '|' is a third of its cell, a

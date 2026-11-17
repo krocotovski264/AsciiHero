@@ -134,6 +134,7 @@ namespace AsciiHero
         class Glow { public Light l; public float baseI, ph; public List<Renderer> caps = new List<Renderer>(); }
         readonly List<Glow> glows = new List<Glow>(); Light ember; MaterialPropertyBlock mpb; Color glowEm;
         // ---- drops falling into the pools ----
+        public System.Action<float, float> onDrip;        // a drop has landed (x, z): its sound
         public readonly List<Vector3> drips = new List<Vector3>();      // x, z, phase
         static float Frac(float x) { return x - Mathf.Floor(x); }
         // a drop every 3.5 s on average, each moved by up to +-0.75 s at random: one comes 2-5 s after the one before
@@ -747,7 +748,7 @@ namespace AsciiHero
                     {
                         float m = m0 + q, h = Frac(m * 0.1031f + d.z * 0.6180f); h *= h + 33.33f; h *= h + h; h = Frac(h);
                         float land = (m - d.z) * DRIP_PERIOD + (h - 0.5f) * 1.5f * DRIP_PERIOD / 3.5f + DRIP_FALL;
-                        if (lastT < land && t >= land) addRipple(d.x, d.y, 0.85f);
+                        if (lastT < land && t >= land) { addRipple(d.x, d.y, 0.85f); if (onDrip != null) onDrip(d.x, d.y); }
                     }
                 }
             lastT = t;

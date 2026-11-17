@@ -1033,6 +1033,29 @@ namespace AsciiHero
                 if (m < 1) { Vector3 r2 = Vector3.zero; SamplePose(fromBase + fromFr, atkQ2, ref r2, null); for (int k = 0; k < nb; k++) atkQ[k] = Quaternion.Slerp(atkQ2[k], atkQ[k], m); aro = Vector3.Lerp(r2, aro, m); }
             }
             Lay(atkQ, aro, w, true, C.bash); bashW = C.bash ? w : 0;
+            // the cut's own steps move the body: standing, its root motion carries him the way the captured fighter went
+            // (without it the feet stepped on the spot and slid)
+            {
+                int fi = Mathf.Clamp(Mathf.FloorToInt(C.a + (C.mirror ? MotionDB.n : 0) + atkFr), 0, MotionDB.N2 - 1);
+                float fwd = MotionDB.RM[fi * 3], lat = MotionDB.RM[fi * 3 + 1], k = w * (1 - wWalk);
+                float fx = Mathf.Sin(heading), fz = Mathf.Cos(heading);
+                atkDrift += new Vector2(fx * fwd + fz * lat, fz * fwd - fx * lat) * k * dt;
+            }
+        }
+        Vector2 atkDrift;
+        /// how high a foot is above where it stands on the ground (m; for the steps' sounds); 9 = no such leg
+        public float FootLift(int si)
+        {
+            if (!limbs[3 + si]) return 9;
+            var f = H.Bone(si == 0 ? "foot.L" : "foot.R"); if (f == null) return 9;
+            return f.position.y - (ch.model.position.y + restAnkle * ch.model.lossyScale.y);
+        }
+        /// how far the cuts' own steps carried him since last asked (the game moves him that far, through the colliders)
+        public Vector2 TakeAttackDrift()
+        {
+            var d = atkDrift; atkDrift = Vector2.zero;
+            if (d.magnitude > 0.3f) d = d.normalized * 0.3f;
+            S.x += d.x; S.z += d.y; return d;
         }
         public const float COMBAT_HOLD = 3f;      // seconds the fighting stance is kept after the last cut, block or hit
         public float combatT; float stance, stanceFeet;

@@ -38,7 +38,7 @@ Shader "AsciiHero/Water"
             TEXTURE2D(_AsciiNDTex); SAMPLER(sampler_AsciiNDTex);
             SAMPLER(ascii_point_clamp_sampler); float _AsciiDepthLit;
             float _AsciiRows, _AsciiTime; float4 _GlyphInk[224];
-            float4 _AsciiWind; float4 _WaterRip[8]; float4 _MoonDir;
+            float4 _AsciiWind; float4 _WaterRip[8]; float4 _MoonDir; float4 _AsciiGrade; float _AsciiDayK;
             float4 _WaterBody[16]; float _WaterBodyN; float4 _WaterTrees[8]; float _WaterTreeN;
             float _WaterReflOn, _AsciiReflPass; TEXTURE2D(_WaterReflTex); SAMPLER(sampler_WaterReflTex);
             TEXTURE2D(_AsciiSkyMap); SAMPLER(sampler_AsciiSkyMap);
@@ -107,6 +107,11 @@ Shader "AsciiHero/Water"
                 // the stars and the Milky Way are painted in it)
                 float2 skyUV = float2(atan2(R.x, R.z) / 6.2832 + 0.5, saturate(asin(saturate(R.y)) / 1.5708));
                 float3 sky = SAMPLE_TEXTURE2D_LOD(_AsciiSkyMap, sampler_AsciiSkyMap, skyUV, 0.6).rgb;
+                {   // by day the water shows a pale sky (grey under clouds) instead of the night one
+                    float sh = saturate(R.y);
+                    float3 daySky = lerp(float3(0.30, 0.38, 0.50), float3(0.12, 0.22, 0.42), sh) * lerp(1.0, 0.55, saturate((1.0 - _AsciiGrade.w) * 3.0));
+                    sky = lerp(sky, daySky, _AsciiDayK);
+                }
                 if (_WaterMode.x > 0.5) sky = float3(0.004, 0.005, 0.008);       // a cave: the vault above is dark
                 // what else the reflected ray meets first: the hero (spheres along his bones) and the trees (trunk and two
                 // spheres of crown each). Seen from the water, a crown is seen from below: leaves with gaps of sky in them.

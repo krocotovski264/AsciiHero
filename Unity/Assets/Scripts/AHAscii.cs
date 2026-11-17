@@ -17,6 +17,7 @@ namespace AsciiHero
     public class AsciiRenderer
     {
         public int cols, rows, W, H;
+        public bool weather;          // the sky's tint, rain and snow over this picture (the world's view only)
         public float exposure = 1f, actorBoost = 0f, bloom = 0.32f;
         public bool surfaceGlyphs = true;
         /// high quality: the lit colour the characters take their brightness from is rendered at full resolution (else half)
@@ -361,6 +362,7 @@ namespace AsciiHero
                 blurMat.SetVector("_Dir", new Vector4(2.2f / bw, 0)); Graphics.Blit(rtB2, rtB1, blurMat);
                 blurMat.SetVector("_Dir", new Vector4(0, 2.2f / bh)); Graphics.Blit(rtB1, rtB2, blurMat);
             }
+            finalMat.SetFloat("_WeatherOn", weather ? 1 : 0); finalMat.SetVector("_GlyphGrid", new Vector4(cols, rows, 0, 0));
             finalMat.SetTexture("_BloomTex", rtB2); finalMat.SetFloat("_Bloom", glow ? bloom : 0);
             if (transT < 1.6f && rtTrans != null)
             {

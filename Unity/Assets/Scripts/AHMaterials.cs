@@ -51,6 +51,7 @@ namespace AsciiHero
             { "DARK", new MatDef(MatId.DARK, 0x101014, 1, 0) },
             { "RED", new MatDef(MatId.RED, 0xb02828, 0.85f, 0) },
             { "ROBE", new MatDef(MatId.ROBE, 0x3f4fb8, 0.85f, 0, 0, false, true) },
+            { "CAPE", new MatDef(MatId.RED, 0x6e1a20, 0.9f, 0, 0, false, true) },            // the knight's cloak
             { "ROBED", new MatDef(MatId.ROBED, 0x28306e, 0.9f, 0) },
             { "PLANK", new MatDef(MatId.PLANK, 0xffffff, 0.85f, 0) },
             { "FLOOR", new MatDef(MatId.FLOOR, 0x5e5044, 1, 0, 0, true) },
@@ -124,7 +125,7 @@ namespace AsciiHero
                 m.SetFloat("_AsciiActor", actor ? 1 : 0);
                 bool big = kv.Key == "FLOOR" || kv.Key == "PLASTER" || kv.Key == "PLANK" || kv.Key == "HEARTH" || kv.Key == "STONE" || kv.Key == "BEAM";
                 m.SetFloat("_GlyphSmoke", kv.Key == "SHADOW" ? 1 : 0);
-                m.SetFloat("_Cloth", actor && (kv.Key == "ROBE" || kv.Key == "ROBED") ? 1 : kv.Key == "LEAF" || kv.Key == "AUTUMN" || kv.Key == "AUTUMN2" || kv.Key == "WHEAT" || kv.Key == "FLOWERB" || kv.Key == "FLOWERP" || kv.Key == "FLOWERW" ? 2 : 0);      // 2: leaves, swaying in the wind
+                m.SetFloat("_Cloth", actor && (kv.Key == "ROBE" || kv.Key == "ROBED" || kv.Key == "CAPE") ? 1 : kv.Key == "LEAF" || kv.Key == "AUTUMN" || kv.Key == "AUTUMN2" || kv.Key == "WHEAT" || kv.Key == "FLOWERB" || kv.Key == "FLOWERP" || kv.Key == "FLOWERW" ? 2 : 0);      // 2: leaves, swaying in the wind
                 m.SetFloat("_AsciiFlat", kv.Key == "GROUND" || kv.Key == "FLOOR" || kv.Key == "WATER" || kv.Key == "CAVEFLOOR" || kv.Key == "MUD" || kv.Key == "ROAD" || kv.Key == "SAND" || kv.Key == "COBBLE" ? 1 : 0);        // floors and walls get no outline
                 if (kv.Key == "GROUND" || kv.Key == "CAVEFLOOR" || kv.Key == "MUD" || kv.Key == "ROAD" || kv.Key == "SAND" || kv.Key == "COBBLE") m.SetVector("_GlyphCell", new Vector4(0.11f, 0.18f, 0, 0)); else
                 if (kv.Key == "WETROCK") m.SetVector("_GlyphCell", new Vector4(0.07f, 0.115f, 0, 0)); else

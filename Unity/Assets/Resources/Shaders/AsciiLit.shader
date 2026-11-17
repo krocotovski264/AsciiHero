@@ -47,6 +47,7 @@ Shader "AsciiHero/Lit"
         CBUFFER_END
         TEXTURE2D(_MainTex); SAMPLER(sampler_MainTex);
         float _AsciiNDPass;
+        float4 _AsciiSeason; float _AsciiWet;      // (the sky: x autumn, y winter, z spring, w snow on the ground; wet ground)
         // ---- see-through: a wall in front of the hero dissolves in a circle around him on the screen (dithered, so it
         // thins out gradually toward the middle instead of vanishing; _SeeFade brings the effect in and out over time) ----
         float4 _SeeHero;   // xyz = the hero's chest (world), w = circle radius in screen heights (0 = off)
@@ -186,6 +187,17 @@ Shader "AsciiHero/Lit"
                     return half4(nVS.xy * 0.5 + 0.5, i.viewZ / 12.0, _AsciiId);
                 }
                 half4 albedo = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv) * _Color;
+                float gloss = _Glossiness;
+                if (_AsciiFlat > 0.5 && nWS.y > 0.5)
+                {   // the ground under the sky: white with snow, dark and glinting when wet
+                    float up = saturate((nWS.y - 0.55) * 3.0);
+                    float2 sp = i.positionWS.xz;
+                    float n = frac(sin(dot(floor(sp * 3.0), float2(12.9898, 78.233))) * 43758.5453);
+                    float sn = up * saturate(_AsciiSeason.w * 1.25 - 0.25 * n);
+                    albedo.rgb = lerp(albedo.rgb, half3(0.82, 0.86, 0.94), sn);
+                    float wt = _AsciiWet * up * (1.0 - sn);
+                    albedo.rgb *= 1.0 - 0.35 * wt; gloss = lerp(gloss, 0.8, wt);
+                }
 
                 InputData d = (InputData)0;
                 d.positionWS = i.positionWS;
@@ -203,7 +215,7 @@ Shader "AsciiHero/Lit"
                 s.albedo = albedo.rgb;
                 s.metallic = _Metallic;
                 s.specular = half3(0, 0, 0);
-                s.smoothness = _Glossiness;
+                s.smoothness = gloss;
                 s.normalTS = half3(0, 0, 1);
                 s.emission = _EmissionColor.rgb;
                 s.occlusion = 1;

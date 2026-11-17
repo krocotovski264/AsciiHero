@@ -150,23 +150,57 @@ namespace AsciiHero
                     Buckle(beltY + 0.01f, 0.05f);
                     break;
                 case "plate":
-                    shell(i => (torso(i) && Y(i) > hipY - 0.02f) || (R[i] == Region.Neck && Y(i) < neckY + 0.05f), 0.04f, "PLATE", 7, 0.006f);
-                    shell(i => (torso(i) && Y(i) < hipY + 0.04f) || (R[i] == Region.Thigh && T[i] < 0.3f), 0.055f, "PLATE", 5, 0);
-                    shell(i => (R[i] == Region.UpperArm && T[i] < 0.34f) || (torso(i) && Y(i) > neckY - 0.08f && Mathf.Abs(X(i)) > 0.14f), 0.06f, "PLATE", 6, 0);
-                    shell(i => R[i] == Region.UpperArm && T[i] >= 0.3f && T[i] < 0.6f, 0.03f, "PLATE", 3, 0);
-                    shell(i => (R[i] == Region.UpperArm || R[i] == Region.ForeArm) && T[i] >= 0.56f && T[i] < 0.66f, 0.045f, "PLATE", 3, 0);
-                    shell(i => R[i] == Region.ForeArm && T[i] >= 0.64f, 0.03f, "PLATE", 3, 0);
-                    shell(i => R[i] == Region.Hand, 0.014f, "PLATE", 1, 0);
-                    shell(i => R[i] == Region.Thigh && T[i] >= 0.28f && T[i] < 0.5f, 0.035f, "PLATE", 4, 0);
-                    shell(i => isLeg(i) && T[i] >= 0.47f && T[i] < 0.6f && R[i] != Region.Foot, 0.05f, "PLATE", 4, 0);
-                    shell(i => R[i] == Region.Shin && T[i] >= 0.58f, 0.032f, "PLATE", 4, 0);
-                    shell(i => R[i] == Region.Foot, 0.022f, "PLATE", 2, 0);
-                    shell(i => R[i] == Region.Head || (R[i] == Region.Neck && Y(i) > neckY), 0.04f, "PLATE", 10, 0.012f);
-                    shell(i => R[i] == Region.Head && Mathf.Abs(Y(i) - eyeY) < 0.011f && Z(i) > headJ.z + 0.02f, 0.058f, "DARK", 1, 0);
-                    shell(i => R[i] == Region.Head && Mathf.Abs(Y(i) - eyeY) < 0.006f && Mathf.Abs(X(i)) > 0.012f && Mathf.Abs(X(i)) < 0.05f && Z(i) > headJ.z + 0.05f, 0.06f, "EYE", 0, 0);
-                    belt(beltY, "LEATHER2", 0.06f, 0.018f);
-                    Plume(headTop);
+                {
+                    // Plate is a suit of separate hard pieces, not one padded shell (that looked like a puffed-up down
+                    // jacket): thin plates with small gaps between them where the dark body shows, the edges of the
+                    // lames standing out as bright rims. Under it a gambeson, over the back a cloak; the helmet is a
+                    // modelled bascinet with the visor down (KayKit, CC0).
+                    pants("PANTS");
+                    shell(i => (torso(i) && Y(i) > hipY - 0.05f) || (R[i] == Region.UpperArm && T[i] < 0.5f) || R[i] == Region.Neck, 0.008f, "LINEN", 1, 0);     // gambeson
+                    // cuirass: breastplate and backplate, a ridge down the middle of the chest
+                    shell(i => torso(i) && Y(i) > beltY + 0.01f && Y(i) < neckY - 0.03f, 0.02f, "PLATE", 2, 0);
+                    shell(i => torso(i) && Y(i) > beltY + 0.06f && Y(i) < neckY - 0.05f && Mathf.Abs(X(i)) < 0.012f && Z(i) > 0, 0.03f, "STEEL", 1, 0);
+                    shell(i => torso(i) && Mathf.Abs(Y(i) - (neckY - 0.045f)) < 0.012f, 0.026f, "STEEL", 1, 0);               // the rim at the neck
+                    // gorget: two rings round the neck
+                    shell(i => R[i] == Region.Neck && Y(i) < neckY + 0.02f, 0.024f, "PLATE", 1, 0);
+                    shell(i => (R[i] == Region.Neck && Y(i) < neckY - 0.01f) || (torso(i) && Y(i) > neckY - 0.03f), 0.03f, "STEEL", 1, 0);
+                    // faulds: three lames below the waist, each standing out a little further over the one above
+                    for (int k = 0; k < 3; k++)
+                    {
+                        float y1 = beltY - 0.005f - k * 0.045f, y0 = y1 - 0.038f, th = 0.024f + 0.006f * k; int kk = k;
+                        shell(i => (torso(i) || R[i] == Region.Thigh) && Y(i) < y1 && Y(i) > y0, th, "PLATE", 1, 0);
+                        shell(i => (torso(i) || R[i] == Region.Thigh) && Mathf.Abs(Y(i) - (y0 + 0.004f)) < 0.006f, th + 0.006f, "STEEL", 0, 0);
+                    }
+                    // pauldrons: three lames over each shoulder
+                    for (int k = 0; k < 3; k++)
+                    {
+                        float a0 = k * 0.11f, a1 = a0 + 0.1f, th = 0.04f - 0.007f * k;
+                        shell(i => (R[i] == Region.UpperArm && T[i] >= a0 && T[i] < a1) || (k == 0 && torso(i) && Y(i) > neckY - 0.09f && Mathf.Abs(X(i)) > 0.13f), th, "PLATE", 2, 0);
+                        shell(i => R[i] == Region.UpperArm && Mathf.Abs(T[i] - a1 + 0.012f) < 0.012f, th + 0.005f, "STEEL", 0, 0);
+                    }
+                    shell(i => R[i] == Region.UpperArm && T[i] >= 0.36f && T[i] < 0.86f, 0.017f, "PLATE", 1, 0);                                  // rerebrace
+                    shell(i => (R[i] == Region.UpperArm && T[i] >= 0.9f) || (R[i] == Region.ForeArm && T[i] < 0.1f), 0.034f, "STEEL", 2, 0);    // couter (elbow cup)
+                    shell(i => R[i] == Region.ForeArm && T[i] >= 0.14f && T[i] < 0.93f, 0.017f, "PLATE", 1, 0);                                   // vambrace
+                    shell(i => R[i] == Region.ForeArm && T[i] >= 0.93f, 0.026f, "STEEL", 1, 0);                                                     // gauntlet cuff
+                    shell(i => R[i] == Region.Hand, 0.01f, "PLATE", 0, 0);
+                    // legs: cuisses, poleyns (knee cups with a rim), greaves, sabatons in lames
+                    shell(i => R[i] == Region.Thigh && T[i] >= 0.18f && T[i] < 0.84f, 0.018f, "PLATE", 1, 0);
+                    shell(i => (R[i] == Region.Thigh && T[i] >= 0.88f) || (R[i] == Region.Shin && T[i] < 0.12f), 0.034f, "STEEL", 2, 0);
+                    shell(i => R[i] == Region.Shin && T[i] >= 0.16f, 0.018f, "PLATE", 1, 0);
+                    shell(i => R[i] == Region.Foot, 0.016f, "PLATE", 1, 0);
+                    shell(i => R[i] == Region.Foot && T[i] > 0.3f && T[i] < 0.36f, 0.022f, "STEEL", 0, 0);
+                    shell(i => R[i] == Region.Foot && T[i] > 0.55f && T[i] < 0.61f, 0.022f, "STEEL", 0, 0);
+                    belt(beltY, "LEATHER2", 0.03f, 0.014f); Buckle(beltY, 0.034f);
+                    float helmTop = KnightHelm();
+                    if (helmTop < 0)
+                    {   // (no helmet model: the old shell helmet)
+                        shell(i => R[i] == Region.Head || (R[i] == Region.Neck && Y(i) > neckY), 0.03f, "PLATE", 6, 0.008f);
+                        helmTop = headTop;
+                    }
+                    Plume(helmTop);
+                    Cape();
                     break;
+                }
                 case "robe":
                     pants("ROBED");
                     shell(i => (torso(i) && Y(i) > hipY - 0.05f) || R[i] == Region.Neck || (isArm(i) && T[i] < 0.86f && R[i] != Region.Hand), 0.018f, "ROBE", 3, 0);
@@ -257,6 +291,80 @@ namespace AsciiHero
             MeshGen.AddGlyphUV(m, false);
             var g = Group("LongHair"); Part(m, "HAIR2", g, Vector3.zero);
             Attach("head", g, Vector3.zero, Quaternion.identity);
+        }
+
+        /// the helmet: a bascinet with its visor down (KayKit Adventurers' knight, CC0), stretched to this head; returns its top (or -1)
+        float KnightHelm()
+        {
+            var ta = Resources.Load<TextAsset>("knighthelm"); if (ta == null) return -1;
+            var b = ta.bytes; int nv = BitConverter.ToInt32(b, 0), ni = BitConverter.ToInt32(b, 4), o = 8;
+            var h = human; Vector3 lo = Vector3.one * 1e5f, hi = -Vector3.one * 1e5f;
+            for (int i = 0; i < h.n; i++) if (HumanDB.vpart[i] == 0 && h.region[i] == Region.Head) { lo = Vector3.Min(lo, h.pos[i]); hi = Vector3.Max(hi, h.pos[i]); }
+            if (hi.x < lo.x) return -1;
+            Vector3 c = (lo + hi) / 2, hs = (hi - lo) / 2;
+            hs = new Vector3(hs.x * 1.3f, hs.y * 1.12f, hs.z * 1.22f); c.y += hs.y * 0.05f; c.z -= hs.z * 0.03f;
+            var vH = new List<Vector3>(); var vV = new List<Vector3>(); var map = new int[nv]; var part = new float[nv];
+            for (int i = 0; i < nv; i++)
+            {
+                var pn = new Vector3(BitConverter.ToSingle(b, o + i * 12), BitConverter.ToSingle(b, o + i * 12 + 4), BitConverter.ToSingle(b, o + i * 12 + 8));
+                part[i] = BitConverter.ToSingle(b, o + nv * 12 + i * 4);
+                var p = c + Vector3.Scale(pn, hs);
+                if (part[i] < 0.5f) { map[i] = vH.Count; vH.Add(p); } else { map[i] = vV.Count; vV.Add(p); }
+            }
+            var iH = new List<int>(); var iV = new List<int>(); int io = o + nv * 16;
+            for (int t = 0; t + 2 < ni; t += 3)
+            {
+                int a0 = BitConverter.ToInt32(b, io + t * 4), a1 = BitConverter.ToInt32(b, io + t * 4 + 4), a2 = BitConverter.ToInt32(b, io + t * 4 + 8);
+                var l = part[a0] < 0.5f ? iH : iV; l.Add(map[a0]); l.Add(map[a1]); l.Add(map[a2]);
+            }
+            var g = Group("Helmet");
+            foreach (var (vs, ix, mat) in new[] { (vH, iH, "PLATE"), (vV, iV, "STEEL") })
+            {
+                var m = new Mesh(); m.SetVertices(vs); m.SetTriangles(ix, 0); m.RecalculateNormals(); m.RecalculateBounds();
+                MeshGen.AddGlyphUV(m, false);
+                Part(m, mat, g, Vector3.zero);
+            }
+            Attach("head", g, Vector3.zero, Quaternion.identity);
+            return c.y + hs.y;
+        }
+
+        /// the knight's cloak: from the shoulders down past the knees, hanging behind; simulated as cloth (AHCloth) like the
+        /// robe's skirt - its grid goes all round the body, only the back of it is drawn
+        void Cape()
+        {
+            var h = human; var P = h.pos; float neckY = h.Head("neck01").y;
+            float yTop = neckY - 0.035f, yBot = h.Head("lowerleg01.L").y - 0.06f;
+            float x0 = 0, z0 = 0, z1 = 0;
+            for (int i = 0; i < h.n; i++)
+            {
+                var rg = h.region[i];
+                if (HumanDB.vpart[i] == 0 && Mathf.Abs(P[i].y - (yTop - 0.05f)) < 0.02f && (rg == Region.Torso || rg == Region.UpperArm))
+                { x0 = Mathf.Max(x0, Mathf.Abs(P[i].x)); z0 = Mathf.Min(z0, P[i].z); z1 = Mathf.Max(z1, P[i].z); }
+            }
+            if (x0 <= 0) return;
+            int rings = 18, segs = 48; var v = new List<Vector3>(); var idx = new List<int>();
+            for (int r = 0; r <= rings; r++)
+            {
+                float t = r / (float)rings, y = yTop - (yTop - yBot) * t;
+                float rx = x0 * (0.82f + 0.3f * t) + 0.05f, rz = ((z1 - z0) / 2 + 0.05f) * (1 + 0.6f * t), cz = (z0 + z1) / 2 - 0.015f - 0.05f * t;
+                for (int sg = 0; sg <= segs; sg++)
+                {
+                    float a = 2 * Mathf.PI * sg / segs;
+                    float fold = 1 + (0.01f + 0.05f * t) * Mathf.Sin(a * 7 + t * 2);
+                    v.Add(new Vector3(Mathf.Cos(a) * rx * fold, y, cz + Mathf.Sin(a) * rz * fold));
+                }
+            }
+            for (int r = 0; r < rings; r++) for (int sg = 0; sg < segs; sg++)
+                {
+                    float am = 2 * Mathf.PI * (sg + 0.5f) / segs;
+                    if (Mathf.Sin(am) > 0.2f) continue;          // (the front of the grid is not drawn)
+                    int a = r * (segs + 1) + sg, b2 = a + segs + 1; idx.Add(a); idx.Add(b2); idx.Add(a + 1); idx.Add(a + 1); idx.Add(b2); idx.Add(b2 + 1);
+                }
+            var m = new Mesh(); m.SetVertices(v); m.SetTriangles(idx, 0); m.RecalculateNormals(); m.RecalculateBounds();
+            MeshGen.AddGlyphUV(m, true);
+            var g = Group("Cape"); skirt = Part(m, "CAPE", g, Vector3.zero).transform;
+            skirtRest = v.ToArray(); skirtRings = rings; skirtSegs = segs;
+            Attach("spine01", g, Vector3.zero, Quaternion.identity);
         }
 
         void RobeSkirt(float yTop)

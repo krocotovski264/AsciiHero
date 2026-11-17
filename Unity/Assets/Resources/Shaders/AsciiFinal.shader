@@ -14,6 +14,68 @@ Shader "Hidden/AsciiHero/Final"
             sampler2D _MainTex, _BloomTex, _AsciiLitTex; float _Bloom, _Linear, _Outline; float4 _LitPx;
             // retyping (a door between places): the old picture, how far the front has run, where from, the glyph grid
             sampler2D _TransTex, _AsciiAtlas; float _TransT, _AsciiRows, _AsciiTime; float4 _TransO, _TransGrid;
+            // the sky: the tint of the time of day and the weather (a: saturation), the rain and the snow over the screen
+            float4 _AsciiGrade, _AsciiPrecip, _AsciiPrecipWind, _GlyphGrid; float _WeatherOn, _AsciiDayK;
+            float H1(float n) { return frac(sin(n * 12.9898) * 43758.5453); }
+            float H2(float2 p) { return frac(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453); }
+            float Glyph(float row, float g, float2 lc)
+            {
+                float rows = max(_AsciiRows, 1.0);
+                return tex2D(_AsciiAtlas, float2((g + clamp(lc.x, 0.04, 0.96)) / 16.0, 1.0 - (row + 1.0) / rows + clamp(lc.y, 0.04, 0.96) / rows)).r;
+            }
+            // rain: streaks of three depths fall down columns of the glyph grid, the columns leaning with the wind
+            // (a lean draws '/' or '\'); a few drops splash ',' on the lower half. Snow: flakes ('*' near, '.' far)
+            // drifting down, swaying from side to side.
+            float3 Precip(float2 uv)
+            {
+                float2 grid = max(_GlyphGrid.xy, float2(8, 8));
+                float2 gp = uv * grid, cell = floor(gp), lc = frac(gp);
+                float t = _AsciiTime, R = grid.y; float3 o = 0;
+                float rainA = _AsciiPrecip.x, snowA = _AsciiPrecip.y, sl = _AsciiPrecipWind.x;
+                if (rainA > 0.01)
+                {
+                    float gch = abs(sl) < 0.18 ? 10.0 : (sl > 0.0 ? 9.0 : 8.0);         // | \ /
+                    [unroll] for (int L = 0; L < 3; L++)
+                    {
+                        float lean = sl * (0.7 + 0.25 * L);
+                        float id = cell.x + floor(cell.y * lean + 0.5);
+                        float spd = R * (1.3 + 0.55 * L) * (0.8 + 0.4 * rainA), len = 1.0 + L + floor(rainA * 1.5);
+                        float cyc = R * (1.3 + 0.4 * H1(id * 3.7 + L));
+                        float pos = t * spd + H1(id * 1.7 + L * 31.0) * cyc;
+                        float n = floor(pos / cyc), head = R - (pos - n * cyc) + 2.0;
+                        float on = step(H1(id * 0.731 + n * 13.1 + L * 7.3), rainA * (0.16 + 0.1 * L));
+                        float d = cell.y - floor(head);
+                        if (on > 0.0 && d >= 0.0 && d < len)
+                        {
+                            float b = (1.0 - d / len) * (0.22 + 0.16 * L);
+                            o = max(o, float3(0.55, 0.62, 0.78) * b * Glyph(1.0, gch, lc));
+                        }
+                    }
+                    if (cell.y < R * 0.55)
+                    {
+                        float tb = floor(t * 7.0 + H2(cell) * 5.0);
+                        if (H2(cell + tb * 0.37) < rainA * 0.012) o = max(o, float3(0.6, 0.68, 0.8) * 0.45 * Glyph(1.0, H2(cell * 1.3 + tb) > 0.5 ? 4.0 : 3.0, lc));
+                    }
+                }
+                if (snowA > 0.01)
+                {
+                    [unroll] for (int L = 0; L < 3; L++)
+                    {
+                        float sw = sin(cell.y * 0.31 + t * (0.7 + 0.2 * L) + L * 2.1) * (1.2 + 0.4 * L) + sl * cell.y * 0.6;
+                        float id = cell.x + floor(sw + 0.5);
+                        float spd = R * (0.09 + 0.05 * L), cyc = R * (1.1 + 0.5 * H1(id * 2.3 + L));
+                        float pos = t * spd + H1(id * 1.3 + L * 17.0) * cyc;
+                        float n = floor(pos / cyc), head = R - (pos - n * cyc) + 1.0;
+                        float on = step(H1(id * 0.917 + n * 7.7 + L * 3.1), snowA * (0.22 + 0.12 * L));
+                        if (on > 0.0 && abs(cell.y - floor(head)) < 0.5)
+                        {
+                            float b = 0.3 + 0.22 * L;
+                            o = max(o, float3(0.86, 0.9, 1.0) * b * (L == 2 ? Glyph(9.0, 2.0, lc) : Glyph(1.0, 1.0, lc)));
+                        }
+                    }
+                }
+                return o;
+            }
             float4 frag (v2f_img i) : SV_Target
             {
                 float3 a = tex2D(_MainTex, i.uv).rgb, b = tex2D(_BloomTex, i.uv).rgb;
@@ -43,6 +105,13 @@ Shader "Hidden/AsciiHero/Final"
                             a = max(a, oc);
                         }
                     }
+                }
+                if (_WeatherOn > 0.5)
+                {
+                    float la = dot(a, float3(0.3, 0.5, 0.2));
+                    a = lerp(la.xxx, a, _AsciiGrade.w) * _AsciiGrade.rgb;
+                    bg = lerp(bg, float3(0.05, 0.06, 0.08), _AsciiDayK * 0.6) + _AsciiPrecip.w * float3(0.12, 0.13, 0.16);
+                    a += Precip(i.uv);
                 }
                 float3 c = bg + a + b * _Bloom * 1.6;
                 // values are display-referred; in a Linear project convert so the sRGB output shows them unchanged

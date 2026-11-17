@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.66 · Unity";
+        public const string VERSION = "beta 0.67 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -192,7 +192,9 @@ namespace AsciiHero
                 SetShadowDistance(14);
                 sceneCam = new GameObject("SceneCamera").AddComponent<Camera>();
                 sceneCam.nearClipPlane = 0.05f; sceneCam.farClipPlane = 40; sceneCam.fieldOfView = 36; sceneCam.allowMSAA = false; sceneCam.allowHDR = false;
-                ascii = new AsciiRenderer(sceneCam); ascii.reflections = true;
+                ascii = new AsciiRenderer(sceneCam); ascii.reflections = true; ascii.weather = true;
+                sceneCam.gameObject.AddComponent<AudioListener>();
+                try { sfx = new Sfx(); } catch (System.Exception e) { Debug.LogWarning("Звуки не загрузились: " + e.Message); }
                 ascii.surfaceGlyphs = PlayerPrefs.GetInt("ascii_glyph_mode", 1) == 1;
                 ApplySettings(false);
             })) yield break;
@@ -299,6 +301,7 @@ namespace AsciiHero
         {
             if (hp <= 0 || !ready) return;
             if (player != null) player.PokeIdle();
+            if (sfx != null) { sfx.Play("hit_armor", 0.7f); sfx.Play("clash", 0.35f); }
             hp = Mathf.Max(0, hp - pct);
             string lost = "";
             while (LimbCount() > Mathf.CeilToInt(hp / 20f))
@@ -499,6 +502,7 @@ namespace AsciiHero
         {
             if (d.dead > 0) return;
             d.hp = Mathf.Max(0, d.hp - dmg); d.wob = 1;
+            Sound("hit_flesh", 0.6f, d.p); Sound("hit_armor", 0.25f, d.p);
             SpawnPuff(d.p + Vector3.up * 1.2f, 0.05f, new Vector3(0, 0.4f, 0), 0.4f);
             foreach (var part in d.parts) if (part.go != null && (d.hp <= 0 || (part.stage > 0 && d.hp <= part.stage))) DummyBreak(d, part, d.hp <= 0 ? 2.2f : 1.6f);
             if (d.hp <= 0) { d.dead = 3; Destroy(d.root); d.root = null; }
@@ -655,6 +659,7 @@ namespace AsciiHero
             {
                 cave = Cave.Build(mats); GlyphLayer.Build(cave.root); cave.PlaceAt(CAVE_O);
                 cave.addRipple = (x, z, a) => AddRipple(x + CAVE_O.x, z + CAVE_O.z, a);
+                cave.onDrip = (x, z) => Sound("drip", 0.55f, new Vector3(x + CAVE_O.x, 0, z + CAVE_O.z));
             }
             outdoor.Clear(); outdoor.Add(field); outdoor.Add(forest); outdoor.Add(cave);
             if (mockups.Count == 0)
@@ -815,9 +820,18 @@ namespace AsciiHero
             if (wsum > 0)
             {
                 sky /= wsum; eq /= wsum; gnd /= wsum; moon /= wsum; hl /= wsum; ex /= wsum;
-                SetAmbient(sky, eq, gnd);
-                if (moonLight != null) { moonLight.intensity = 0.3f * moon; moonLight.enabled = moon > 0.02f; }
-                heroLight.intensity = hl; ascii.exposure = ex;
+                // the time of day, the season and the weather over it (night, summer and a clear sky leave it as it was)
+                skyS.Update(Time.deltaTime);
+                Color atn = skyS.ambTint * skyS.ambK;
+                SetAmbient(sky * atn, eq * atn, gnd * atn);
+                if (moonLight != null)
+                {
+                    moonLight.intensity = skyS.sunK * moon; moonLight.enabled = moon > 0.02f && moonLight.intensity > 0.01f;
+                    moonLight.color = skyS.sunCol; moonLight.transform.rotation = Quaternion.LookRotation(-skyS.sunDir);
+                }
+                heroLight.intensity = hl * skyS.heroK; ascii.exposure = ex * skyS.expK;
+                var wsv = sceneCam != null ? sceneCam.transform.InverseTransformDirection(windV) : Vector3.zero;
+                skyS.Wind(new Vector2(Mathf.Clamp(wsv.x * 0.35f, -0.8f, 0.8f), 0));
             }
         }
         /// all the armour lies in new places every time the hero comes into the world (the places themselves stay)
@@ -1002,7 +1016,8 @@ namespace AsciiHero
             if (where == 0)
             {
                 if (moonLight != null) { moonLight.enabled = true; moonLight.intensity = 0.3f; }
-                heroLight.intensity = 1.6f;
+                heroLight.intensity = 1.6f; Sky.Neutral();
+                if (moonLight != null) { moonLight.color = Mats.Hex(0x8aa6ff); moonLight.transform.rotation = Quaternion.LookRotation(-new Vector3(-0.12f, 0.788f, -0.604f).normalized); }
                 SetAmbient(Mats.Hex(0x50465a) * 0.45f, Mats.Hex(0x342b32) * 0.45f, Mats.Hex(0x18100a) * 0.45f);
                 if (at == null) ShowToast("Трактир «Пьяный дракон»");
             }
@@ -1027,7 +1042,7 @@ namespace AsciiHero
             ApplyEditorAmbient();
             SetShadowDistance(14);
         }
-        void ApplyEditorAmbient() { SetAmbient(Mats.Hex(0xc8d4ff) * 0.3f, Mats.Hex(0x7c7c8c) * 0.3f, Mats.Hex(0x302418) * 0.3f); }
+        void ApplyEditorAmbient() { Sky.Neutral(); SetAmbient(Mats.Hex(0xc8d4ff) * 0.3f, Mats.Hex(0x7c7c8c) * 0.3f, Mats.Hex(0x302418) * 0.3f); }
         static void SetAmbient(Color sky, Color equator, Color ground)
         {
             RenderSettings.ambientMode = AmbientMode.Trilight;
@@ -1051,7 +1066,9 @@ namespace AsciiHero
         int setQuality, setGrass, setRes, setFps, setMusic, setSound; bool setBloom, setShowFps, setOutline = true;
         static readonly string[] QUALITY = { "Низкое", "Среднее", "Высокое" };
         static readonly int[] GRASS = { 0, 25, 50, 75, 100 }, RES = { 50, 67, 75, 85, 100 }, FPS = { 30, 60, 90, 120 };
-        static readonly string[] DEVELOPERS = { "krocotovski264", "Тёма — программист", "", "Анимация ходьбы и передвижения в бою: набор 100STYLE —", "I. Mason, S. Starke, T. Komura (CC BY 4.0)", "", "Скелеты в пещере: BodyParts3D, DBCLS —", "© The Database Center for Life Science (CC BY 4.0)" };
+        static readonly string[] DEVELOPERS = { "krocotovski264", "Тёма — программист", "", "Анимация ходьбы и передвижения в бою: набор 100STYLE —", "I. Mason, S. Starke, T. Komura (CC BY 4.0)", "", "Скелеты в пещере: BodyParts3D, DBCLS —", "© The Database Center for Life Science (CC BY 4.0)", "",
+            "Звуки: Kenney (CC0); freesound: felix.blume, inchadney, sengjinn, BlueDelta, straget (CC0);",
+            "mystiscool, Corsica_S, D W, inchadney, gregswinford, Benboncan (CC BY)" };
         void LoadSettings()
         {
             bool phone = Application.isMobilePlatform;
@@ -1073,7 +1090,7 @@ namespace AsciiHero
             Shader.SetGlobalFloat("_AsciiGrassThin", 1 - GRASS[setGrass] / 100f);
             if (ascii != null) { ascii.bloom = setBloom ? 0.32f : 0f; ascii.fullLit = false; ascii.litDiv = setQuality == 0 ? 3 : 2; ascii.outline = setOutline; }
             shadowScale = setQuality == 0 ? 0f : setQuality == 1 ? 0.85f : 1f; SetShadowDistance(shadowBase);
-            AudioListener.volume = setSound / 100f;      // (the game has no sounds or music yet: the levels are kept for them)
+            AudioListener.volume = setSound / 100f;      // (no music yet)
             // rendering resolution: a share of the display's own resolution (100 % = the most the device can show)
             int sw = Display.main.systemWidth, sh = Display.main.systemHeight; if (sw <= 0 || sh <= 0) { sw = Screen.currentResolution.width; sh = Screen.currentResolution.height; }
             bool land = Screen.width >= Screen.height; int big = Mathf.Max(sw, sh), small = Mathf.Min(sw, sh);
@@ -1328,6 +1345,7 @@ namespace AsciiHero
             if (world) WorldUpdate(dt);
             else
             {
+                if (sfx != null) sfx.Update(dt);          // (the beds fade out)
                 if (!interacting)
                 {
                     if (Mathf.Abs(vel) > 1e-4f) { cam.yaw += vel; vel *= Mathf.Pow(0.04f, dt); }
@@ -1509,6 +1527,7 @@ namespace AsciiHero
 
         // ---------- actions: attack, guard, dash ----------
         Cloak cloak; readonly List<Renderer> cloakRs = new List<Renderer>(); MaterialPropertyBlock clothMpb;
+        readonly Sky skyS = new Sky(); bool skyOpen;
         Vector3 windV; float windA = 0.7f, windStr = 0.3f, windTarget = 0.4f, windPhaseT, windRun; int windPhase = 1;
         class Piece { public string kind = ""; public List<Renderer> rs = new List<Renderer>(); public float delay, om = 11, zeta = 0.45f, lift = 0.3f, wob, turns = 1, side; public Vector3 axis = Vector3.up; }
         readonly List<Piece> pieces = new List<Piece>(); MaterialPropertyBlock shiftMpb;
@@ -1523,7 +1542,7 @@ namespace AsciiHero
             // moving: where the stick points; standing: where the hero looks
             Vector3 d = moveDir.HasValue ? new Vector3(moveDir.Value.x, 0, moveDir.Value.y) : new Vector3(Mathf.Sin(player.heading), 0, Mathf.Cos(player.heading));
             if (swipe.HasValue && swipe.Value.sqrMagnitude > 1e-4f) { var w = ScreenToWorldDir(swipe.Value); d = new Vector3(w.x, 0, w.y); }      // a swipe: where the finger went
-            dashDir = d.normalized; dashT = 0; dashFrom = pos; dashMist = 0; player.StartLeap(); player.PokeIdle();
+            dashDir = d.normalized; dashT = 0; dashFrom = pos; dashMist = 0; player.StartLeap(); player.PokeIdle(); if (sfx != null) { sfx.Play("swing", 0.45f, 0.6f); sfx.Play("cloth", 0.3f); }
             // the shadow passes straight through trees, rocks and furniture; it only has to come out on free ground:
             // if the end of the dash is inside something it goes on until it is clear (or, failing that, stops short)
             dashLen = DASH_DIST;
@@ -1675,6 +1694,7 @@ namespace AsciiHero
             if (InputHub.Key("Attack")) DoAttack();
             if (InputHub.Key("Dash")) DoDash();
             var dd = player.Locomotion(dt, dir, mag, lockPos, new Vector2(pos.x, pos.z), p => NoDeeper(WCollide(p, 0.27f)));
+            dd += player.TakeAttackDrift();          // (the steps of a cut)
             var np = NoDeeper(WCollide(new Vector2(pos.x + dd.x, pos.z + dd.y), 0.27f));
             pos = new Vector3(np.x, 0, np.y);
             UpdateDash(dt);
@@ -1685,7 +1705,7 @@ namespace AsciiHero
                 heroSink += (want - heroSink) * Mathf.Min(1, dt * 6);
             }
             hero.go.transform.position = pos + Vector3.down * heroSink;
-            UpdateOutdoor(); Doors(dt); UpdateGlows();
+            UpdateOutdoor(); Doors(dt); UpdateGlows(); UpdateSound(dt);
             float idleYaw = 0;
             if (player.idleYawW > 0) { Vector3 co = Mirror(new Vector3(Mathf.Sin(isoYaw), 0, Mathf.Cos(isoYaw))); idleYaw = Mathf.DeltaAngle(player.heading * Mathf.Rad2Deg, Mathf.Atan2(co.x, co.z) * Mathf.Rad2Deg) * Mathf.Deg2Rad * player.idleYawW; }   // waving: turned to the camera
             hero.go.transform.rotation = Quaternion.Euler(0, (player.heading - player.spinYaw + idleYaw) * Mathf.Rad2Deg, 0);      // the full-turn sweep spins the whole figure
@@ -2346,6 +2366,120 @@ namespace AsciiHero
         {
             stickR = 62 * k;
             if (invOpen) PocketUI(W, H);
+            else if (setDev && loc != null && loc != tavern) SkyUI();
+        }
+
+        // ---------- sounds ----------
+        Sfx sfx; readonly float[] footUp = { 1, 1 }; bool wasCut; float waterNearT, waterNear = 99, lastFlash, plateT;
+        string Surface()
+        {
+            if (loc == tavern) return "wood";
+            float wd = loc.DepthW(pos);
+            if (wd > 0.04f) return "water";
+            if (skyS.SnowCover > 0.45f && loc != cave) return "snow";
+            if (loc == cave) return "stone";
+            if (loc == field || loc == forest) return "grass";
+            var m = loc as Mockup;
+            if (m != null)
+                switch (m.kind)
+                {
+                    case "swamp": case "toxic": return "mud";
+                    case "bright": case "crystal": return "stone";
+                    case "snow": return "snow";
+                    case "wastes": return "gravel";
+                    case "grim": return "dirt";
+                }
+            return "grass";
+        }
+        void UpdateSound(float dt)
+        {
+            if (sfx == null) return;
+            sfx.ear = pos; if (sceneCam != null) sfx.earRight = sceneCam.transform.right;
+            // steps: a foot that comes down to the ground
+            if (player != null && !invOpen)
+            {
+                float sp = player.Velocity.magnitude;
+                for (int si = 0; si < 2; si++)
+                {
+                    float y = player.FootLift(si); if (y > 8) continue;
+                    if (footUp[si] > 0 && y < 0.025f)
+                    {
+                        footUp[si] = 0;
+                        if (sp > 0.25f || player.Attacking)
+                        {
+                            string sf = Surface(); float v = Mathf.Lerp(0.28f, 0.6f, Mathf.Clamp01(sp / 4.5f));
+                            if (sf == "water") { sfx.Play(loc.DepthW(pos) > 0.3f ? "splash" : "step_water", v * 0.9f); }
+                            else
+                            {
+                                if (sf == "snow") v *= 1.2f; if (sf == "mud") v *= 0.9f;
+                                sfx.Play("step_" + sf, v, 1, 0.09f);
+                                if (skyS.Rain > 0.3f && sf != "stone" && sf != "wood") sfx.Play("step_water", v * 0.35f * skyS.Rain, 1.2f);      // wet ground
+                            }
+                            // the plates of the armour on a run
+                            plateT -= 1; if (sp > 3 && plateT <= 0) { sfx.Play("plates", 0.12f); plateT = 2 + Random.Range(0, 3); }
+                        }
+                    }
+                    else if (y > 0.06f) footUp[si] = 1;
+                }
+                // a cut: the blade's whoosh as the edge starts to travel
+                bool cut = player.Cutting;
+                if (cut && !wasCut) { sfx.Play("swing", 0.5f, 1, 0.1f); sfx.Play("blade", 0.22f, 1.1f); }
+                wasCut = cut;
+            }
+            // the beds of the place, the time and the weather
+            bool inside = loc == tavern, cav = loc == cave;
+            var mk = loc as Mockup; string kind = mk != null ? mk.kind : loc == field ? "field" : loc == forest ? "forest" : "";
+            if (inside) { sfx.Bed("amb_fire", 0.32f); if (skyS.Rain > 0.1f) sfx.Bed("amb_rain", skyS.Rain * 0.15f); }
+            else
+            {
+                float day = skyS.DayK, rain = skyS.Rain, dry = 1 - Mathf.Clamp01(rain * 2 + skyS.Snow * 1.5f);
+                sfx.Bed("amb_wind", (cav ? 0.05f : 0.1f + 0.28f * windStr) * (1 + 0.6f * skyS.Snow + 0.5f * Mathf.Max(0, rain - 0.6f)));
+                float muff = cav ? 0.3f : 1;
+                sfx.Bed("amb_rain", Mathf.Min(rain, 0.6f) / 0.6f * 0.45f * (1 - Mathf.Clamp01((rain - 0.7f) / 0.3f) * 0.5f) * muff);
+                sfx.Bed("amb_rain_heavy", Mathf.Clamp01((rain - 0.6f) / 0.4f) * 0.6f * muff);
+                bool green = kind == "field" || kind == "forest" || kind == "bright" || kind == "autumn" || kind == "swamp";
+                if (!cav && green) sfx.Bed("amb_birds", day * dry * (1 - skyS.Winter) * 0.3f);
+                if (!cav && (green || kind == "grim")) sfx.Bed("amb_crickets", (1 - day) * dry * (1 - skyS.Winter) * 0.22f);
+                if (cav || kind == "grim" || kind == "toxic" || kind == "swamp" || kind == "wastes") sfx.Bed("amb_eerie", cav ? 0.12f : 0.22f * (1 - 0.5f * day));
+                // running water nearby: how far the nearest deep water is (looked around the hero now and then)
+                waterNearT -= dt;
+                if (waterNearT <= 0)
+                {
+                    waterNearT = 0.4f; waterNear = 99;
+                    if (loc.HasWater)
+                        for (int r = 1; r <= 4 && waterNear > 90; r++)
+                            for (int a = 0; a < 8; a++)
+                            {
+                                float rr = r * 2f, an = a * Mathf.PI / 4;
+                                if (loc.DepthW(pos + new Vector3(Mathf.Cos(an) * rr, 0, Mathf.Sin(an) * rr)) > 0.12f) { waterNear = rr; break; }
+                            }
+                    if (loc.DepthW(pos) > 0.12f) waterNear = 0;
+                }
+                if (waterNear < 90) sfx.Bed("amb_stream", 0.4f * Mathf.Clamp01(1 - waterNear / 9f) * (kind == "swamp" || kind == "toxic" ? 0.5f : 1));
+                // thunder after the flash (the further the storm, the later)
+                if (skyS.Flash > 0.95f && lastFlash < 0.95f) sfx.Play("thunder", (cav ? 0.3f : 0.75f), 1, 0.08f, null, 0.4f + 1.8f * Random.value);
+                lastFlash = skyS.Flash;
+            }
+            sfx.Update(dt);
+        }
+        void Sound(string g, float vol, Vector3 at) { if (sfx != null) sfx.Play(g, vol, 1, 0.08f, at); }
+
+        // ---------- the sky by hand (developer mode) ----------
+        void SkyUI()
+        {
+            float bw = 74 * k, bh = 24 * k, gap = 4 * k, x1 = safe.xMax - 8 * k, y = safe.y + 8 * k;
+            if (Button(new Rect(x1 - 96 * k, y, 96 * k, bh), skyOpen ? "НЕБО ▴" : "НЕБО ▾", skyOpen)) skyOpen = !skyOpen;
+            if (!skyOpen) return;
+            y += bh + gap;
+            void RowB(string[] names, int cur, System.Action<int> set)
+            {
+                for (int i = 0; i < names.Length; i++)
+                    if (Button(new Rect(x1 - (names.Length - i) * (bw + gap) + gap, y, bw, bh), names[i], cur == i)) set(i);
+                y += bh + gap;
+            }
+            RowB(Sky.TOD, skyS.tod, i => skyS.tod = i);
+            RowB(Sky.SEASON, skyS.season, i => skyS.season = i);
+            RowB(Sky.WEATHER, skyS.weather, i => skyS.weather = i);
         }
 
         // ---------- backpack ----------

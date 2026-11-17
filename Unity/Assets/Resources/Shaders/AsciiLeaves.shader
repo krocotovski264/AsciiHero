@@ -38,6 +38,19 @@ Shader "AsciiHero/Leaves"
             float _AsciiGrassThin;     // settings: the share of blades that is not drawn (0 = all)
             float4 _AsciiWind;         // wind: xy = direction (world xz), z = strength 0..1.5, w = unused
 
+            // the season over the foliage (_AsciiSeason: x autumn, y winter, z spring, w snow lying)
+            float4 _AsciiSeason;
+            float3 SeasonGreen(float3 g, float s)
+            {
+                float l = dot(g, float3(0.3, 0.5, 0.2));
+                float3 aut = lerp(float3(0.85, 0.40, 0.10), float3(0.80, 0.62, 0.14), frac(s * 5.3)) * (l * 2.0 + 0.08);
+                if (frac(s * 2.7) > 0.8) aut = float3(0.62, 0.18, 0.08) * (l * 2.0 + 0.08);
+                g = lerp(g, aut, _AsciiSeason.x);
+                float3 win = lerp(float3(0.42, 0.40, 0.36) * (l * 1.6 + 0.06), float3(0.86, 0.9, 0.98) * (l * 1.2 + 0.22), _AsciiSeason.w * step(0.45, frac(s * 4.1)));
+                g = lerp(g, win, _AsciiSeason.y);
+                float3 spr = frac(s * 9.7) > 0.86 ? float3(0.95, 0.62, 0.78) * (l * 2.0 + 0.12) : g * 1.12 + float3(0.02, 0.05, 0.0);
+                return lerp(g, spr, _AsciiSeason.z);
+            }
             float WHash(float2 p) { p = frac(p * float2(123.34, 456.21)); p += dot(p, p + 45.32); return frac(p.x * p.y); }
             float WNoise(float2 p)      // smooth value noise, 0..1
             {
@@ -98,7 +111,8 @@ Shader "AsciiHero/Leaves"
                 float row = 2.0;
                 float gi = t < 0.25 ? 2.0 : t < 0.4 ? 4.0 : t < 0.55 ? 8.0 : t < 0.7 ? 12.0 : t < 0.86 ? 13.0 : 11.0;     // , ; * % & #
                 float depthK = clamp(1.0 - (myZ - _AsciiDepthRef) * 0.08, 0.5, 1.2);
-                float3 green = lerp(_GrassA.rgb, _GrassB.rgb, t);
+                float3 green = SeasonGreen(lerp(_GrassA.rgb, _GrassB.rgb, t), s);
+                if (!wood && frac(s * 3.3) < _AsciiSeason.y * 0.75) vis = false;          // winter: most leaves are gone
                 if (wood)
                 {   // the stem and the branches: line characters along them as they lie on the screen, in bark brown
                     float3 dv = TransformWorldToViewDir(i.dir, true);
