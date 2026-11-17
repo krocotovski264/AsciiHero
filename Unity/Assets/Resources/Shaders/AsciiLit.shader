@@ -45,6 +45,10 @@ Shader "AsciiHero/Lit"
             float _SeeThrough;
             float _Fade;
         CBUFFER_END
+
+            // the story's sight: what is behind a wall from the hero is not drawn (Game: StoryVis, a top-down mask)
+            TEXTURE2D(_VisTex); SAMPLER(sampler_VisTex); float4 _VisRect; float _VisOn;
+            float VisK(float3 p) { if (_VisOn < 0.5) return 1.0; float2 uv = (p.xz - _VisRect.xy) * _VisRect.zw; if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return 1.0; return SAMPLE_TEXTURE2D_LOD(_VisTex, sampler_VisTex, uv, 0).r; }
         TEXTURE2D(_MainTex); SAMPLER(sampler_MainTex);
         float _AsciiNDPass;
         float4 _AsciiSeason; float _AsciiWet;      // (the sky: x autumn, y winter, z spring, w snow on the ground; wet ground)
@@ -67,7 +71,7 @@ Shader "AsciiHero/Lit"
             int2 q = int2(fmod(floor(pix), 4.0));
             return (M[q.y * 4 + q.x] + 0.5) / 16.0;
         }
-        void SeeClip(float3 pWS, float2 pix) { if (_SeeThrough > 0.5) clip(Bayer4(pix) - SeeK(pWS) * 1.02); if (_Fade > 0.001) clip(Bayer4(pix) - _Fade * 1.02); }      // (_Fade: a piece dissolving away - the cave's roof)
+        void SeeClip(float3 pWS, float2 pix) { if (_VisOn > 0.5) clip(VisK(pWS) - 0.02 - Bayer4(pix) * 0.96); if (_SeeThrough > 0.5) clip(Bayer4(pix) - SeeK(pWS) * 1.02); if (_Fade > 0.001) clip(Bayer4(pix) - _Fade * 1.02); }      // (_Fade: a piece dissolving away - the cave's roof)
         float4 _DashShift;   // per renderer (world): during the dash the armour pieces lag behind the body
         float4 _DashSpin;    // per renderer: xyz = axis, w = angle; the piece tumbles about _DashPivot while it flies
         float4 _DashPivot;

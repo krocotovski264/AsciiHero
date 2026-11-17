@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.74 · Unity";
+        public const string VERSION = "beta 0.75 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -39,7 +39,7 @@ namespace AsciiHero
         }
 
         // ---------- state ----------
-        CharConfig cfg = new CharConfig { sex = 'm', height = 180, build = 1, armor = "chain", weapon = "shield" };
+        CharConfig cfg = new CharConfig { sex = 'm', height = 180, build = 1, armor = "plate", weapon = "sword" };
         Camera display, sceneCam; AsciiRenderer ascii;
         Mats mats, actorMats;
         Character hero; MotionActor player;
@@ -1080,7 +1080,8 @@ namespace AsciiHero
         static readonly string[] DEVELOPERS = { "Программисты: OBLOGO и kotovski264", "", "Анимация ходьбы и передвижения в бою: набор 100STYLE —", "I. Mason, S. Starke, T. Komura (CC BY 4.0)", "", "Скелеты в пещере: BodyParts3D, DBCLS —", "© The Database Center for Life Science (CC BY 4.0)", "",
             "Звуки: Kenney (CC0); freesound: felix.blume, inchadney, sengjinn, BlueDelta, straget (CC0);",
             "mystiscool, Corsica_S, D W, inchadney, gregswinford, Benboncan (CC BY);", "шаги по воде: Citadel Station 13 (CC BY-SA 3.0)", "",
-            "Голова крысолюда: модель rat из набора 3moji (CC BY-SA 4.0), изменена", "Анимации сцен: CMU Graphics Lab Motion Capture Database (mocap.cs.cmu.edu)" };
+            "Голова крысолюда: модель rat из набора 3moji (CC BY-SA 4.0), изменена", "Анимации сцен и падения: CMU Graphics Lab Motion Capture Database (mocap.cs.cmu.edu)",
+            "Капюшоны и шлем крысолюдов, плащ, череп Ёрика: KayKit, Kay Lousberg (CC0)" };
         void LoadSettings()
         {
             bool phone = Application.isMobilePlatform;
@@ -2013,6 +2014,7 @@ namespace AsciiHero
                     projAscii.SetSize(pw, ph, cell * dp);
                     projAscii.SelfCheck();
                 }
+                SkullCam(on, cell * dp);
             }
             if (!world)
             {

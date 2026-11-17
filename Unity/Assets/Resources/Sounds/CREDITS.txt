@@ -32,3 +32,7 @@ Other assets of AsciiHero (not sounds):
   Resources/rathead.bytes  the rat-man's head, cut from "rat" of the 3moji set, CC BY-SA 4.0 (modified: head only, rescaled, recoloured)
   Resources/cuts.bytes     the story's scene clips, from the CMU Graphics Lab Motion Capture Database (mocap.cs.cmu.edu), free to use;
                            subjects 114, 26, 111, 18, retargeted to the game's skeleton
+  Resources/cuts.bytes     also "die" (the fall backwards): CMU subject 90, clip 90_18 (RugPullFall)
+  Resources/kaykit.bytes   KayKit Character Packs (Skeletons 1.0, Adventurers 1.0) by Kay Lousberg, CC0 1.0
+                           (www.kaylousberg.com): Skeleton_Rogue_Hood, Skeleton_Warrior_Helmet, Barbarian_Cape,
+                           Skeleton_Warrior_Head and _Jaw - single pieces, rescaled, recoloured by their palette

@@ -33,6 +33,10 @@ Shader "AsciiHero/Water"
                 float4 _WaterCell; float4 _WaterMode;
                 float4 _WaterTintA, _WaterTintB;     // another water (w > 0): its deep and crest colours - a swamp's murk, acid ooze
             CBUFFER_END
+
+            // the story's sight: what is behind a wall from the hero is not drawn (Game: StoryVis, a top-down mask)
+            TEXTURE2D(_VisTex); SAMPLER(sampler_VisTex); float4 _VisRect; float _VisOn;
+            float VisK(float3 p) { if (_VisOn < 0.5) return 1.0; float2 uv = (p.xz - _VisRect.xy) * _VisRect.zw; if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return 1.0; return SAMPLE_TEXTURE2D_LOD(_VisTex, sampler_VisTex, uv, 0).r; }
             TEXTURE2D(_AsciiAtlas); SAMPLER(sampler_AsciiAtlas);
             TEXTURE2D(_AsciiLitTex); SAMPLER(sampler_AsciiLitTex);
             TEXTURE2D(_AsciiNDTex); SAMPLER(sampler_AsciiNDTex);
@@ -214,7 +218,7 @@ Shader "AsciiHero/Water"
                     col *= 1.0 - 0.7 * saturate(dot(rf, float3(0.3, 0.5, 0.2)) * 2.5);
                 }
                 float sceneZ = dz > 1e-4 ? dz * 12.0 : 1e5;
-                bool vis = _AsciiReflPass < 0.5 && -pVS.z <= sceneZ + 0.08 && all(suv >= 0.0) && all(suv <= 1.0) && shore < 1.02;
+                bool vis = VisK(mul(UNITY_MATRIX_I_V, float4(pVS, 1.0)).xyz) > 0.5 && _AsciiReflPass < 0.5 && -pVS.z <= sceneZ + 0.08 && all(suv >= 0.0) && all(suv <= 1.0) && shore < 1.02;
                 o.col = col * (1.0 - smoothstep(0.93, 1.02, shore) * 0.5);
                 o.glyph = float2(row, gi);
                 float4 ink = _GlyphInk[(int)(row * 16.0 + gi + 0.5)];

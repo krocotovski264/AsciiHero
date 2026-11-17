@@ -9,7 +9,7 @@ namespace AsciiHero
     public class CharConfig
     {
         public char sex = 'm'; public int build = 1; public float height = 178f;
-        public string armor = "leather"; public string weapon = "sword";
+        public string armor = "plate"; public string weapon = "sword";
         public bool shadow;   // the hero: a body of living darkness inside the armour
         public float[] body;  // the body customisation (Body.ALL; the height is 'height' above), null = defaults
         public CharConfig Clone() { var c = (CharConfig)MemberwiseClone(); if (body != null) c.body = (float[])body.Clone(); return c; }
@@ -18,26 +18,19 @@ namespace AsciiHero
     public class Character
     {
         public static readonly string[] BUILDS = { "Худое", "Обычное", "Атлетичное", "Крупное" };
+        // (only the knight's plate and the sword are left to choose; the rest of the code still dresses townsfolk in plain clothes)
         public static readonly string[][] ARMORS = {
-            new[] { "cloth", "Рубаха путника", "Льняная рубаха, штаны, сапоги" },
-            new[] { "leather", "Кожаная броня", "Дублёная кожа, наручи, наплечники" },
-            new[] { "chain", "Кольчуга", "Хауберк, кольчужный капюшон, табард" },
             new[] { "plate", "Рыцарские латы", "Полный доспех, шлем с плюмажем" },
-            new[] { "robe", "Мантия мага", "Длинная мантия с капюшоном" },
         };
         public static readonly string[][] WEAPONS = {
-            new[] { "none", "Без оружия", "Пустые руки" },
             new[] { "sword", "Меч", "Одноручный стальной клинок" },
-            new[] { "shield", "Меч и щит", "Клинок и каплевидный щит" },
-            new[] { "axe", "Два томагавка", "По короткому топору в каждой руке" },
-            new[] { "spear", "Копьё", "Длинное древко с наконечником" },
-            new[] { "staff", "Посох", "Посох с магическим кристаллом" },
         };
 
         public GameObject go;           // root (move/rotate this)
         public Transform model;         // scaled for height
         public Human human;
         public CharConfig cfg;
+        public Vector3 weaponHome, weaponAlt; public Quaternion weaponHomeRot, weaponAltRot; public bool hasAlt, weaponInLeft;
         public Transform weapon, weaponL, orb, shield, weaponSlide, skirt; public Vector3[] skirtRest; public int skirtRings, skirtSegs; public float weaponSlideBase = -0.5f;   // shield: local z = its face, local y = its top
         public List<Renderer> glyphs = new List<Renderer>();   // skinned glyph renderers (limb hiding)
         public static readonly string[] LIMBS = { "head", "armL", "armR", "legL", "legR" };
@@ -572,6 +565,18 @@ namespace AsciiHero
             // convert world placement into model space (model scale is 1 while building)
             Attach("wrist.R", g0, model.InverseTransformPoint(grip), Quaternion.Inverse(model.rotation) * rot);
             weapon = g0;
+            // where it sits in the other hand (the arm that held it can be torn off): the grip mirrored across the body
+            {
+                var wl = human.Bone("wrist.L"); var wr = human.Bone("wrist.R");
+                if (wl != null && wr != null)
+                {
+                    weaponHome = g0.localPosition; weaponHomeRot = g0.localRotation;
+                    Vector3 mp = model.InverseTransformPoint(g0.position); Quaternion mr = Quaternion.Inverse(model.rotation) * g0.rotation;
+                    mp.x = -mp.x; mr = new Quaternion(mr.x, -mr.y, -mr.z, mr.w);
+                    Vector3 wp = model.TransformPoint(mp); Quaternion wq = model.rotation * mr;
+                    weaponAlt = wl.InverseTransformPoint(wp); weaponAltRot = Quaternion.Inverse(wl.rotation) * wq; hasAlt = true;
+                }
+            }
             if (W == "axe")
             {   // the second tomahawk, in the left hand
                 Vector3 gripL; var rotL = GripIn("L", W, out gripL);

@@ -393,7 +393,7 @@ namespace AsciiHero
             uint h = (uint)(x * 374761393 + y * 668265263 + z * 1274126177); h = (h ^ (h >> 13)) * 1274126177u; h ^= h >> 16;
             return (h & 0xffffff) / 16777215f;
         }
-        static float N3(float x, float y, float z)          // smooth value noise 0..1
+        internal static float N3(float x, float y, float z)          // smooth value noise 0..1
         {
             int ix = Mathf.FloorToInt(x), iy = Mathf.FloorToInt(y), iz = Mathf.FloorToInt(z);
             float fx = x - ix, fy = y - iy, fz = z - iz;
@@ -402,13 +402,13 @@ namespace AsciiHero
             float c = Mathf.Lerp(H3(ix, iy, iz + 1), H3(ix + 1, iy, iz + 1), fx), d = Mathf.Lerp(H3(ix, iy + 1, iz + 1), H3(ix + 1, iy + 1, iz + 1), fx);
             return Mathf.Lerp(Mathf.Lerp(a, b, fy), Mathf.Lerp(c, d, fy), fz);
         }
-        static float Fbm3(float x, float y, float z, int oct)
+        internal static float Fbm3(float x, float y, float z, int oct)
         {
             float s = 0, a = 0.5f, n = 0;
             for (int o = 0; o < oct; o++) { s += a * N3(x, y, z); n += a; a *= 0.5f; x = x * 2.03f + 17.1f; y = y * 2.03f - 9.3f; z = z * 2.03f + 5.7f; }
             return s / n;
         }
-        static float RidgedW(float x, float y, float z)       // weighted ridged multifractal (each octave weighted by the last)
+        internal static float RidgedW(float x, float y, float z)       // weighted ridged multifractal (each octave weighted by the last)
         {
             float s = 0, a = 1, w = 1, n = 0;
             for (int o = 0; o < 3; o++)

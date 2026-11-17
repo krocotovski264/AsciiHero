@@ -26,6 +26,10 @@ Shader "AsciiHero/Fire"
             CBUFFER_START(UnityPerMaterial)
                 float4 _FireSize;
             CBUFFER_END
+
+            // the story's sight: what is behind a wall from the hero is not drawn (Game: StoryVis, a top-down mask)
+            TEXTURE2D(_VisTex); SAMPLER(sampler_VisTex); float4 _VisRect; float _VisOn;
+            float VisK(float3 p) { if (_VisOn < 0.5) return 1.0; float2 uv = (p.xz - _VisRect.xy) * _VisRect.zw; if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return 1.0; return SAMPLE_TEXTURE2D_LOD(_VisTex, sampler_VisTex, uv, 0).r; }
             TEXTURE2D(_AsciiAtlas); SAMPLER(sampler_AsciiAtlas);
             TEXTURE2D(_AsciiLitTex); SAMPLER(sampler_AsciiLitTex);
             TEXTURE2D(_AsciiNDTex); SAMPLER(sampler_AsciiNDTex);
@@ -54,7 +58,7 @@ Shader "AsciiHero/Fire"
                 float4 sp = ComputeScreenPos(clip); float2 suv = sp.xy / sp.w;
                 float dz = _AsciiDepthLit > 0.5 ? abs(SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, ascii_point_clamp_sampler, suv, 0).a) : SAMPLE_TEXTURE2D_LOD(_AsciiNDTex, sampler_AsciiNDTex, suv, 0).b;
                 float sceneZ = dz > 1e-4 ? dz * 12.0 : 1e5;
-                bool vis = -pVS.z <= sceneZ + 0.06 && all(suv >= 0.0) && all(suv <= 1.0);
+                bool vis = -pVS.z <= sceneZ + 0.06 && all(suv >= 0.0) && all(suv <= 1.0) && VisK(p) > 0.5;
                 // colour: white-yellow -> orange -> red -> dark; it appears quickly and fades out slowly
                 float3 col = lerp(float3(1.0, 0.95, 0.62), float3(1.0, 0.58, 0.14), saturate(ph / 0.3));
                 col = lerp(col, float3(0.85, 0.2, 0.05), saturate((ph - 0.3) / 0.4));

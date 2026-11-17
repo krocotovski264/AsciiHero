@@ -39,6 +39,10 @@ Shader "AsciiHero/Glyph"
                 float _GlyphSee;
                 float _GlyphFade;
             CBUFFER_END
+
+            // the story's sight: what is behind a wall from the hero is not drawn (Game: StoryVis, a top-down mask)
+            TEXTURE2D(_VisTex); SAMPLER(sampler_VisTex); float4 _VisRect; float _VisOn;
+            float VisK(float3 p) { if (_VisOn < 0.5) return 1.0; float2 uv = (p.xz - _VisRect.xy) * _VisRect.zw; if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return 1.0; return SAMPLE_TEXTURE2D_LOD(_VisTex, sampler_VisTex, uv, 0).r; }
             TEXTURE2D(_AsciiAtlas); SAMPLER(sampler_AsciiAtlas);
             // see-through (same as AsciiHero/Lit): the characters of a wall in front of the hero thin out and dim
             float4 _SeeHero; float _SeeFade;
@@ -227,7 +231,7 @@ Shader "AsciiHero/Glyph"
                 bool capeTwo = _GlyphCloth > 0.5 && _GlyphCloth < 1.5 && _ClothSim > 0.5 && _ClothMap.w > 0.5;     // the cloak: cloth, seen from either side (its rest normals say nothing once it moves)
                 float seeK = _GlyphSee > 0.5 ? SeeK(pWS) : 0.0;
                 bool seeGone = frac(i.seed.x * 13.37 + 0.21) < seeK * 1.02 || frac(i.seed.x * 7.13 + 0.53) < _GlyphFade * 1.02;      // (_GlyphFade: dissolving away)
-                bool vis = !seeGone && ((scat || smkA > 0.03) ? (lodKeep && !gone && inside) : lodKeep && !gone && ember < 0.999 && (capeTwo || dot(nVS, toCam) > -0.05 - ember - _GlyphPuff * 4.0 - (_DashSpin.w != 0.0 ? 4.0 : 0.0)) && myZ <= sceneZ + 0.008 + (0.0035 + 0.007 * (lod - 1.0)) * myZ && inside);
+                bool vis = !seeGone && VisK(pWS) > 0.5 && ((scat || smkA > 0.03) ? (lodKeep && !gone && inside) : lodKeep && !gone && ember < 0.999 && (capeTwo || dot(nVS, toCam) > -0.05 - ember - _GlyphPuff * 4.0 - (_DashSpin.w != 0.0 ? 4.0 : 0.0)) && myZ <= sceneZ + 0.008 + (0.0035 + 0.007 * (lod - 1.0)) * myZ && inside);
                 float3 lit = SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, sampler_AsciiLitTex, suv, 0).rgb;
                 float3 col = _AsciiLinear > 0.5 ? pow(max(lit, 0.0), 1.0 / 2.2) : max(lit, 0.0);
                 float lum = dot(col, float3(0.299, 0.587, 0.114));

@@ -271,7 +271,7 @@ namespace AsciiHero
                 for (int k = 0; k <= n; k++)
                 {
                     var p = Vector2.Lerp(w.a, w.b, k / (float)n); if (InGap(p)) continue;
-                    for (float o = -0.3f; o <= 0.3f; o += CELL * 0.5f) { var q = p + nrm * o; int i = Mathf.FloorToInt((q.x - gx0) / CELL), j = Mathf.FloorToInt((q.y - gy0) / CELL); if (i >= 0 && j >= 0 && i < gw && j < gh) walk[j * gw + i] = false; }
+                    for (float o = -0.45f; o <= 0.45f; o += CELL * 0.5f) { var q = p + nrm * o; int i = Mathf.FloorToInt((q.x - gx0) / CELL), j = Mathf.FloorToInt((q.y - gy0) / CELL); if (i >= 0 && j >= 0 && i < gw && j < gh) walk[j * gw + i] = false; }
                 }
             }
             // a bounds rectangle in location coordinates
@@ -335,109 +335,167 @@ namespace AsciiHero
                     }
                 }
             }
-            // the edge of the ground: walls where one side is ground and the other is not
-            var edges = new List<KeyValuePair<Vector2, Vector2>>();
-            foreach (var t in myTiles) { var p = map.Poly(t); for (int k = 0; k < p.Count; k++) edges.Add(new KeyValuePair<Vector2, Vector2>(p[k], p[(k + 1) % p.Count])); }
-            foreach (var c in myCircles) { int n = Mathf.CeilToInt(2 * Mathf.PI * c.r / 1.2f); for (int k = 0; k < n; k++) { float a0 = k * Mathf.PI * 2 / n, a1 = (k + 1) * Mathf.PI * 2 / n; edges.Add(new KeyValuePair<Vector2, Vector2>(c.c + new Vector2(Mathf.Cos(a0), Mathf.Sin(a0)) * c.r, c.c + new Vector2(Mathf.Cos(a1), Mathf.Sin(a1)) * c.r)); } }
-            var done = new HashSet<string>();
-            foreach (var e in edges)
-            {
-                var a = e.Key; var b = e.Value; var d = b - a; float len = d.magnitude; if (len < 0.05f) continue; d /= len;
-                string key = Mathf.RoundToInt((a.x + b.x) * 10) + ":" + Mathf.RoundToInt((a.y + b.y) * 10);
-                if (done.Contains(key)) continue;
-                var nrm = new Vector2(-d.y, d.x); var mid = (a + b) / 2;
-                bool s1 = Walk(mid + nrm * 0.35f), s2 = Walk(mid - nrm * 0.35f);
-                if (s1 == s2) continue;
-                done.Add(key);
-                var outN = s1 ? -nrm : nrm; string bio = BiomeAt(mid - outN * 0.35f) ?? "cave";
-                WallStrip(mats, a, b, outN, WallStyle(bio), false);
-            }
-            // the walls drawn on the map
-            foreach (var w in map.walls)
-            {
-                var d = w.b - w.a; float len = d.magnitude; if (len < 0.1f) continue; d /= len;
-                var nrm = new Vector2(-d.y, d.x); var mid = (w.a + w.b) / 2;
-                string b1 = BiomeAt(mid + nrm * 0.6f), b2 = BiomeAt(mid - nrm * 0.6f);
-                if (b1 == null && b2 == null) continue;
-                WallStrip(mats, w.a, w.b, nrm, WallStyle(b1 ?? b2), true);
-            }
-            // the passages: a hole in the rock or a door
-            foreach (var g in passages) PassageLook(mats, g);
-            // meshes
             foreach (var kv in blocks)
             {
                 string matName = kv.Key.Split(':')[0];
                 var m = new Mesh { indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 }; m.SetVertices(kv.Value.v); m.SetTriangles(kv.Value.t, 0);
                 m.RecalculateNormals(); m.RecalculateBounds(); MeshGen.AddGlyphUV(m, false);
-                Material mat = matName == "ROCKBIG" ? mats.Big(mats["ROCK"]) : matName == "PLANKW" ? mats["PLASTER"] : mats[matName];
-                bool floor = matName == "CAVEFLOOR" || matName == "FLOOR" || matName == "GROUND" || matName == "ROAD" || matName == "SNOW" || matName == "SAND";
-                MeshGen.Obj(m, mat, T, Vector3.zero, Quaternion.identity, !floor, floor ? "Ground" : "Wall");
+                MeshGen.Obj(m, mats[matName], T, Vector3.zero, Quaternion.identity, false, "Ground");
             }
+            Fields();
+            Rock(mats);
+            foreach (var g in passages) PassageLook(mats, g);
             Decor(mats);
         }
-        /// a wall along a - b; outN points away from the ground it stands by (a wall drawn on the map: both sides)
-        void WallStrip(Mats mats, Vector2 a, Vector2 b, Vector2 outN, string style, bool both)
+
+        // ================= the walls: the surface of one field over the whole place =================
+        // As the test cave (Cave.BuildRock), but the plan comes from the map: the signed distance to the edge of the
+        // ground (> 0 over the ground, < 0 in the rock), worked out on the walk grid. Every wall gets the style of the
+        // ground nearest to it - rough rock leaning back in the caves, a low grassy bank on the meadow, straight plank
+        // walls in the inns - and the rock is a band 1.6 m wide (beyond it, nothing: the sight mask hides it anyway).
+        // Its surface is taken with surface nets in 8 m chunks: closed, without gaps or seams, a mesh per chunk.
+        float[] sdf; byte[] lab; float[] dInM;             // per cell: signed distance (m), nearest ground's style, distance to the rock (m)
+        const float BAND = 1.6f;
+        static readonly float[] H_TOP = { 2.9f, 1.15f, 2.9f }, CREST = { 0.9f, 0.35f, 0f }, LEAN = { 0.1f, 0.55f, 0f }, ROUGH = { 1f, 0.35f, 0f };
+        static byte Code(string b) { return (byte)(b == "meadow" ? 1 : b == "tavern" || b == "city" || b == "grim" ? 2 : 0); }
+        float nOx, nOz;
+        void Fields()
         {
-            float len = (b - a).magnitude; int n = Mathf.Max(1, Mathf.CeilToInt(len / 0.6f));
-            if (style == "rock")
+            int n = gw * gh; const float INF = 1e9f;
+            var dO = new float[n]; var dI = new float[n]; lab = new byte[n];
+            for (int q = 0; q < n; q++) { dO[q] = walk[q] ? 0 : INF; dI[q] = walk[q] ? INF : 0; lab[q] = walk[q] ? Code(cellBiome[q]) : (byte)0; }
+            const float D = 1.41421f;
+            // two chamfer passes each way; the style of the nearest ground travels with the distance
+            for (int pass = 0; pass < 2; pass++)
             {
-                float th = both ? 0.35f : 0.9f;
-                for (int k = 0; k < n; k++)
-                {
-                    var p0 = Vector2.Lerp(a, b, k / (float)n); var p1 = Vector2.Lerp(a, b, (k + 1f) / n);
-                    var pm = (p0 + p1) / 2; if (InGap(pm)) continue;
-                    float j0 = Noise(p0), j1 = Noise(p1), h0 = 2.0f + 0.9f * Noise(p0 * 0.7f + Vector2.one * 9), h1 = 2.0f + 0.9f * Noise(p1 * 0.7f + Vector2.one * 9);
-                    var in0 = p0 - outN * (both ? th : 0.02f + 0.18f * j0); var in1 = p1 - outN * (both ? th : 0.02f + 0.18f * j1);
-                    var o0 = p0 + outN * (th + 0.25f * j0); var o1 = p1 + outN * (th + 0.25f * j1);
-                    var mb = Block("ROCKBIG", pm); var face = L3(-outN) - L3(Vector2.zero);
-                    // the face toward the ground leans back a little as it rises
-                    var t0 = in0 + outN * 0.25f; var t1 = in1 + outN * 0.25f;
-                    Quad(mb, L3(in0), L3(in1), L3(t1, h1), L3(t0, h0), face);
-                    Quad(mb, L3(t0, h0), L3(t1, h1), L3(o1, h1 * 0.9f), L3(o0, h0 * 0.9f), Vector3.up);
-                    if (both) Quad(mb, L3(o0), L3(o1), L3(o1, h1 * 0.9f), L3(o0, h0 * 0.9f), -face);
-                }
-            }
-            else if (style == "plank")
-            {
-                for (int k = 0; k < n; k++)
-                {
-                    var p0 = Vector2.Lerp(a, b, k / (float)n); var p1 = Vector2.Lerp(a, b, (k + 1f) / n);
-                    if (InGap((p0 + p1) / 2)) continue;
-                    var mb = Block("PLANKW", (p0 + p1) / 2); const float H = 2.8f, TH = 0.12f;
-                    var i0 = p0 - outN * (both ? TH : 0); var i1 = p1 - outN * (both ? TH : 0); var o0 = p0 + outN * TH; var o1 = p1 + outN * TH;
-                    var face = L3(-outN) - L3(Vector2.zero);
-                    Quad(mb, L3(i0), L3(i1), L3(i1, H), L3(i0, H), face);
-                    Quad(mb, L3(i0, H), L3(i1, H), L3(o1, H), L3(o0, H), Vector3.up);
-                    if (both) Quad(mb, L3(o0), L3(o1), L3(o1, H), L3(o0, H), -face);
-                }
-                // posts
-                for (float s = 0; s <= len; s += 2.5f)
-                {
-                    var p = Vector2.Lerp(a, b, s / Mathf.Max(len, 0.01f)); if (InGap(p)) continue;
-                    MeshGen.Obj(MeshGen.Box(0.22f, 2.9f, 0.22f), mats["BEAM"], root.transform, L3(p, 1.45f), Quaternion.identity, true, "Post");
-                }
-            }
-            else
-            {   // the meadow's edge: a bank of moss and stone with trees behind it
-                for (int k = 0; k < n; k++)
-                {
-                    var p0 = Vector2.Lerp(a, b, k / (float)n); var p1 = Vector2.Lerp(a, b, (k + 1f) / n);
-                    if (InGap((p0 + p1) / 2)) continue;
-                    float h0 = 0.7f + 0.5f * Noise(p0 * 0.9f), h1 = 0.7f + 0.5f * Noise(p1 * 0.9f);
-                    var mb = Block("MOSS", (p0 + p1) / 2); var face = L3(-outN) - L3(Vector2.zero);
-                    var t0 = p0 + outN * 0.5f; var t1 = p1 + outN * 0.5f; var o0 = p0 + outN * 1.4f; var o1 = p1 + outN * 1.4f;
-                    Quad(mb, L3(p0), L3(p1), L3(t1, h1), L3(t0, h0), face);
-                    Quad(mb, L3(t0, h0), L3(t1, h1), L3(o1, h1 * 0.6f), L3(o0, h0 * 0.6f), Vector3.up);
-                }
-                if (!both)
-                    for (float s = 1.2f; s < len; s += Rr(5.5f, 8f))
+                for (int j = 0; j < gh; j++) for (int i = 0; i < gw; i++)
                     {
-                        var p = Vector2.Lerp(a, b, s / len) + outN * Rr(1.6f, 2.8f); if (InGap(p)) continue;
-                        try { NatureLib.Place(Rr(0, 1) < 0.65f ? "oak1" : "oak5", mats, root.transform, L3(p), Rr(0, 360), Rr(0.8f, 1.15f)); } catch (Exception) { }
+                        int q = j * gw + i;
+                        void Try(int ii, int jj, float c) { if (ii < 0 || jj < 0 || ii >= gw || jj >= gh) return; int r = jj * gw + ii; if (dO[r] + c < dO[q]) { dO[q] = dO[r] + c; lab[q] = lab[r]; } if (dI[r] + c < dI[q]) dI[q] = dI[r] + c; }
+                        Try(i - 1, j, 1); Try(i, j - 1, 1); Try(i - 1, j - 1, D); Try(i + 1, j - 1, D);
+                    }
+                for (int j = gh - 1; j >= 0; j--) for (int i = gw - 1; i >= 0; i--)
+                    {
+                        int q = j * gw + i;
+                        void Try(int ii, int jj, float c) { if (ii < 0 || jj < 0 || ii >= gw || jj >= gh) return; int r = jj * gw + ii; if (dO[r] + c < dO[q]) { dO[q] = dO[r] + c; lab[q] = lab[r]; } if (dI[r] + c < dI[q]) dI[q] = dI[r] + c; }
+                        Try(i + 1, j, 1); Try(i, j + 1, 1); Try(i + 1, j + 1, D); Try(i - 1, j + 1, D);
                     }
             }
+            sdf = new float[n]; dInM = new float[n];
+            for (int q = 0; q < n; q++) { sdf[q] = walk[q] ? (dI[q] - 0.5f) * CELL : -(dO[q] - 0.5f) * CELL; dInM[q] = walk[q] ? dI[q] * CELL : 0; }
+            nOx = Rr(0, 300); nOz = Rr(0, 300);
         }
-        float Noise(Vector2 p) { return Mathf.PerlinNoise(p.x * 0.9f + 31.7f, p.y * 0.9f + 11.3f); }
+        /// the signed distance at a point of the map (bilinear over the cell centres)
+        public float SdfAt(float x, float y)
+        {
+            float fx = (x - gx0) / CELL - 0.5f, fy = (y - gy0) / CELL - 0.5f;
+            int i = Mathf.FloorToInt(fx), j = Mathf.FloorToInt(fy); float u = fx - i, v = fy - j;
+            float S(int a, int b) { a = Mathf.Clamp(a, 0, gw - 1); b = Mathf.Clamp(b, 0, gh - 1); return sdf[b * gw + a]; }
+            return Mathf.Lerp(Mathf.Lerp(S(i, j), S(i + 1, j), u), Mathf.Lerp(S(i, j + 1), S(i + 1, j + 1), u), v);
+        }
+        int LabAt(float x, float y) { int i = Mathf.Clamp(Mathf.FloorToInt((x - gx0) / CELL), 0, gw - 1), j = Mathf.Clamp(Mathf.FloorToInt((y - gy0) / CELL), 0, gh - 1); return lab[j * gw + i]; }
+        /// how far a point of the ground is from the rock (m; 0 off the ground)
+        public float WallDist(Vector2 m) { int i = Mathf.FloorToInt((m.x - gx0) / CELL), j = Mathf.FloorToInt((m.y - gy0) / CELL); return i < 0 || j < 0 || i >= gw || j >= gh ? 0 : dInM[j * gw + i]; }
+        /// the rock field at a point (map x, height y, map y as z): > 0 in the air
+        float Air(float x, float y, float z)
+        {
+            float sd = SdfAt(x, z);
+            if (sd > 1.4f) return sd;
+            int c = LabAt(x, z);
+            float foot = Mathf.Clamp01(1 - y / 1.1f); foot *= foot;
+            float room = sd + LEAN[c] * y - 0.15f * ROUGH[c] * foot;
+            float hOut = H_TOP[c] + CREST[c] * (Mathf.PerlinNoise(x * 0.23f + nOx, z * 0.23f + nOz) - 0.5f) * 2f;
+            float f = Mathf.Max(room, y - hOut);
+            f = Mathf.Max(f, -(sd + BAND));
+            // the ways through: a hole carved in the rock (a doorway in the inn's planks)
+            foreach (var g in passages)
+            {
+                bool here = g.from == region; var into = here ? g.n : -g.n;
+                var a = g.p - into * 0.3f; var b = g.p + into * (BAND + 0.6f); var ab = b - a;
+                var q = new Vector2(x, z); float t = Mathf.Clamp01(Vector2.Dot(q - a, ab) / ab.sqrMagnitude); var cl = a + ab * t;
+                float side = Mathf.Abs(Vector2.Dot(q - cl, new Vector2(-into.y, into.x)));
+                float hole = g.style == "hole" ? 1.0f - new Vector2(side, Mathf.Max(0, y - 1.0f)).magnitude : Mathf.Min(0.95f - side, 2.3f - y);
+                if ((q - cl).magnitude < 1.3f) f = Mathf.Max(f, hole);
+            }
+            float rough = ROUGH[c];
+            if (rough <= 0 || Mathf.Abs(f) > 0.8f) return f;
+            float big = (Cave.Fbm3(x * 0.45f + nOx, y * 0.45f, z * 0.45f + nOz, 2) - 0.5f) * 0.8f;
+            float crease = Cave.RidgedW(x * 0.9f + nOz, y * 0.9f, z * 0.9f + nOx) * 0.2f;
+            float grain = (Cave.N3(x * 5.1f + nOx, y * 5.1f, z * 5.1f + nOz) - 0.5f) * 0.05f;
+            return f + (big - crease + 0.08f + grain) * rough;
+        }
+        void Rock(Mats mats)
+        {
+            var T = root.transform;
+            var mRock = new Material(mats["WETROCK"]) { name = "StoryRock" }; mRock.SetFloat("_SeeThrough", 1); mRock.SetFloat("_Cull", 0); mRock.SetVector("_GlyphCell", new Vector4(0.12f, 0.2f, 0, 0));
+            var mBank = new Material(mats["MOSS"]) { name = "StoryBank" }; mBank.SetFloat("_SeeThrough", 1); mBank.SetFloat("_Cull", 0); mBank.SetVector("_GlyphCell", new Vector4(0.1f, 0.16f, 0, 0));
+            var mPlank = new Material(mats["BEAM"]) { name = "StoryPlanks" }; mPlank.SetColor("_Color", Mats.Hex(0x6a4626)); mPlank.SetFloat("_SeeThrough", 1); mPlank.SetFloat("_Cull", 0); mPlank.SetVector("_GlyphCell", new Vector4(0.06f, 0.1f, 0, 0));
+            var MAT = new[] { mRock, mBank, mPlank };
+            const float S = 0.25f, CH = 8f, Y0 = -0.25f; int NC = Mathf.RoundToInt(CH / S), NY = Mathf.CeilToInt((3.9f - Y0) / S) + 1;
+            float X0 = gx0, Z0 = gy0, X1 = gx0 + gw * CELL, Z1 = gy0 + gh * CELL;
+            int NP = NC + 3;      // points -1 .. NC+1
+            var F = new float[NP * NY * NP];
+            int I(int i, int y, int j) { return ((j + 1) * NY + y) * NP + (i + 1); }
+            int verts = 0, tris = 0;
+            for (float cz = Z0; cz < Z1; cz += CH)
+                for (float cx = X0; cx < X1; cx += CH)
+                {
+                    // anything of the rock here? (between the edge of the ground and the end of the band)
+                    bool any = false;
+                    for (float sz = cz - S; sz <= cz + CH + S && !any; sz += 0.5f) for (float sx = cx - S; sx <= cx + CH + S; sx += 0.5f) { float d = SdfAt(sx, sz); if (d < 0.6f && d > -BAND - 0.6f) { any = true; break; } }
+                    if (!any) continue;
+                    for (int j = -1; j <= NC + 1; j++) for (int i = -1; i <= NC + 1; i++) for (int y = 0; y < NY; y++)
+                                F[I(i, y, j)] = Air(cx + i * S, Y0 + y * S, cz + j * S);
+                    var cellV = new Dictionary<int, int>(); var vs = new List<Vector3>(); var ns = new List<Vector3>(); var vc = new List<int>();
+                    int[,] E = { { 0, 1 }, { 2, 3 }, { 4, 5 }, { 6, 7 }, { 0, 2 }, { 1, 3 }, { 4, 6 }, { 5, 7 }, { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 } };
+                    var cv = new float[8]; var cp = new Vector3[8];
+                    for (int j = -1; j <= NC; j++) for (int i = -1; i <= NC; i++) for (int y = 0; y < NY - 1; y++)
+                            {
+                                int neg = 0;
+                                for (int k = 0; k < 8; k++) { int dx = k & 1, dy = (k >> 1) & 1, dz = (k >> 2) & 1; cv[k] = F[I(i + dx, y + dy, j + dz)]; cp[k] = new Vector3(dx, dy, dz); if (cv[k] < 0) neg++; }
+                                if (neg == 0 || neg == 8) continue;
+                                Vector3 sum = Vector3.zero; int cnt = 0;
+                                for (int e = 0; e < 12; e++) { float a = cv[E[e, 0]], b = cv[E[e, 1]]; if ((a < 0) == (b < 0)) continue; sum += Vector3.Lerp(cp[E[e, 0]], cp[E[e, 1]], a / (a - b)); cnt++; }
+                                var pc = sum / cnt; float mx = cx + (i + pc.x) * S, my = Y0 + (y + pc.y) * S, mz = cz + (j + pc.z) * S;
+                                // the normal from the field's slope in this cell (into the air), turned into the place's axes
+                                float gxv = (cv[1] - cv[0] + cv[3] - cv[2] + cv[5] - cv[4] + cv[7] - cv[6]), gyv = (cv[2] - cv[0] + cv[3] - cv[1] + cv[6] - cv[4] + cv[7] - cv[5]), gzv = (cv[4] - cv[0] + cv[5] - cv[1] + cv[6] - cv[2] + cv[7] - cv[3]);
+                                cellV[I(i, y, j)] = vs.Count; vs.Add(new Vector3(-mx, my, mz)); ns.Add(new Vector3(-gxv, gyv, gzv).normalized); vc.Add(LabAt(mx, mz));
+                            }
+                    if (vs.Count == 0) continue;
+                    var ts = new List<int>[3]; for (int q = 0; q < 3; q++) ts[q] = new List<int>();
+                    void Quad(int c0, int c1, int c2, int c3)
+                    {
+                        int a, b, c, d; if (!cellV.TryGetValue(c0, out a) || !cellV.TryGetValue(c1, out b) || !cellV.TryGetValue(c2, out c) || !cellV.TryGetValue(c3, out d)) return;
+                        var L = ts[vc[a]];
+                        foreach (var tri in new[] { new[] { a, b, c }, new[] { a, c, d } })
+                        {
+                            var nrm = Vector3.Cross(vs[tri[1]] - vs[tri[0]], vs[tri[2]] - vs[tri[0]]);
+                            if (Vector3.Dot(nrm, ns[tri[0]] + ns[tri[1]] + ns[tri[2]]) < 0) { L.Add(tri[0]); L.Add(tri[2]); L.Add(tri[1]); }
+                            else { L.Add(tri[0]); L.Add(tri[1]); L.Add(tri[2]); }
+                        }
+                    }
+                    // a quad for every crossed grid edge whose point belongs to this chunk
+                    for (int j = 0; j < NC; j++) for (int i = 0; i < NC; i++) for (int y = 1; y < NY - 1; y++)
+                            {
+                                float f0 = F[I(i, y, j)];
+                                if ((f0 < 0) != (F[I(i + 1, y, j)] < 0)) Quad(I(i, y - 1, j - 1), I(i, y, j - 1), I(i, y, j), I(i, y - 1, j));
+                                if ((f0 < 0) != (F[I(i, y + 1, j)] < 0)) Quad(I(i - 1, y, j - 1), I(i, y, j - 1), I(i, y, j), I(i - 1, y, j));
+                                if ((f0 < 0) != (F[I(i, y, j + 1)] < 0)) Quad(I(i - 1, y - 1, j), I(i, y - 1, j), I(i, y, j), I(i - 1, y, j));
+                            }
+                    for (int q = 0; q < 3; q++)
+                    {
+                        if (ts[q].Count == 0) continue;
+                        // only the vertices this material uses
+                        var map2 = new Dictionary<int, int>(); var rv = new List<Vector3>(); var rn = new List<Vector3>(); var rt = new List<int>();
+                        foreach (int v in ts[q]) { int k2; if (!map2.TryGetValue(v, out k2)) { k2 = rv.Count; map2[v] = k2; rv.Add(vs[v]); rn.Add(ns[v]); } rt.Add(k2); }
+                        var m = new Mesh { name = "storyrock", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+                        m.SetVertices(rv); m.SetNormals(rn); m.uv = new Vector2[rv.Count]; m.SetTriangles(rt, 0); m.RecalculateBounds(); MeshGen.AddGlyphUV(m, false);
+                        MeshGen.Obj(m, MAT[q], T, Vector3.zero, Quaternion.identity, true, "Rock");
+                        verts += rv.Count; tris += rt.Count / 3;
+                    }
+                }
+            Debug.Log(region + ": скала " + verts + " вершин, " + tris + " треугольников");
+        }
 
         void PassageLook(Mats mats, StoryPassage g)
         {
@@ -461,35 +519,224 @@ namespace AsciiHero
                 MeshGen.Obj(MeshGen.Box(2.1f, 0.2f, 0.25f), mats["BEAM"], T, L3(g.p, 2.5f), Quaternion.LookRotation(L3(g.n) - L3(Vector2.zero)), true, "Lintel");
             }
         }
+        // ================= what lies about =================
+        // Placed by rules from the ground itself, so a new map gets it right away: by the walls (stalagmites, boulders,
+        // moss, mushrooms - some glowing), in the open (puddles with drops falling into them, skeletons, bones, sharp
+        // stones), hanging from the dark (stalactites); never on a thing of the map (a creature, a chest, a way out).
+        struct Pool { public Vector2 c; public float rx, ry, ang, depth; }
+        readonly List<Pool> pools = new List<Pool>();
+        class GlowC { public Light l; public float baseI, ph; public List<Renderer> caps = new List<Renderer>(); }
+        readonly List<GlowC> glowsC = new List<GlowC>(); MaterialPropertyBlock mpbC;
+        readonly List<Vector3> drips = new List<Vector3>(); float lastT = -1;
+        public System.Action<float, float> onDrip;
+        readonly List<Vector2> keepFree = new List<Vector2>();
+        static float Frac(float x) { return x - Mathf.Floor(x); }
+        float PoolK(Pool p, float x, float y)
+        {
+            float dx = x - p.c.x, dy = y - p.c.y, cs = Mathf.Cos(p.ang), sn = Mathf.Sin(p.ang);
+            float u = (dx * cs + dy * sn) / p.rx, v = (-dx * sn + dy * cs) / p.ry;
+            float a = Mathf.Atan2(v, u), wob = 1 + 0.08f * Mathf.Sin(a * 3 + p.c.x) + 0.05f * Mathf.Sin(a * 5 + p.c.y);
+            return Mathf.Sqrt(u * u + v * v) / wob;
+        }
+        float WaterK(Vector2 m) { float k = 9; foreach (var p in pools) k = Mathf.Min(k, PoolK(p, m.x, m.y)); return k; }
+        // location-local x, z -> map: x = -X, y = Z
+        public override bool HasWater => pools.Count > 0;
+        public override bool InWater(float x, float z) { return WaterK(new Vector2(-x, z)) < 0.97f; }
+        public override float Depth(float x, float z)
+        {
+            float d = 0; foreach (var p in pools) { float k = PoolK(p, -x, z); if (k < 0.97f) d = Mathf.Max(d, WaterDepth.Puddle((0.97f - k) / 0.97f, p.depth)); }
+            return d;
+        }
+        public override List<Bounds> MirrorWater() { return new List<Bounds>(); }
+        bool Free(Vector2 p, float r)
+        {
+            if (!Walk(p)) return false;
+            foreach (var q in keepFree) if ((p - q).sqrMagnitude < 2.2f * 2.2f) return false;
+            foreach (var c in colliders) if (c.circle && (new Vector2(-p.x - c.x, p.y - c.z)).magnitude < c.r + r + 0.15f) return false;
+            return WaterK(p) > 1.25f;
+        }
+        /// a random free spot on this ground whose distance from the rock is within [d0, d1]
+        bool Spot(string biome, float d0, float d1, float r, out Vector2 p)
+        {
+            for (int k = 0; k < 60; k++)
+            {
+                p = new Vector2(Rr(gx0, gx0 + gw * CELL), Rr(gy0, gy0 + gh * CELL));
+                if (BiomeAt(p) != biome) continue;
+                float wd = WallDist(p); if (wd < d0 || wd > d1) continue;
+                if (Free(p, r)) return true;
+            }
+            p = Vector2.zero; return false;
+        }
+        float AreaOf(string biome) { int n = 0; for (int q = 0; q < walk.Length; q++) if (walk[q] && cellBiome[q] == biome) n++; return n * CELL * CELL; }
+        void Moss(Transform T, Mats mats, Vector2 p, float r, float y)
+        {
+            var g = MeshGen.Obj(MeshGen.Sphere(1, 8, 3, Mathf.PI / 2), mats["MOSS"], T, L3(p, y), Quaternion.Euler(0, Rr(0, 360), 0), false, "Moss");
+            g.transform.localScale = new Vector3(r * Rr(0.8f, 1.2f), Rr(0.04f, 0.08f), r * Rr(0.8f, 1.2f));
+        }
+        void Mushroom(Transform T, Mats mats, Vector2 p, float s, bool glow, List<Renderer> caps)
+        {
+            var holder = new GameObject(glow ? "GlowMushroom" : "Mushroom").transform; holder.SetParent(T, false);
+            holder.localPosition = L3(p); holder.localRotation = Quaternion.Euler(Rr(-12, 12), Rr(0, 360), Rr(-12, 12)); holder.localScale = Vector3.one * s;
+            float h = Rr(0.07f, 0.16f);
+            MeshGen.Obj(MeshGen.Cylinder(0.022f, 0.016f, h, 6), mats["LINEN"], holder, new Vector3(0, h / 2, 0), Quaternion.identity, false, "Stem");
+            var cap = MeshGen.Obj(MeshGen.Sphere(0.06f, 8, 4, Mathf.PI / 2), mats[glow ? "GLOWSHROOM" : "MUSH"], holder, new Vector3(0, h - 0.005f, 0), Quaternion.identity, false, "Cap");
+            cap.transform.localScale = new Vector3(1, glow ? 0.75f : 0.55f, 1);
+            if (caps != null) caps.Add(cap.GetComponent<Renderer>());
+        }
+        static readonly string[] BONES = { "b_femur", "b_humerus", "b_tibia", "b_rib", "b_rib", "b_pelvis", "b_jaw" };
         void Decor(Mats mats)
         {
             var T = root.transform;
-            // in the caves: glowing mushrooms by the walls now and then (and their faint light), loose stones
-            bool anyCave = false;
-            foreach (var t in myTiles) if (t.b == "cave") { anyCave = true; break; }
-            if (anyCave || myCircles.Count > 0)
+            foreach (var e in map.ents) keepFree.Add(e.p);
+            foreach (var g in passages) { keepFree.Add(g.p); keepFree.Add(g.p + g.n * 1.5f); keepFree.Add(g.p - g.n * 1.5f); }
+            float cave = AreaOf("cave"), meadow = AreaOf("meadow");
+            Vector2 p;
+            if (cave > 1)
             {
-                int placed = 0;
-                for (int k = 0; k < 4000 && placed < 60; k++)
+                // puddles first (the rest keeps off them): in the open, a drop falling into each now and then
+                var dpts = new List<Vector3>(); var dsd = new List<Vector2>();
+                for (int k = 0, n = Mathf.RoundToInt(cave / 150); k < n; k++)
                 {
-                    var p = new Vector2(Rr(gx0, gx0 + gw * CELL), Rr(gy0, gy0 + gh * CELL));
-                    if (BiomeAt(p) != "cave" || !Walk(p)) continue;
-                    bool nearWall = !Walk(p + Vector2.right * 0.9f) || !Walk(p - Vector2.right * 0.9f) || !Walk(p + Vector2.up * 0.9f) || !Walk(p - Vector2.up * 0.9f);
-                    if (!nearWall) continue;
-                    placed++;
-                    if (placed % 3 == 0)
+                    if (!Spot("cave", 1.4f, 99, 1.0f, out p)) continue;
+                    var pl = new Pool { c = p, rx = Rr(0.5f, 1.1f), ry = Rr(0.35f, 0.8f), ang = Rr(0, 3.14f), depth = 0.06f };
+                    pools.Add(pl);
+                    WaterMesh(T, mats, pl);
+                    for (int q = 0; q < 2; q++)
                     {
-                        var g = new GameObject("Glow"); g.transform.SetParent(T, false); g.transform.localPosition = L3(p, 0.5f);
-                        var l = g.AddComponent<Light>(); l.type = LightType.Point; l.color = Mats.Hex(0x5ff0d0); l.intensity = 0.9f; l.range = 3.2f;
-                        for (int q = 0; q < 3; q++) { float s = Rr(0.06f, 0.12f); MeshGen.Obj(MeshGen.Sphere(s, 8, 5, Mathf.PI * 0.55f), mats["GLOWSHROOM"], T, L3(p + new Vector2(Rr(-0.3f, 0.3f), Rr(-0.3f, 0.3f)), Rr(0.08f, 0.2f)), Quaternion.identity, false, "Shroom"); }
+                        float a = Rr(0, 6.28f), rr = Rr(0, 0.6f); var dp = pl.c + new Vector2(Mathf.Cos(a) * pl.rx * rr, Mathf.Sin(a) * pl.ry * rr); float ph = Rr(0, 1);
+                        dpts.Add(L3(dp, WATER_Y)); dsd.Add(new Vector2(ph, Rr(0, 1))); drips.Add(new Vector3(dp.x, dp.y, ph));
                     }
-                    else { float s = Rr(0.18f, 0.4f); MeshGen.Obj(Cave.CaveMesh("stone", Vector3.one * s, rnd.NextDouble() < 0.5), mats["ROCK"], T, L3(p, -0.03f), Quaternion.Euler(Rr(-12, 12), Rr(0, 360), Rr(-12, 12)), true, "Stone"); }
+                }
+                if (dpts.Count > 0) GlyphLayer.MakeMotes(T, Vector3.zero, Quaternion.identity, Vector3.one, dpts, dsd, 2, new Color(0.65f, 0.8f, 0.9f), new Vector4(0.05f, Cave.DRIP_TOP, Cave.DRIP_PERIOD, 0));
+                // stalagmites and boulders by the walls (they block the way: colliders)
+                for (int k = 0, n = Mathf.RoundToInt(cave / 45); k < n; k++)
+                {
+                    float r = Rr(0.09f, 0.2f); if (!Spot("cave", 0.35f, 1.3f, r, out p)) continue;
+                    float h = Rr(0.5f, 1.7f);
+                    MeshGen.Obj(MeshGen.Cylinder(r, 0.015f, h, 8), mats["WETROCK"], T, L3(p, h / 2), Quaternion.Euler(Rr(-5, 5), Rr(0, 360), Rr(-5, 5)), true, "Stalagmite");
+                    colliders.Add(Collider2.Circle(-p.x, p.y, r + 0.08f));
+                    if (Rr(0, 1) < 0.5f) Moss(T, mats, p + new Vector2(Rr(-0.2f, 0.2f), Rr(-0.2f, 0.2f)), r * 2.2f, 0.01f);
+                }
+                for (int k = 0, n = Mathf.RoundToInt(cave / 70); k < n; k++)
+                {
+                    float s = Rr(0.3f, 0.7f); if (!Spot("cave", 0.2f, 1.6f, s, out p)) continue;
+                    float d = s * 2.3f;
+                    MeshGen.Obj(Cave.CaveMesh(Rr(0, 1) < 0.5f ? "boulder_a" : "boulder_b", new Vector3(d * Rr(0.9f, 1.1f), d * Rr(0.85f, 1.15f), d * Rr(0.9f, 1.1f)), Rr(0, 1) < 0.5f), mats[Rr(0, 1) < 0.5f ? "ROCK" : "WETROCK"], T, L3(p, -0.04f), Quaternion.Euler(0, Rr(0, 360), 0), true, "Boulder");
+                    if (s > 0.42f) colliders.Add(Collider2.Circle(-p.x, p.y, s * 1.05f));
+                    if (Rr(0, 1) < 0.6f) Moss(T, mats, p, s * 0.8f, s * 0.75f);
+                }
+                // stalactites over the ground, 3 m up
+                for (int k = 0, n = Mathf.RoundToInt(cave / 35); k < n; k++)
+                {
+                    if (!Spot("cave", 0.2f, 99, 0, out p)) continue;
+                    float h = Rr(0.35f, 1.2f), r = Rr(0.06f, 0.15f);
+                    MeshGen.Obj(MeshGen.Cylinder(0.012f, r, h, 7), mats["WETROCK"], T, L3(p, 3.0f - h / 2), Quaternion.Euler(0, Rr(0, 360), 0), false, "Stalactite");
+                }
+                // small sharp stones, walked over
+                for (int k = 0, n = Mathf.RoundToInt(cave / 50); k < n; k++)
+                {
+                    float r = Rr(0.08f, 0.18f), sc = r * 2.6f; if (!Spot("cave", 0.2f, 99, r, out p)) continue;
+                    MeshGen.Obj(Cave.CaveMesh("stone", new Vector3(sc, sc * Rr(0.9f, 1.4f), sc), Rr(0, 1) < 0.5f), mats["ROCK"], T, L3(p, -0.02f), Quaternion.Euler(Rr(-12, 12), Rr(0, 360), Rr(-12, 12)), true, "SharpRock");
+                }
+                // moss at the foot of the walls
+                for (int k = 0, n = Mathf.RoundToInt(cave / 25); k < n; k++) { if (!Spot("cave", 0.1f, 0.6f, 0.2f, out p)) continue; Moss(T, mats, p, Rr(0.25f, 0.6f), 0.01f); }
+                // mushrooms: clusters by the walls, a third of them glowing (a slow pulse of their light)
+                int lights = 0;
+                for (int k = 0, n = Mathf.RoundToInt(cave / 90); k < n; k++)
+                {
+                    if (!Spot("cave", 0.2f, 1.0f, 0.3f, out p)) continue;
+                    bool glow = k % 3 == 0;
+                    var gl = glow ? new GlowC { ph = Rr(0, 6.28f), baseI = 0.55f } : null;
+                    int c = 3 + rnd.Next(5);
+                    for (int i = 0; i < c; i++) Mushroom(T, mats, p + new Vector2(Rr(-0.3f, 0.3f), Rr(-0.3f, 0.3f)), Rr(0.7f, 1.4f), glow, gl != null ? gl.caps : null);
+                    if (glow && lights < 16)
+                    {
+                        lights++;
+                        var lg = new GameObject("GlowLight"); lg.transform.SetParent(T, false); lg.transform.localPosition = L3(p, 0.45f);
+                        gl.l = lg.AddComponent<Light>(); gl.l.type = LightType.Point; gl.l.color = new Color(0.35f, 1f, 0.85f); gl.l.range = 2.6f; gl.l.intensity = gl.baseI;
+                    }
+                    if (gl != null) glowsC.Add(gl);
+                }
+                // the dead of earlier days: skeletons lying, skulls, loose bones
+                for (int k = 0, n = Mathf.Max(2, Mathf.RoundToInt(cave / 350)); k < n; k++)
+                {
+                    if (!Spot("cave", 0.6f, 99, 0.6f, out p)) continue;
+                    MeshGen.Obj(Cave.CaveMesh(Rr(0, 1) < 0.6f ? "anat_lie" : "anat_curl", Vector3.one * Rr(0.95f, 1.03f)), mats["BONE"], T, L3(p), Quaternion.Euler(0, Rr(0, 360), 0), false, "Skeleton");
+                    colliders.Add(Collider2.Circle(-p.x, p.y, 0.4f));
+                }
+                for (int k = 0, n = Mathf.RoundToInt(cave / 250); k < n; k++) { if (!Spot("cave", 0.2f, 99, 0.15f, out p)) continue; MeshGen.Obj(Cave.CaveMesh("skull", Vector3.one * Rr(0.85f, 1f)), mats["BONE"], T, L3(p, -0.015f), Quaternion.Euler(Rr(-15, 15), Rr(0, 360), Rr(-25, 25)), true, "Skull"); }
+                for (int k = 0, n = Mathf.RoundToInt(cave / 40); k < n; k++) { if (!Spot("cave", 0.1f, 99, 0.1f, out p)) continue; MeshGen.Obj(Cave.CaveMesh(BONES[rnd.Next(BONES.Length)], Vector3.one * Rr(0.9f, 1.05f)), mats["BONE"], T, L3(p, -0.005f), Quaternion.Euler(0, Rr(0, 360), 0), false, "LooseBone"); }
+                // what the miners left: burnt-out torches, pickaxes
+                for (int k = 0, n = Mathf.RoundToInt(cave / 500); k < n; k++)
+                {
+                    if (!Spot("cave", 0.3f, 99, 0.2f, out p)) continue;
+                    var t = new GameObject("OldTorch").transform; t.SetParent(T, false); t.localPosition = L3(p, 0.05f);
+                    t.localRotation = Quaternion.Euler(0, Rr(0, 360), 0) * Quaternion.Euler(Rr(0, 1) < 0.5f ? Rr(55, 70) : 86, 0, 0);
+                    MeshGen.Obj(Cave.CaveMesh("torch_stick", Vector3.one * 0.55f), mats["WOOD"], t, new Vector3(0, 0.22f, 0), Quaternion.identity, true, "TorchStick");
+                    MeshGen.Obj(Cave.CaveMesh("torch_head", Vector3.one * 0.55f), mats["DARK"], t, new Vector3(0, 0.22f, 0), Quaternion.identity, true, "TorchHead");
+                }
+                for (int k = 0, n = Mathf.RoundToInt(cave / 600); k < n; k++)
+                {
+                    if (!Spot("cave", 0.3f, 99, 0.2f, out p)) continue;
+                    var t = new GameObject("Pickaxe").transform; t.SetParent(T, false); t.localPosition = L3(p, 0.03f);
+                    t.localRotation = Quaternion.Euler(0, Rr(0, 360), 0) * Quaternion.Euler(88, 0, 0);
+                    MeshGen.Obj(Cave.CaveMesh("pick_handle", Vector3.one * 0.8f), mats["WOOD"], t, Vector3.zero, Quaternion.identity, true, "Handle");
+                    MeshGen.Obj(Cave.CaveMesh("pick_head", Vector3.one * 0.8f), mats["STEEL"], t, Vector3.zero, Quaternion.identity, true, "Pick");
+                }
+                // fireflies, here and there
+                for (int k = 0, n = Mathf.Max(1, Mathf.RoundToInt(cave / 900)); k < n; k++)
+                {
+                    if (!Spot("cave", 1.0f, 99, 0, out p)) continue;
+                    var pts = new List<Vector3>(); var sd = new List<Vector2>();
+                    for (int i = 0; i < 18; i++) { var q = p + new Vector2(Rr(-3, 3), Rr(-3, 3)); if (!Walk(q)) continue; pts.Add(L3(q, Rr(0.3f, 1.7f))); sd.Add(new Vector2(0, Rr(0, 1))); }
+                    if (pts.Count > 0) GlyphLayer.MakeMotes(T, Vector3.zero, Quaternion.identity, Vector3.one, pts, sd, 1, new Color(0.8f, 1f, 0.4f) * 1.3f, new Vector4(0.045f, 0, 0, 0.45f));
                 }
             }
-            // in an inn: tables, benches, barrels, a counter, a hearth and warm lights
+            if (meadow > 1)
+            {   // the meadow: no trees; ferns and flowers by the bank, stones in the grass
+                for (int k = 0, n = Mathf.RoundToInt(meadow / 30); k < n; k++)
+                {
+                    if (!Spot("meadow", 0.1f, 2.0f, 0.2f, out p)) continue;
+                    string nm = Rr(0, 1) < 0.6f ? "fern1" : "flower3";
+                    try { NatureLib.Place(nm, mats, T, L3(p), Rr(0, 360), Rr(0.8f, 1.2f)); } catch (Exception) { }
+                }
+                for (int k = 0, n = Mathf.RoundToInt(meadow / 120); k < n; k++)
+                {
+                    if (!Spot("meadow", 0.3f, 99, 0.4f, out p)) continue;
+                    try { NatureLib.Place("mrock3", mats, T, L3(p, -0.1f), Rr(0, 360), Rr(0.6f, 1.0f)); colliders.Add(Collider2.Circle(-p.x, p.y, 0.45f)); } catch (Exception) { }
+                }
+            }
+            // in an inn: tables, benches, barrels, warm lights
             bool inn = false; foreach (var t in myTiles) if (t.b == "tavern") { inn = true; break; }
-            if (inn)
-            {
+            if (inn) Inn(mats);
+        }
+        const float WATER_Y = 0.04f;
+        void WaterMesh(Transform T, Mats mats, Pool pl)
+        {
+            const float Q = 0.12f; var vs = new List<Vector3>(); var ts = new List<int>(); float r = Mathf.Max(pl.rx, pl.ry) + 0.3f;
+            var c = pl.c;
+            for (float x = c.x - r; x < c.x + r; x += Q)
+                for (float y = c.y - r; y < c.y + r; y += Q)
+                {
+                    if (Mathf.Min(Mathf.Min(PoolK(pl, x, y), PoolK(pl, x + Q, y)), Mathf.Min(PoolK(pl, x, y + Q), PoolK(pl, x + Q, y + Q))) > 1.02f) continue;
+                    int o = vs.Count;
+                    vs.Add(L3(new Vector2(x, y), WATER_Y)); vs.Add(L3(new Vector2(x, y + Q), WATER_Y)); vs.Add(L3(new Vector2(x + Q, y + Q), WATER_Y)); vs.Add(L3(new Vector2(x + Q, y), WATER_Y));
+                    ts.Add(o); ts.Add(o + 2); ts.Add(o + 1); ts.Add(o); ts.Add(o + 3); ts.Add(o + 2);
+                }
+            if (vs.Count == 0) return;
+            var wm = new Mesh { name = "puddle" }; wm.SetVertices(vs); wm.SetTriangles(ts, 0); wm.RecalculateNormals(); wm.RecalculateBounds();
+            if (wm.normals[0].y < 0) { for (int i = 0; i < ts.Count; i += 3) { int s = ts[i + 1]; ts[i + 1] = ts[i + 2]; ts[i + 2] = s; } wm.SetTriangles(ts, 0); wm.RecalculateNormals(); }
+            var go = MeshGen.Obj(wm, mats["WATER"], T, Vector3.zero, Quaternion.identity, false, "Water");
+            var wp = new List<Vector3>(); var wsd = new List<Vector2>();
+            for (float y = c.y - r; y <= c.y + r; y += 0.13f)
+                for (float x = c.x - r; x <= c.x + r; x += 0.1f) { float kk = PoolK(pl, x, y); if (kk > 1.0f) continue; wp.Add(L3(new Vector2(x, y), WATER_Y)); wsd.Add(new Vector2(kk, Rr(0, 1))); }
+            if (wp.Count > 0) GlyphLayer.MakeWater(go.transform, wp, wsd, new Vector4(1, 0, 0, 0));
+        }
+
+        void Inn(Mats mats)
+        {
+            var T = root.transform;
+
                 Vector2 c = Vector2.zero; foreach (var t in myTiles) c += new Vector2((t.i + 0.5f) * map.tile, (t.j + 0.5f) * map.tile); c /= Mathf.Max(1, myTiles.Count);
                 int tables = 0;
                 for (int k = 0; k < 400 && tables < 5; k++)
@@ -513,7 +760,7 @@ namespace AsciiHero
                     var l = g.AddComponent<Light>(); l.type = LightType.Point; l.color = Mats.Hex(0xffb070); l.intensity = 1.4f; l.range = 7f;
                 }
             }
-        }
+
         // ---- only what is near the hero is on (the place is far bigger than the screen) ----
         struct Cull { public GameObject go; public Vector3 c; public float r; }
         readonly List<Cull> cull = new List<Cull>(); float cullT;
@@ -528,6 +775,26 @@ namespace AsciiHero
         }
         public override void Update(float t)
         {
+            // the glowing mushrooms breathe; a drop reaches a puddle: a ring where it falls
+            if (mpbC == null) mpbC = new MaterialPropertyBlock();
+            foreach (var g in glowsC)
+            {
+                float k = 0.72f + 0.28f * Mathf.Sin(t * 0.7f + g.ph) * (0.8f + 0.2f * Mathf.Sin(t * 1.9f + g.ph * 2));
+                if (g.l != null) g.l.intensity = g.baseI * k;
+                foreach (var r in g.caps) { if (r == null || !r.isVisible) continue; r.GetPropertyBlock(mpbC); mpbC.SetColor("_EmissionColor", Mats.Hex(0x3fd8b8) * (0.45f + 0.55f * k)); r.SetPropertyBlock(mpbC); }
+            }
+            if (lastT >= 0 && addRipple != null)
+                foreach (var d in drips)
+                {
+                    float m0 = Mathf.Floor(t / Cave.DRIP_PERIOD + d.z);
+                    for (int q = -1; q <= 1; q++)
+                    {
+                        float m = m0 + q, h = Frac(m * 0.1031f + d.z * 0.6180f); h *= h + 33.33f; h *= h + h; h = Frac(h);
+                        float land = (m - d.z) * Cave.DRIP_PERIOD + (h - 0.5f) * 1.5f * Cave.DRIP_PERIOD / 3.5f + Cave.DRIP_FALL;
+                        if (lastT < land && t >= land && (new Vector2(-d.x - focus.x, d.y - focus.z)).sqrMagnitude < 400) { addRipple(-d.x, d.y, 0.85f); if (onDrip != null) onDrip(-d.x, d.y); }
+                    }
+                }
+            lastT = t;
             cullT -= Time.deltaTime; if (cullT > 0) return; cullT = 0.2f;
             foreach (var c in cull)
             {
@@ -536,6 +803,54 @@ namespace AsciiHero
             }
         }
         public void CullNow() { cullT = 0; Update(0); }
+        // ---- sight: rays from the hero over the ground, every way; what lies past the rock they hit is not drawn
+        // (the shaders read this mask: _VisTex over _VisRect). A ray goes on 0.9 m into the rock, so the wall's face
+        // shows and its top beyond does not. ----
+        const int VN = 256; const float VC = 0.25f; const int RAYS = 720; const float VR = 30f;
+        Texture2D visTex; byte[] visPx;
+        public Texture2D VisUpdate(Vector3 heroW, out Vector4 rect)
+        {
+            if (visTex == null) { visTex = new Texture2D(VN, VN, TextureFormat.R8, false) { filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp, name = "StoryVis" }; visPx = new byte[VN * VN]; }
+            float x0 = Mathf.Floor(heroW.x / VC) * VC - VN * VC / 2, z0 = Mathf.Floor(heroW.z / VC) * VC - VN * VC / 2;
+            System.Array.Clear(visPx, 0, visPx.Length);
+            var h = ToMap(heroW);
+            for (int r = 0; r < RAYS; r++)
+            {
+                float a = r * Mathf.PI * 2 / RAYS; var d = new Vector2(Mathf.Cos(a), Mathf.Sin(a));
+                float hit = -1;
+                for (float t = 0; t < VR; t += 0.2f)
+                {
+                    var m = h + d * t;
+                    if (hit < 0 && !Walk(m)) hit = t;
+                    if (hit >= 0 && t - hit > 0.9f) break;
+                    // map -> world: x = origin.x - m.x, z = origin.z + m.y
+                    int i = (int)((origin.x - m.x - x0) / VC), j = (int)((origin.z + m.y - z0) / VC);
+                    if (i < 0 || j < 0 || i >= VN || j >= VN) break;
+                    visPx[j * VN + i] = 255;
+                }
+            }
+            visTex.LoadRawTextureData(visPx); visTex.Apply(false);
+            rect = new Vector4(x0, z0, 1f / (VN * VC), 1f / (VN * VC));
+            return visTex;
+        }
+        /// a wall between the camera and the hero shows through round him (as in the test cave)
+        float seeFade;
+        public override void Cutaway(Vector3 camOff)
+        {
+            var h = ToMap(focus + origin); var c2 = new Vector2(-camOff.x, camOff.z); float horiz = c2.magnitude; bool hidden = false;
+            if (horiz > 1e-3f)
+            {
+                c2 /= horiz; float tanP = camOff.y / horiz;
+                for (float t = 0.3f; t < 4.5f && !hidden; t += 0.2f)
+                {
+                    var q = h + c2 * t; if (Walk(q)) continue;
+                    int code = LabAt(q.x, q.y); if (H_TOP[code] > 0.4f + t * tanP) hidden = true;
+                }
+            }
+            seeFade = Mathf.MoveTowards(seeFade, hidden ? 1f : 0f, Time.deltaTime * (hidden ? 1.6f : 2.2f));
+            Shader.SetGlobalVector("_SeeHero", new Vector4(focus.x + origin.x, focus.y + 1.0f, focus.z + origin.z, 0.2f));
+            Shader.SetGlobalFloat("_SeeFade", Mathf.SmoothStep(0f, 1f, seeFade));
+        }
         public string TitleAt(Vector3 w) { return map.ChunkName(ToMap(w)) ?? title; }
     }
 }

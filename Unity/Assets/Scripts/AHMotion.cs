@@ -522,6 +522,22 @@ namespace AsciiHero
                 b.localScale = present[l] ? Vector3.one : Vector3.one * 1e-4f;
                 foreach (var r in b.GetComponentsInChildren<Renderer>(true)) r.enabled = present[l];   // rigid gear on that limb
             }
+            // the weapon hand is gone: the blade goes to the other hand (and back when the arm is whole again)
+            if (ch.weapon != null && ch.hasAlt && ch.weaponL == null)
+            {
+                bool left = !present[2] && present[1];
+                if (left != ch.weaponInLeft)
+                {
+                    var hb = ch.human; var to = hb.Bone(left ? "wrist.L" : "wrist.R");
+                    if (to != null)
+                    {
+                        ch.weapon.SetParent(to, false); ch.weapon.localPosition = left ? ch.weaponAlt : ch.weaponHome; ch.weapon.localRotation = left ? ch.weaponAltRot : ch.weaponHomeRot; ch.weapon.localScale = Vector3.one;
+                        ch.weaponInLeft = left;
+                    }
+                }
+                bool held = ch.weaponInLeft ? present[1] : present[2];
+                foreach (var r in ch.weapon.GetComponentsInChildren<Renderer>(true)) r.enabled = held;
+            }
             if (ch.hoodDown != null) ch.hoodDown.SetActive(!present[0]);           // no head: the hood hangs down the back
             if (mpb == null) mpb = new MaterialPropertyBlock();
             mpb.SetFloatArray("_LimbGone", gone);
@@ -1046,18 +1062,18 @@ namespace AsciiHero
         }
         Vector2 atkDrift;
         // ---------- the story's clips (CutLib): over everything, the arms free of the weapon grip ----------
-        CutLib.Clip cut; float cutT, cutW, cutSpeed = 1; bool cutHold, cutLoop; Quaternion[] cutQ;
+        CutLib.Clip cut; float cutT, cutW, cutSpeed = 1; bool cutHold, cutLoop, cutStay; Quaternion[] cutQ;
         public bool InCut => cut != null && cutW > 0.01f;
         public string CutName => cut != null ? cut.name : null;
         public bool CutHeld => cutHold;
         /// play a story clip: hold = stay on its first frame (until played again without hold), loop = over and over
-        public void PlayCut(string name, bool hold = false, bool loop = false, float speed = 1)
+        public void PlayCut(string name, bool hold = false, bool loop = false, float speed = 1, bool stay = false)
         {
             CutLib.Load(); CutLib.Clip c; if (!CutLib.clips.TryGetValue(name, out c)) { Debug.LogWarning("Нет клипа " + name); return; }
             if (cut != c || !hold) cutT = 0;
-            cut = c; cutHold = hold; cutLoop = loop; cutSpeed = speed; if (cutW < 0.01f && hold) cutW = 1;
+            cut = c; cutHold = hold; cutLoop = loop; cutSpeed = speed; cutStay = stay; if (cutW < 0.01f && hold) cutW = 1;
         }
-        public void StopCut() { if (cut != null) { cutLoop = false; cutHold = false; cutT = Mathf.Max(cutT, (cut.n - 1f) / CutLib.fps); } }
+        public void StopCut() { if (cut != null) { cutLoop = false; cutHold = false; cutStay = false; cutT = Mathf.Max(cutT, (cut.n - 1f) / CutLib.fps); } }
         /// how far through the clip (0..1); 1 when none plays
         public float CutProgress => cut == null ? 1 : Mathf.Clamp01(cutT * CutLib.fps / Mathf.Max(1, cut.n - 1));
         void CutLayer(float dt)
@@ -1066,7 +1082,8 @@ namespace AsciiHero
             float len = (cut.n - 1f) / CutLib.fps;
             if (!cutHold) cutT += dt * cutSpeed;
             if (cutLoop && cutT > len) cutT -= len;
-            bool done = !cutLoop && !cutHold && cutT >= len;
+            if (cutStay && cutT > len) cutT = len;          // (a fall: he stays where it ended)
+            bool done = !cutLoop && !cutHold && !cutStay && cutT >= len;
             cutW = Mathf.MoveTowards(cutW, done ? 0 : 1, dt / (done ? 0.35f : 0.25f));
             if (cutW <= 0.001f && done)
             {

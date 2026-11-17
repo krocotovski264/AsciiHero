@@ -35,6 +35,10 @@ Shader "AsciiHero/Motes"
             CBUFFER_START(UnityPerMaterial)
                 float _MoteMode; float4 _MoteColor; float4 _MoteParams;
             CBUFFER_END
+
+            // the story's sight: what is behind a wall from the hero is not drawn (Game: StoryVis, a top-down mask)
+            TEXTURE2D(_VisTex); SAMPLER(sampler_VisTex); float4 _VisRect; float _VisOn;
+            float VisK(float3 p) { if (_VisOn < 0.5) return 1.0; float2 uv = (p.xz - _VisRect.xy) * _VisRect.zw; if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return 1.0; return SAMPLE_TEXTURE2D_LOD(_VisTex, sampler_VisTex, uv, 0).r; }
             TEXTURE2D(_AsciiAtlas); SAMPLER(sampler_AsciiAtlas);
             TEXTURE2D(_AsciiLitTex); TEXTURE2D(_AsciiNDTex); SAMPLER(sampler_AsciiNDTex);
             SAMPLER(ascii_point_clamp_sampler); float _AsciiDepthLit;
@@ -105,7 +109,7 @@ Shader "AsciiHero/Motes"
                 float4 sp = ComputeScreenPos(clip); float2 suv = sp.xy / sp.w;
                 float dz = _AsciiDepthLit > 0.5 ? abs(SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, ascii_point_clamp_sampler, suv, 0).a) : SAMPLE_TEXTURE2D_LOD(_AsciiNDTex, sampler_AsciiNDTex, suv, 0).b;
                 float sceneZ = dz > 1e-4 ? dz * 12.0 : 1e5;
-                bool vis = -pVS.z <= sceneZ + 0.05 && all(suv >= 0.0) && all(suv <= 1.0) && bright > 0.01;
+                bool vis = -pVS.z <= sceneZ + 0.05 && all(suv >= 0.0) && all(suv <= 1.0) && bright > 0.01 && VisK(p) > 0.5;
                 o.col = _MoteColor.rgb * bright;
                 o.glyph = float2(row, gi);
                 float4 ink = _GlyphInk[(int)(row * 16.0 + gi + 0.5)];
