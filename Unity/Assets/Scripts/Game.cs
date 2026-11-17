@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.77 · Unity";
+        public const string VERSION = "beta 0.78 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -57,14 +57,16 @@ namespace AsciiHero
         GameObject editorRoot, worldLightsRoot; Light key, rim, fill, heroLight;
         GameObject floor;
         bool rebuildPending; GUIStyle sLimb, sIcon;
+        /// what lies in the backpack (Yorick is not a thing: he has his own cloud)
+        readonly List<string> bagTmp = new List<string>();
+        List<string> BagItems() { bagTmp.Clear(); foreach (var x in inventory) if (x != "Череп Ёрика") bagTmp.Add(x); return bagTmp; }
         // the things in the backpack, drawn in characters (after the icons of game-icons.net, CC BY 3.0: Lorc, Delapouite, Sbed)
         static readonly Dictionary<string, string> ITEM_ICONS = new Dictionary<string, string> {
-            { "Череп Ёрика", " -*%@@%#= \n*@@@@@@@@*\n.@- %% .@-\n @@@=-@@@ \n  =@@@@+. " },  // game-icons.net: death-skull
-            { "Записка о Большой Крысе", ".-+###%%* \n :=@@@@@# \n  #@@@@@: \n #@@@@@.  \n +**+@@@%-" },  // game-icons.net: scroll-unfurled
-            { "Шлем крысолюдов", "   *%@*.  \n  #%%%%%  \n :#%%@%#: \n  :=@@+-  \n  ==**++  " },  // game-icons.net: visored-helm
-            { "Драгоценности", "          \n.#**##**#.\n.*@#@@#@#.\n  .*%@*:  \n    ..    " },  // game-icons.net: cut-diamond
-            { "Бутыль крысиного пойла", "    ==    \n   .=*.   \n   +=++   \n   #**%   \n   -::-   " },  // game-icons.net: beer-bottle
-            { "Вещица из трактира", "     ++#. \n   :=+=-. \n  =@@@%   \n =@@@@@=  \n :%@@%#.  " },  // game-icons.net: swap-bag
+            { "Записка о Большой Крысе", " ____ \n|~~~~|\n|~~~ |\n|~~~~|\n|____|" },
+            { "Шлем крысолюдов", " .--. \n/ /\\ \\\n|[==]|\n \\__/ " },
+            { "Драгоценности", "  /\\  \n /<>\\ \n \\<>/ \n  \\/  " },
+            { "Бутыль крысиного пойла", "  ][  \n  ||  \n /  \\ \n |~~| \n |__| " },
+            { "Вещица из трактира", " \\_/  \n/   \\ \n| $$ |\n\\___/ " },
         };
         // body customisation UI
         Rect bodyList; readonly List<Rect> bodyTracks = new List<Rect>(); readonly List<int> bodyTrackIx = new List<int>(); Rect bodyTrackHit;
@@ -2987,16 +2989,6 @@ namespace AsciiHero
                     if (projAscii != null && projAscii.final != null && keyMat != null) { keyMat.SetFloat("_KeyAlpha", small); Graphics.DrawTexture(lp, projAscii.final, keyMat); }
                     MissingLimbDots(lp);
                     PocketSkull(lp, small);
-                    {   // each piece of the armour and what is left of it
-                        if (sLimb == null || sLimb.fontSize != Mathf.RoundToInt(10 * k)) { sLimb = new GUIStyle(sSmall) { fontSize = Mathf.RoundToInt(10 * k), alignment = TextAnchor.UpperLeft, richText = true }; }
-                        float ly = lp.yMax - 5 * 14 * k;
-                        for (int l = 0; l < 5; l++)
-                        {
-                            string c = !limbs[l] ? "#a04040" : limbHp[l] < 35 ? "#e0a050" : "#b8b0d0";
-                            string v = !limbs[l] ? (keptDrop.ContainsKey(l) ? "лежит" : "нет") : limbHp[l] + "%" + (limbBroken[l] ? " ·" : "");
-                            GUI.Label(new Rect(lp.xMax - 2 * k, ly + l * 14 * k, 160 * k, 14 * k), "<color=" + c + ">" + Character.LIMB_NAME[l] + "  " + v + "</color>", sLimb);
-                        }
-                    }
                     // right: the page (it slides in from the side it was swiped to)
                     float cell; var gr = PocketGrid(W, H, out cell); uiRects.Add(gr);
                     float slide = pocketSlideFrom * (1 - Mathf.SmoothStep(0, 1, pocketPageT)) * gr.width * 0.6f;
@@ -3008,7 +3000,7 @@ namespace AsciiHero
                             if (pt.owner == "ui" && gr.Contains(pt.start) && live) pocketScroll -= pt.Delta.y / cell;
                         pocketScroll = Mathf.Clamp(pocketScroll, 0, 5);
                         var lineC = new Color(0.4f, 0.36f, 0.52f, 0.16f); var fillC = new Color(0.03f, 0.025f, 0.05f, 0.1f);      // (the grid barely there)
-                        int ifs = Mathf.Max(5, Mathf.FloorToInt(cell / 6.4f));
+                        int ifs = Mathf.Max(6, Mathf.FloorToInt(cell / 5.6f));
                         if (sIcon == null || sIcon.fontSize != ifs) { sIcon = new GUIStyle(sMono) { richText = false, alignment = TextAnchor.MiddleCenter, fontSize = ifs, wordWrap = false }; sIcon.normal.textColor = new Color(0.86f, 0.74f, 1f); }
                         int fs = Mathf.Max(8, Mathf.RoundToInt(cell * 0.5f));
                         if (sBag == null || sBag.fontSize != fs) { sBag = new GUIStyle(sMono) { richText = false, alignment = TextAnchor.MiddleCenter, fontSize = fs, wordWrap = false }; sBag.normal.textColor = new Color(0.82f, 0.66f, 1f); }
@@ -3019,10 +3011,11 @@ namespace AsciiHero
                             {
                                 var cr = new Rect(cc * cell + 2, (r - r0) * cell - off + 2, cell - 4, cell - 4);
                                 Fill(cr, fillC); Frame(cr, lineC, Mathf.Max(1, k));
-                                int ii = r * 5 + cc;
-                                if (ii < inventory.Count && inventory[ii].Length > 0)
+                                int ii = r * 5 + cc; var bag = BagItems();
+                                if (ii < bag.Count && bag[ii].Length > 0)
                                 {
-                                    string ic; if (ITEM_ICONS.TryGetValue(inventory[ii], out ic)) GUI.Label(cr, ic, sIcon); else GUI.Label(cr, inventory[ii].Substring(0, 1), sBag);
+                                    string ic; if (ITEM_ICONS.TryGetValue(bag[ii], out ic)) GUI.Label(cr, ic, sIcon); else GUI.Label(cr, bag[ii].Substring(0, 1), sBag);
+                                    if (live && Tapped(new Rect(pg.x + cr.x, pg.y + cr.y, cr.width, cr.height))) ShowToast(bag[ii]);
                                 }
                             }
                         GUI.EndGroup();

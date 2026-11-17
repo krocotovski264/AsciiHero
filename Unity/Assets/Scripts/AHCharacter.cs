@@ -10,6 +10,7 @@ namespace AsciiHero
     {
         public char sex = 'm'; public int build = 1; public float height = 178f;
         public string armor = "plate"; public string weapon = "sword";
+        public string blade;  // how the blade looks: null as the weapon says, "dagger" (a short sword), "sabre" (curved, for the two-handed set)
         public bool shadow;   // the hero: a body of living darkness inside the armour
         public float[] body;  // the body customisation (Body.ALL; the height is 'height' above), null = defaults
         public CharConfig Clone() { var c = (CharConfig)MemberwiseClone(); if (body != null) c.body = (float[])body.Clone(); return c; }
@@ -479,6 +480,17 @@ namespace AsciiHero
             return MeshGen.Extrude(s, thick * 2.8f);
         }
 
+        // a sabre: a curved single-edged blade, a knuckle guard (laid in the tomahawk's holder: its edge forward)
+        void Sabre(Transform g)
+        {
+            Part(MeshGen.Cylinder(0.015f, 0.013f, 0.11f, 8), "LEATHER2", g, Vector3.zero);
+            Part(MeshGen.Box(0.03f, 0.016f, 0.1f), "GOLD", g, new Vector3(0, 0.06f, 0.015f));
+            // the blade: a curved strip, bending back along its length
+            var s = new List<Vector2>(); int n = 8; float L = 0.72f;
+            for (int i = 0; i <= n; i++) { float t = i / (float)n; s.Add(new Vector2(0.018f * (1 - t * 0.7f) - 0.09f * t * t, t * L)); }
+            for (int i = n; i >= 0; i--) { float t = i / (float)n; s.Add(new Vector2(-0.016f * (1 - t) - 0.09f * t * t - (i == n ? 0 : 0.002f), t * L)); }
+            var go = Part(MeshGen.Extrude(s, 0.008f), "STEEL", g, new Vector3(0, 0.068f, 0), Quaternion.Euler(0, 90, 0));
+        }
         // a tomahawk: short haft, small bearded head with a spike behind
         void Tomahawk(Transform g)
         {
@@ -529,7 +541,13 @@ namespace AsciiHero
                 if (W == "spear") g.localPosition = new Vector3(0, -0.55f, 0);
                 if (W == "staff") { weaponSlideBase = 0.5f - grip.y; g.localPosition = new Vector3(0, weaponSlideBase, 0); weaponSlide = g; }     // its foot on the ground
             }
-            if (W == "sword" || W == "shield")
+            if (W == "sword" && cfg.blade == "dagger")
+            {   // a dagger: a narrow 30 cm blade, a small cross, a wrapped grip
+                Part(MeshGen.Cylinder(0.013f, 0.012f, 0.09f, 8), "LEATHER2", g, Vector3.zero);
+                Part(MeshGen.Box(0.09f, 0.014f, 0.022f), "STEEL", g, new Vector3(0, 0.052f, 0));
+                Part(Blade(0.3f, 0.018f, 0.012f, 0.003f, 0.08f), "STEEL", g, new Vector3(0, 0.058f, 0));
+            }
+            else if (W == "sword" || W == "shield")
             {
                 Part(MeshGen.Cylinder(0.015f, 0.014f, 0.11f, 10), "LEATHER2", g, Vector3.zero);
                 Part(MeshGen.Sphere(0.024f, 10, 8), "GOLD", g, new Vector3(0, -0.07f, 0));
@@ -538,6 +556,7 @@ namespace AsciiHero
                 Part(Blade(0.78f, 0.024f, 0.019f, 0.004f, 0.1f), "STEEL", g, new Vector3(0, 0.075f, 0));
                 Part(MeshGen.Box(0.008f, 0.5f, 0.0125f), "DARK", g, new Vector3(0, 0.37f, 0));
             }
+            else if (W == "axe" && cfg.blade == "sabre") Sabre(g);
             else if (W == "axe") Tomahawk(g);
             else if (W == "spear")
             {
@@ -580,7 +599,7 @@ namespace AsciiHero
             if (W == "axe")
             {   // the second tomahawk, in the left hand
                 Vector3 gripL; var rotL = GripIn("L", W, out gripL);
-                var gL0 = Group("WeaponL"); var gL = Group("Holder"); gL.SetParent(gL0, false); gL.localRotation = Quaternion.Euler(0, -90, 0); Tomahawk(gL);
+                var gL0 = Group("WeaponL"); var gL = Group("Holder"); gL.SetParent(gL0, false); gL.localRotation = Quaternion.Euler(0, -90, 0); if (cfg.blade == "sabre") Sabre(gL); else Tomahawk(gL);
                 Attach("wrist.L", gL0, model.InverseTransformPoint(gripL), Quaternion.Inverse(model.rotation) * rotL);
                 weaponL = gL0;
             }

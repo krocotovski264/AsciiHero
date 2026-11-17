@@ -283,7 +283,7 @@ namespace AsciiHero
             public Vector3 p, home, goal; public int hp, maxHp; public float scale = 1;
             public int state; public float t, cd, seenT, lostT, dodgeCd, parryCd, leapT, stagger, deadT, barkCd, guardT, strafe = 1, dmgK = 1, think, biteT = -1, biteCd = 2; public bool fortitudeUsed;
             public Vector2 leapV, step; public float stepT; public bool noticed, hurtBark, swingHit, raged; public int combo; public Vector3 lastSeen;
-            public BoneArm bones; public bool gone; public Quaternion[] hunchRest, hunchPre, hunchSet; public bool hunchOn;
+            public BoneArm bones; public bool gone; public float fourK, fourPh; public Quaternion[] hunchRest, hunchPre, hunchSet; public bool hunchOn;
             public bool Dead => hp <= 0;
             public bool Boss => kind == "boss";
         }
@@ -374,7 +374,8 @@ namespace AsciiHero
             {
                 sex = 'm', build = boss ? 3 : zombie ? 1 : 0, height = boss ? 186 : zombie ? 176 : 155,
                 armor = zombie ? "plate" : "cloth",
-                weapon = kind == "drunk" ? "none" : "sword"
+                weapon = kind == "drunk" ? "none" : boss ? "axe" : "sword",
+                blade = boss ? "sabre" : rat ? "dagger" : null          // the rats: daggers; the chief: two sabres
             };
             var ch = Character.Build(cfgF, actorMats, name);
             var hb = ch.human;
@@ -453,7 +454,7 @@ namespace AsciiHero
             ch.go.transform.SetParent(L.root.transform, true); ch.go.transform.position = w; ch.go.transform.rotation = Quaternion.Euler(0, heading * Mathf.Rad2Deg, 0);
             GlyphLayer.Build(ch.go);
             var f = new Foe { id = id, name = name, kind = kind, ch = ch, act = new MotionActor(ch), L = L, p = w, home = w, goal = w };
-            f.bones = arm; f.act.heading = heading; f.act.maxSpeed = boss ? 3.7f : zombie ? 1.3f : 3.3f;
+            f.bones = arm; f.act.heading = heading; f.act.maxSpeed = boss ? Mathf.Max(3.6f, player.maxSpeed * 1.05f) : zombie ? 1.3f : Mathf.Max(3.4f, player.maxSpeed);       // (as fast as the hero runs)
             f.maxHp = f.hp = boss ? 70 : zombie ? 40 : 30;
             f.think = Random.value * 2; f.cd = 1;
             if (kind == "drunk") { f.act.PlayCut("talk", false, true, 0.7f + 0.3f * Random.value); }
@@ -534,7 +535,7 @@ namespace AsciiHero
                 f.ch.go.transform.position = f.p; f.ch.go.transform.rotation = Quaternion.Euler(0, f.act.heading * Mathf.Rad2Deg, 0);
                 if (f.kind != "zombie") HunchReset(f);
                 f.act.Animate(tNow, dt);
-                if (f.kind != "zombie") Hunch(f);
+                if (f.kind != "zombie") { Hunch(f); Fours(f, dist, dt); }
                 if (f.bones != null) f.bones.Follow();
                 if (f.kind != "drunk") { StrikeHero(f, dist, toH); Bite(f, dist, toH, dt); }
             }
@@ -592,7 +593,7 @@ namespace AsciiHero
         void Fight(Foe f, float dist, Vector2 toH, Vector2 fwd, float dt, ref Vector2? dir2, ref float mag, ref Vector2? lockP)
         {
             lockP = new Vector2(pos.x, pos.z);
-            float reach = (f.act.Attacking ? f.act.Reach : 1.6f) * (f.Boss ? 1.15f : 1);
+            float reach = (f.act.Attacking ? f.act.Reach : 1.6f) * (f.Boss ? 1.15f : f.kind == "zombie" ? 1f : 0.85f);
             bool heroSwinging = player.Attacking && player.combatT > 0;
             // the walk to him (round the walls, if he is out of sight)
             Vector2 toward = toH;
@@ -706,6 +707,31 @@ namespace AsciiHero
             }
             f.hunchOn = true;
         }
+        /// running, a rat drops onto all fours: the back level, the head up, the arms reaching down to the ground and
+        /// swinging like front legs (laid over the run of the legs); to fight he stands up on his hind legs again
+        void Fours(Foe f, float dist, float dt)
+        {
+            float sp = f.act.Velocity.magnitude;
+            bool on = !f.act.Attacking && f.leapT <= 0 && sp > 1.7f && (!f.noticed || dist > 3.2f) && f.kind != "drunk";
+            f.fourK = Mathf.MoveTowards(f.fourK, on ? 1 : 0, dt / (on ? 0.25f : 0.18f));
+            if (f.fourK < 0.01f) return;
+            float q = Mathf.SmoothStep(0, 1, f.fourK);
+            f.fourPh += dt * sp / 1.5f;                     // a stride of 1.5 m
+            var tr = f.ch.go.transform; var hb = f.ch.human; Vector3 ax = tr.right, fw = tr.forward;
+            void B(string n, float deg) { var b = hb.Bone(n); if (b != null) b.rotation = Quaternion.AngleAxis(deg * q, ax) * b.rotation; }
+            B("spine04", 16); B("spine03", 16); B("spine01", 12); B("neck01", -26); B("head", -16);
+            foreach (var side in new[] { "L", "R" })
+            {
+                float sw = Mathf.Sin((f.fourPh + (side == "L" ? 0.5f : 0f)) * Mathf.PI * 2);
+                var d = (-Vector3.up + fw * (0.25f + 0.45f * sw)).normalized;
+                Transform u = hb.Bone("upperarm01." + side), lo = hb.Bone("lowerarm01." + side), w = hb.Bone("wrist." + side);
+                if (u == null || lo == null || w == null) continue;
+                var cu = (lo.position - u.position).normalized; u.rotation = Quaternion.Slerp(Quaternion.identity, Quaternion.FromToRotation(cu, d), q) * u.rotation;
+                var cl = (w.position - lo.position).normalized; var dl = (d + fw * (sw < 0 ? 0.25f : -0.1f)).normalized;
+                lo.rotation = Quaternion.Slerp(Quaternion.identity, Quaternion.FromToRotation(cl, dl), q) * lo.rotation;
+            }
+            tr.position = f.p + Vector3.down * (0.1f * q);
+        }
         void Leap(Foe f, Vector2 d, float sp) { f.leapV = d.normalized * sp; f.leapT = 0.28f; SpawnPuff(f.p + Vector3.up * 0.3f, 0.04f, Vector3.zero, 0.4f); Sound("cloth", 0.5f, f.p); }
 
         void Bite(Foe f, float dist, Vector2 toH, float dt)
@@ -722,7 +748,7 @@ namespace AsciiHero
         void StrikeHero(Foe f, float dist, Vector2 toH)
         {
             if (!f.act.Cutting || f.swingHit || hp <= 0 || respawnT > 0) return;
-            float reach = f.act.Reach * (f.Boss ? 1.15f : 1);
+            float reach = f.act.Reach * (f.Boss ? 1.15f : f.kind == "zombie" ? 1f : 0.85f);
             var fwd = new Vector2(Mathf.Sin(f.act.heading), Mathf.Cos(f.act.heading));
             if (dist > reach || Vector2.Dot(fwd, toH / Mathf.Max(dist, 0.01f)) < 0.3f) return;
             f.swingHit = true;
@@ -1052,9 +1078,7 @@ namespace AsciiHero
             var r = SkullRect(lp);
             AddPiece(r, r.width / 2, false, 0, alpha);
             if (skullAscii != null && skullAscii.final != null && keyMat != null) { keyMat.SetFloat("_KeyAlpha", alpha); Graphics.DrawTexture(r, skullAscii.final, keyMat); }
-            var old = GUI.color; GUI.color = new Color(1, 1, 1, alpha);
-            GUI.Label(new Rect(r.x, r.yMax - 4 * k, r.width, 16 * k), "Ёрик", sSmall);
-            GUI.color = old;
+
         }
         // ---- the pocket map of a story place: its ground by biome, its walls, its ways out, chests ----
         Location mapFor;
@@ -1242,6 +1266,8 @@ namespace AsciiHero
                 foreach (float ex in new[] { -0.17f, 0.17f })
                 { var e = MeshGen.Obj(MeshGen.Sphere(0.085f * 0.22f, 10, 8), actorMats["DARK"], skullHead, new Vector3(ex, 0.07f, 0.62f) * 0.22f, Quaternion.identity, false, "Eye"); e.transform.localScale = new Vector3(1, 0.85f, 0.7f); }
                 { var mo = MeshGen.Obj(MeshGen.Sphere(0.16f * 0.22f, 10, 8), actorMats["DARK"], skullHead, new Vector3(0, -0.25f, 0.58f) * 0.22f, Quaternion.identity, false, "Mouth"); mo.transform.localScale = new Vector3(1.3f, 0.45f, 0.9f); }
+                // and dark all through inside: only the outer shell carries characters
+                { var cav = MeshGen.Obj(MeshGen.Sphere(0.5f * 0.22f, 14, 10), actorMats["DARK"], skullHead, new Vector3(0, 0.08f, -0.12f) * 0.22f, Quaternion.identity, false, "Inside"); cav.transform.localScale = new Vector3(0.86f, 0.92f, 1.32f); }
                 var noseD = MeshGen.Obj(MeshGen.Sphere(0.05f * 0.22f, 8, 6), actorMats["DARK"], skullHead, new Vector3(0, -0.07f, 0.66f) * 0.22f, Quaternion.identity, false, "Nose"); noseD.transform.localScale = new Vector3(0.8f, 1.2f, 0.6f);
                 GlyphLayer.Build(skullRig);
                 var lg = new GameObject("SkullKey"); lg.transform.SetParent(skullRig.transform, false); lg.transform.localPosition = new Vector3(0.5f, 0.6f, 0.9f);
@@ -1265,7 +1291,7 @@ namespace AsciiHero
             skullAscii.SetSize(Mathf.Max(16, Mathf.RoundToInt(r.width)), Mathf.Max(16, Mathf.RoundToInt(r.height)), cellPx * 0.7f);       // (finer characters: a sharper skull)
             skullAscii.SelfCheck();
         }
-        Rect SkullRect(Rect lp) { float r = lp.width * 0.27f * 1.2f; return new Rect(Mathf.Max(safe.x + 4 * k, lp.x - r * 1.55f), Mathf.Max(safe.y + 4 * k, lp.y - r * 0.55f), 2 * r, 2 * r); }
+        Rect SkullRect(Rect lp) { float r = lp.width * 0.27f * 1.2f; return new Rect(Mathf.Max(safe.x + 4 * k, lp.x - r * 1.55f), Screen.height * 0.10f, 2 * r, 2 * r); }      // (10 % from the top)
         // ================= saving =================
         float autoT, lastAuto = -99; bool autoAfterScene;
         void AutoSave()
