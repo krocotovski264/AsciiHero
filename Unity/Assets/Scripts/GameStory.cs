@@ -283,7 +283,7 @@ namespace AsciiHero
             public Vector3 p, home, goal; public int hp, maxHp; public float scale = 1;
             public int state; public float t, cd, seenT, lostT, dodgeCd, parryCd, leapT, stagger, deadT, barkCd, guardT, strafe = 1, dmgK = 1, think, biteT = -1, biteCd = 2; public bool fortitudeUsed;
             public Vector2 leapV, step; public float stepT; public bool noticed, hurtBark, swingHit, raged; public int combo; public Vector3 lastSeen;
-            public BoneArm bones; public bool gone; public float fourK, fourPh; public Quaternion[] hunchRest, hunchPre, hunchSet; public bool hunchOn;
+            public BoneArm bones; public bool gone; public float fourK, fourPh, retreatT, throwCd = 3, windT = -1; public bool parryRiposte; public Quaternion[] hunchRest, hunchPre, hunchSet; public bool hunchOn;
             public bool Dead => hp <= 0;
             public bool Boss => kind == "boss";
         }
@@ -561,7 +561,7 @@ namespace AsciiHero
         {
             BestMark(f.kind, false);
             f.noticed = true; f.cd = Mathf.Max(f.cd, 0.25f);
-            if (f.Boss) { if (!sDone.Contains("boss_intro")) { AutoSave(); Play("boss_intro"); } }
+            if (f.Boss) { mind = new BossMind(); if (!sDone.Contains("boss_intro")) { AutoSave(); Play("boss_intro"); } }
             else if (f.barkCd <= 0) { Bark(f.ch.go.transform, f.kind == "zombie" ? "zombie_moan" : Random.value < 0.5f ? "rat_notice" : "rat_notice2"); f.barkCd = 8; }
             Sound("draw", 0.35f, f.p);
         }
@@ -602,72 +602,163 @@ namespace AsciiHero
             {
                 // the simple ones: walk (run when far), strike when near; now and then a leap back from his blow
                 bool zomb = f.kind == "zombie";
-                // pack tactics: with another rat already on him, this one comes round his side
-                Vector2 want = toward;
-                if (!zomb && dist < 4.5f)
-                    foreach (var o in foes)
-                        if (o != f && !o.Dead && o.noticed && o.L == f.L && o.kind == "rat" && (new Vector2(o.p.x - pos.x, o.p.z - pos.z)).magnitude < dist)
-                        { var side = new Vector2(-toH.y, toH.x).normalized * f.strafe; want = toH.normalized + side * 0.9f; break; }
-                if (dist > reach * 0.9f) { dir2 = want.normalized; mag = zomb ? (dist > 4 ? 1.3f : 1f) : 2f; }          // the rats run at him
-                // a bite in a leap (from a little further than the blade reaches)
-                f.biteCd -= dt;
-                if (!zomb && f.biteCd <= 0 && f.biteT < 0 && dist > 1.3f && dist < 2.6f && !f.act.Attacking && Random.value < dt * 1.2f)
-                { f.biteCd = 3.5f + Random.value * 2; f.biteT = 0.3f; Leap(f, toH, 7f); }
-                if (dist < reach * 1.05f && f.cd <= 0 && !f.act.Attacking) { f.act.StartAttack(); f.swingHit = false; f.cd = zomb ? 1.6f + Random.value * 0.8f : 0.9f + Random.value * 0.6f; }
-                // nimble: a rat leaps back after its blow now and then, and out of the way of his
-                if (!zomb && f.act.Attacking && f.swingHit && f.dodgeCd <= 0 && Random.value < 0.35f) { f.dodgeCd = 1.5f; Leap(f, -toH.normalized, 5.5f); }
-                if (heroSwinging && dist < 2.4f && f.dodgeCd <= 0 && !zomb)
-                {
-                    f.dodgeCd = 1.2f;
-                    if (Random.value < 0.18f) Leap(f, -toH.normalized, 5.5f);
+                if (zomb)
+                {   // the risen: slow and stubborn, straight at him, a heavy blow now and then
+                    if (dist > reach * 0.9f) { dir2 = toward.normalized; mag = dist > 4 ? 1.3f : 1f; }
+                    if (dist < reach * 1.05f && f.cd <= 0 && !f.act.Attacking) { f.act.StartAttack(); f.swingHit = false; f.cd = 1.6f + Random.value * 0.8f; }
+                    return;
                 }
+                // ---- a rat: hit and run. In at a run (or a leap with a bite), one stab, straight back out, a breath at a
+                // distance circling him, and in again ----
+                f.biteCd -= dt;
+                if (f.act.Attacking && f.act.CutDone && f.retreatT <= 0) { f.retreatT = 0.9f + Random.value * 0.8f; Leap(f, -toH.normalized + new Vector2(-toH.y, toH.x).normalized * f.strafe * 0.4f, 6.5f); }
+                if (f.retreatT > 0)
+                {   // out of his reach, sideways round him, until the next run in
+                    f.retreatT -= dt;
+                    var side = new Vector2(-toH.y, toH.x).normalized * f.strafe;
+                    dir2 = (side + toH.normalized * (dist < 3f ? -1f : dist > 4f ? 0.6f : 0f)).normalized; mag = 1.2f;
+                    if (Random.value < dt * 0.5f) f.strafe = -f.strafe;
+                    if (heroSwinging && dist < 2.4f && f.dodgeCd <= 0) { f.dodgeCd = 1f; Leap(f, -toH.normalized, 6f); }
+                    return;
+                }
+                if (dist > reach * 0.9f) { dir2 = toward.normalized; mag = 2f; }                      // the run in
+                if (f.biteCd <= 0 && f.biteT < 0 && dist > 1.4f && dist < 2.6f && !f.act.Attacking && Random.value < dt * 2f)
+                { f.biteCd = 3f + Random.value * 2; f.biteT = 0.3f; Leap(f, toH, 7f); f.retreatT = 0; }  // a leap in with a bite (out again after)
+                if (dist < reach * 1.05f && f.cd <= 0 && !f.act.Attacking) { f.act.StartAttack(); f.swingHit = false; f.cd = 0.4f; }
+                if (heroSwinging && dist < 2.2f && f.dodgeCd <= 0 && !f.act.Attacking) { f.dodgeCd = 1.2f; if (Random.value < 0.3f) Leap(f, -toH.normalized, 6f); }
                 return;
             }
-            // ---- the chief ----
+            // ---- the chief: he learns the hero. He keeps count of how often the hero swings (and how evenly), which way he
+            // dashes, how much he guards, how far he keeps, how often his own defence fails - and answers with it: a hero
+            // who swings a lot meets parries and a riposte, one who dashes to a side finds him there, one who keeps away
+            // gets a knife thrown at where he is going. His blows are hard to read: a short, quiet wind-up. ----
+            var M = mind;
             if (!f.raged && f.hp < f.maxHp * 0.4f) { f.raged = true; Play("boss_rage"); f.parryCd = 0; }
-            float tempo = f.raged ? 0.65f : 1f;          // in his rage he is quicker to strike, slower to think of defence
-            // defence first: a blow coming, he is facing it
-            if (heroSwinging && dist < player.Reach + 0.4f && f.dodgeCd <= 0 && !f.act.Attacking)
+            float tempo = f.raged ? 0.7f : 1f;
+            M.Observe(this, f, dist, dt);
+            // a knife from his belt: when the hero keeps away (or has kept away of late), at where he will be
+            f.throwCd -= dt;
+            if (f.throwCd <= 0 && dist > 4.2f && dist < 11f && !f.act.Attacking && f.seenT <= 0.1f && (M.farK > 0.4f || dist > 6f))
+            { ThrowKnife(f, M); f.throwCd = (M.farK > 0.6f ? 4f : 6.5f) + Random.value * 2f; f.windT = -1; }
+            // defence: his blow coming, he is facing it
+            if (heroSwinging && dist < player.Reach + 0.5f && f.dodgeCd <= 0 && !f.act.Attacking)
             {
-                f.dodgeCd = f.raged ? 1.6f : 0.9f;
-                float r = Random.value;
-                if (f.parryCd <= 0 && r < (f.raged ? 0.2f : 0.38f)) { f.guardT = 0.45f; f.parryCd = 2.2f; }                    // the axes up: the blow will be turned
-                else if (r < (f.raged ? 0.35f : 0.68f)) { var side = new Vector2(-toH.y, toH.x).normalized * (Random.value < 0.5f ? 1 : -1); Leap(f, side * 0.8f - toH.normalized * 0.4f, 6f); }   // a step aside
-                else if (r < 0.8f) Leap(f, -toH.normalized, 6.5f);                                                                // a leap back
+                f.dodgeCd = f.raged ? 1.4f : 0.8f;
+                float r = Random.value, pParry = (f.raged ? 0.6f : 1f) * M.ParryK, pDodge = M.DodgeK;
+                if (f.parryCd <= 0 && r < pParry) { f.guardT = 0.45f; f.parryCd = f.raged ? 1.6f : 1.1f; f.parryRiposte = true; }          // the sabres up: turned aside, answered at once
+                else if (r < pParry + 0.18f) { f.guardT = 0.5f; f.parryRiposte = false; }                                                    // a plain block: taken on crossed blades
+                else if (r < pParry + 0.18f + pDodge)
+                {   // a dash aside (to the side the hero does not favour) or straight back
+                    float sideS = M.dashSide > 0.25f ? -1 : M.dashSide < -0.25f ? 1 : (Random.value < 0.5f ? 1 : -1);
+                    if (Random.value < 0.6f) Leap(f, new Vector2(-toH.y, toH.x).normalized * sideS * 0.85f - toH.normalized * 0.35f, 7f);
+                    else Leap(f, -toH.normalized, 7.5f);
+                }
             }
             f.act.guardHeld = f.guardT > 0;
             if (f.guardT > 0) { mag = 0; return; }
-            // he reads the hero's guard: against a raised blade he circles and waits for it to drop, then a quick pair
-            bool heroGuards = player.guardHeld;
+            // a combination going on: the next blow
             if (f.combo > 0 && !f.act.Attacking && f.cd <= 0.25f)
-            {   // the next blow of a combination
-                if (dist < reach * 1.3f) { f.act.StartAttack(); f.swingHit = false; f.combo--; f.cd = 0.35f * tempo; }
-                else f.combo = 0;
+            {
+                if (dist < reach * 1.3f) { f.act.StartAttack(); f.swingHit = false; f.combo--; f.cd = 0.3f * tempo; }
+                else { f.combo = 0; dir2 = toH.normalized; mag = 2f; }
             }
+            // the quiet wind-up before a combination: a still moment, a little lower
+            if (f.windT > 0) { f.windT -= dt; mag = 0; if (f.windT <= 0) { f.act.StartAttack(); f.swingHit = false; f.combo = M.ComboLen(); f.cd = (0.6f + Random.value * 0.6f) * tempo; } return; }
             if (dist > 3.2f) { dir2 = toward.normalized; mag = 2f; return; }
             if (f.act.Attacking) { if (dist > reach * 0.8f) { dir2 = toH.normalized; mag = 0.6f; } return; }
-            if (heroGuards && f.cd > -0.6f)
-            {   // circle him
-                var side = new Vector2(-toH.y, toH.x).normalized * f.strafe;
-                dir2 = (side + toH.normalized * (dist > 2.6f ? 0.5f : dist < 1.8f ? -0.4f : 0)).normalized; mag = 0.8f;
-                if (Random.value < dt * 0.4f) f.strafe = -f.strafe;
+            if (player.guardHeld && f.cd > -0.6f && M.guardK > 0.35f)
+            {   // he knows the hero waits behind his blade: round him, waiting for it to drop (or a knife, if far)
+                var side = new Vector2(-toH.y, toH.x).normalized * (M.dashSide != 0 ? Mathf.Sign(M.dashSide) : f.strafe);
+                dir2 = (side + toH.normalized * (dist > 2.6f ? 0.5f : dist < 1.8f ? -0.4f : 0)).normalized; mag = 1.1f;
                 return;
             }
             if (f.cd <= 0)
             {
-                if (dist < reach * 1.1f)
-                {   // a combination of two or three blows, a pause of his own choosing after it
-                    if (Random.value < 0.25f && f.biteT < 0) { f.biteT = 0.25f; Leap(f, toH, 6.5f); f.combo = 1; f.cd = 0.45f; return; }      // (the wererat's bite opens a combination)
-                    f.act.StartAttack(); f.swingHit = false; f.combo = Random.value < 0.55f ? 1 : Random.value < 0.6f ? 2 : 0;
-                    f.cd = (0.7f + Random.value * 0.7f) * tempo;
+                if (dist < reach * 1.15f)
+                {
+                    if (Random.value < 0.2f && f.biteT < 0) { f.biteT = 0.25f; Leap(f, toH, 6.5f); f.combo = 1; f.cd = 0.4f; return; }      // the wererat's bite opens it
+                    f.windT = f.raged ? 0.08f : 0.14f;
                 }
-                else { dir2 = toH.normalized; mag = 2f; }      // closing in at a run
+                else { dir2 = toH.normalized; mag = 2f; }      // closing in at a run (where the hero is about to be)
             }
             else
-            {   // between blows: keep at the edge of reach, drift round him
-                var side = new Vector2(-toH.y, toH.x).normalized * f.strafe;
-                float want = reach * 1.25f; dir2 = (side * 0.8f + toH.normalized * Mathf.Clamp(dist - want, -1, 1)).normalized; mag = 0.7f;
+            {   // between blows: at the edge of reach, on the side the hero likes to dash to
+                float sideS = Mathf.Abs(M.dashSide) > 0.25f ? Mathf.Sign(M.dashSide) : f.strafe;
+                var side = new Vector2(-toH.y, toH.x).normalized * sideS;
+                float want = reach * 1.25f; dir2 = (side * 0.8f + toH.normalized * Mathf.Clamp(dist - want, -1, 1)).normalized; mag = 1f;
                 if (Random.value < dt * 0.3f) f.strafe = -f.strafe;
+            }
+        }
+        // ---- what the chief has learnt about the hero (one fight's memory) ----
+        class BossMind
+        {
+            readonly List<float> swings = new List<float>(); public float dashSide, guardK, farK, hitsK; float lastDashT = 9, lastAtk;
+            public void Swing(float t) { swings.Add(t); while (swings.Count > 0 && t - swings[0] > 8f) swings.RemoveAt(0); }
+            public void Hit() { hitsK = Mathf.Min(1, hitsK + 0.25f); }
+            public void Observe(Game g, Foe f, float dist, float dt)
+            {
+                guardK += ((g.player.guardHeld && dist < 4 ? 1 : 0) - guardK) * dt * 0.25f;
+                farK += ((dist > 4.2f ? 1 : 0) - farK) * dt * 0.15f;
+                hitsK = Mathf.Max(0, hitsK - dt * 0.05f);
+                // a new dash of the hero's: to which side of the chief?
+                if (g.dashT < lastDashT && g.dashT < 0.05f)
+                {
+                    var to = new Vector2(f.p.x - g.pos.x, f.p.z - g.pos.z).normalized; var dd = new Vector2(g.dashDir.x, g.dashDir.z);
+                    float sd = Mathf.Sign(to.x * dd.y - to.y * dd.x);
+                    dashSide = Mathf.Clamp(dashSide * 0.7f + sd * 0.3f, -1, 1);
+                }
+                lastDashT = g.dashT;
+            }
+            /// a hero who swings a lot (and evenly) is parried more
+            public float ParryK
+            {
+                get
+                {
+                    float rate = swings.Count / 6f, even = 0;
+                    if (swings.Count >= 4) { float m = 0, v = 0; int n = swings.Count - 1; for (int i = 1; i < swings.Count; i++) m += swings[i] - swings[i - 1]; m /= n; for (int i = 1; i < swings.Count; i++) v += Mathf.Pow(swings[i] - swings[i - 1] - m, 2); even = Mathf.Clamp01(1 - Mathf.Sqrt(v / n) / Mathf.Max(0.1f, m)); }
+                    return Mathf.Clamp(0.12f + 0.45f * Mathf.Clamp01(rate / 1.2f) + 0.2f * even, 0.12f, 0.7f);
+                }
+            }
+            /// the more he has been hit, the more he gets out of the way
+            public float DodgeK => 0.25f + 0.35f * hitsK;
+            public int ComboLen() { return Random.value < 0.5f ? 1 : Random.value < 0.6f ? 2 : 0; }
+        }
+        BossMind mind = new BossMind();
+        // ---- thrown knives ----
+        class Knife { public GameObject go; public Vector3 p, v; public float life; public StoryLocation L; public bool stuck; }
+        readonly List<Knife> knives = new List<Knife>();
+        void ThrowKnife(Foe f, BossMind M)
+        {
+            var from = f.p + Vector3.up * 1.3f; var hv = player.Velocity;
+            float t = (new Vector2(pos.x - from.x, pos.z - from.z)).magnitude / 14f;
+            var aim = pos + hv * t + Vector3.up * 1.0f;
+            if (Mathf.Abs(M.dashSide) > 0.4f) { var to = (aim - from); var side = Vector3.Cross(Vector3.up, to.normalized); aim += side * Mathf.Sign(M.dashSide) * 0.6f; }      // (where he tends to dash)
+            var go = new GameObject("Knife"); go.transform.SetParent(f.L.root.transform, true); go.transform.position = from;
+            MeshGen.Obj(MeshGen.Box(0.025f, 0.3f, 0.012f), actorMats["STEEL"], go.transform, new Vector3(0, 0.08f, 0), Quaternion.identity, true, "Blade");
+            MeshGen.Obj(MeshGen.Cylinder(0.012f, 0.012f, 0.1f, 6), actorMats["LEATHER2"], go.transform, new Vector3(0, -0.07f, 0), Quaternion.identity, true, "Grip");
+            GlyphLayer.Build(go);
+            knives.Add(new Knife { go = go, p = from, v = (aim - from).normalized * 14f, L = f.L });
+            Sound("cloth", 0.6f, from); f.act.PokeIdle();
+        }
+        void UpdateKnives(float dt)
+        {
+            var L = loc as StoryLocation;
+            for (int i = knives.Count - 1; i >= 0; i--)
+            {
+                var kn = knives[i]; kn.life += dt;
+                if (kn.go == null || kn.life > 6f || kn.L != L) { if (kn.go != null) Destroy(kn.go); knives.RemoveAt(i); continue; }
+                if (kn.stuck) continue;
+                kn.v += Vector3.down * 3f * dt; kn.p += kn.v * dt;
+                kn.go.transform.position = kn.p; kn.go.transform.rotation = Quaternion.LookRotation(kn.v) * Quaternion.Euler(90, 0, 0) * Quaternion.Euler(0, kn.life * 1400f, 0);
+                var d = new Vector2(kn.p.x - pos.x, kn.p.z - pos.z);
+                if (d.magnitude < 0.45f && hp > 0 && respawnT <= 0)
+                {
+                    var hf = new Vector2(Mathf.Sin(player.heading), Mathf.Cos(player.heading));
+                    if (dashT < DASH_T + 0.15f) { }                                                     // (under the dash)
+                    else if (player.guardHeld && Vector2.Dot(hf, d.normalized) > 0.2f) { Sound("clash", 0.7f, kn.p); kn.v = -kn.v * 0.3f; kn.life = 5.5f; continue; }
+                    else { Sound("hit_flesh", 0.6f, kn.p); Damage(6); Destroy(kn.go); knives.RemoveAt(i); continue; }
+                }
+                if (kn.p.y < 0.05f || !L.Walk(L.ToMap(kn.p))) { kn.stuck = true; kn.life = Mathf.Max(kn.life, 3.5f); Sound("hit_stone", 0.4f, kn.p); }
             }
         }
         /// the next point on the way (the search is made at most twice a second per creature)
@@ -782,12 +873,15 @@ namespace AsciiHero
                 if (f.act.guardHeld && Vector2.Dot(ff, -d / Mathf.Max(dist, 0.01f)) > 0.3f)
                 {   // parried: steel on steel, and he answers at once
                     Sound("clash", 0.9f, f.p); SpawnPuff((f.p + pos) / 2 + Vector3.up * 1.2f, 0.03f, Vector3.up, 0.3f);
-                    f.guardT = 0; f.act.guardHeld = false; f.cd = 0; f.combo = 1; f.act.StartAttack(); f.swingHit = false;
+                    f.guardT = 0; f.act.guardHeld = false;
+                    if (f.parryRiposte || !f.Boss) { f.cd = 0; f.combo = 1; f.act.StartAttack(); f.swingHit = false; }      // parried: answered at once
+                    else f.cd = 0.3f;                                                                                       // only blocked
                     player.combatT = Mathf.Max(player.combatT, 1);
                     continue;
                 }
                 int dmg = cfg.weapon == "none" ? 6 : 10;
                 f.hp -= dmg; f.stagger = f.Boss ? 0.12f : 0.35f; Sound("hit_flesh", 0.7f, f.p);
+                if (f.Boss) mind.Hit();
                 if (!f.noticed) Notice(f);
                 f.lastSeen = pos; f.seenT = 0;
                 if (!f.Boss && !f.hurtBark && f.kind == "rat" && Random.value < 0.6f) { f.hurtBark = true; Bark(f.ch.go.transform, "rat_hurt"); }
@@ -1018,7 +1112,7 @@ namespace AsciiHero
             }
             autoT += dt; if (autoT > 300f) { autoT = 0; AutoSave(); }          // every five minutes
             if (autoAfterScene && sDir == null) { autoAfterScene = false; AutoSave(); }
-            HeroHitsFoes(); UpdateFoes(dt); UpdateFolk(dt); UpdateChests(dt); UpdateSkull(dt);
+            HeroHitsFoes(); UpdateFoes(dt); UpdateKnives(dt); UpdateFolk(dt); UpdateChests(dt); UpdateSkull(dt);
             StoryTriggers(); StoryPassages(dt); UpdateDirector(dt); StoryIdleTalk(dt);
             hero.go.transform.position = pos + Vector3.down * heroSink;
         }
@@ -1362,6 +1456,7 @@ namespace AsciiHero
         /// the hero swings at something (in a fight)
         void StoryFight()
         {
+            mind.Swing(Time.time);
             if (!story || yorickCd > 0 || NearestEntity(5f) == null) return;
             if (Random.value < 0.4f) YorickSay(Y_FIGHT[Random.Range(0, Y_FIGHT.Length)]); else yorickCd = 4;
         }
@@ -1413,13 +1508,13 @@ namespace AsciiHero
         class Beast { public string id, name, basis, look, ways, stats; }
         static readonly Beast[] BEASTS = {
             new Beast { id = "rat", name = "Крысолюд", basis = "по образу ратфолка (Tome of Beasts) и крысиного племени D&D",
-                look = "Невысокий, сутулый, весь в серо-бурой шерсти; длинная морда, голый хвост. Рваный капюшон, короткий меч.",
-                ways = "Бродит по норам, роется в хламе, оглядывается. Видит только то, что перед ним, но слышит шаги рядом. Заметив чужого — пищит и бежит на него. Вдвоём-втроём заходят с боков (тактика стаи), бьют мечом и кусают в прыжке, после удара часто отскакивают назад (ловкий отход).",
-                stats = "Скорость: быстрая · Здоровье: низкое · Атаки: короткий меч, укус в прыжке" },
+                look = "Невысокий, сутулый, весь в серо-бурой шерсти; длинная морда, голый хвост. Рваный капюшон, кинжал. Бегает на четвереньках.",
+                ways = "Бродит по норам, роется в хламе, оглядывается. Видит только то, что перед ним, но слышит шаги рядом. Заметив чужого — пищит и бежит на него на четвереньках. Бьёт и бежит: подскакивает (иногда с укусом в прыжке), режет кинжалом и сразу отпрыгивает, кружит на расстоянии и снова бросается.",
+                stats = "Скорость: быстрая · Здоровье: низкое · Атаки: кинжал, укус в прыжке" },
             new Beast { id = "boss", name = "Большая Крыса", basis = "по образу оборотня-крысы (вэрэрат, Monster Manual)",
-                look = "На голову выше других крысолюдов, чёрная шерсть, красные глаза. Шипастый железный шлем, меховой плащ, меч.",
-                ways = "Чует добычу носом даже за стеной. Бьёт сериями (меч и укус), отскакивает в сторону и назад, парирует и сразу отвечает. Против поднятого клинка ходит кругом и ждёт; последний удар серии пробивает защиту. Раненый — свирепеет: бьёт чаще, защищается хуже.",
-                stats = "Скорость: очень быстрая · Здоровье: среднее · Атаки: серия из двух, укус, парирование" },
+                look = "На голову выше других крысолюдов, чёрная шерсть, красные глаза. Шипастый железный шлем, меховой плащ, две сабли, ножи за поясом.",
+                ways = "Чует добычу носом даже за стеной и учится по ходу боя: кто бьёт часто и одинаково, того ловит на две сабли и сразу отвечает; кто держит блок — того обходит кругом; кто рвётся в одну сторону — там его и встречает; кто держится подальше — получает нож туда, куда шагнёт. Замах у него короткий и тихий. Бьёт сериями, отпрыгивает в сторону и назад. Раненый свирепеет.",
+                stats = "Скорость: очень быстрая · Здоровье: среднее · Атаки: серии двумя саблями, укус, брошенный нож, парирование с ответом, блок" },
             new Beast { id = "zombie", name = "Воин-зомби", basis = "по образу зомби (Monster Manual)",
                 look = "Мёртвый рыцарь: латы с прорехами, голый череп с отвисшей челюстью, рука — одни кости.",
                 ways = "Медлителен и упрям. Бредёт к живому, бьёт тяжело и редко. Нежитская стойкость: смертельный удар его не всегда валит — иногда он поднимается ещё раз.",

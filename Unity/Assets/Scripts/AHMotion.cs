@@ -1126,6 +1126,8 @@ namespace AsciiHero
         public readonly List<Vector3> trail = new List<Vector3>();
         int atkType, lastAtk; float atkT = 9, atkDur; float guard; public bool guardHeld;
         public bool Attacking => atkType != 0 && atkT < atkDur;
+        /// the cut of the blow has passed (what is left is the recovery)
+        public bool CutDone => Attacking && atkT > Clip.cut1;
         /// starts an attack if none is running (the cooldown is the animation itself); pressed during one, the next is chained on.
         /// Standing: any attack of the weapon but the last one. Running with a blade: sword arm behind -> an overhead cut, in front -> a drawn one.
         public bool StartAttack()
