@@ -76,7 +76,7 @@ Shader "AsciiHero/Glyph"
             #define CLOTH_ROWS 8
             float4 _ClothGrid[144];       // world displacement of each particle from its rest place
             float4 _ClothNrm[144];        // the cloak's simulated normals (world)
-            float4 _ClothMap2;            // the cloak (_ClothMap.w = 1): width at the top and at the hem, columns, rows
+            float4 _ClothMap2, _ClothMap3; // the cloak (_ClothMap.w = 1, x = the body's axis z): angles round the neck, over the shoulders, behind the arms, the shoulders' v; the elbows' v, 1/exponent of v, columns, rows
             float4 _ClothMap;             // skirt mesh: x = centre z, y = top y, z = bottom y, w = 1 for the cloak
             float _ClothSim;              // per renderer: 1 = this is the simulated skirt
             float4 _AsciiWind;            // xy = direction (world xz), z = strength
@@ -112,10 +112,11 @@ Shader "AsciiHero/Glyph"
                 if (_GlyphCloth < 0.5 || _ClothSim < 0.5) return ws;
                 if (_ClothMap.w > 0.5)
                 {   // the cloak: a sheet, columns across (x grows with the width row by row), rows down
-                    int C = (int)_ClothMap2.z, R = (int)_ClothMap2.w;
-                    float v01 = saturate((_ClothMap.y - os.y) / max(_ClothMap.y - _ClothMap.z, 1e-3));
-                    float W = lerp(_ClothMap2.x, _ClothMap2.y, v01);
-                    float uu = saturate(os.x / max(W, 1e-3) + 0.5) * (C - 1), vv = v01 * (R - 1);
+                    int C = (int)_ClothMap3.z, R = (int)_ClothMap3.w;
+                    float v01 = pow(saturate((_ClothMap.y - os.y) / max(_ClothMap.y - _ClothMap.z, 1e-3)), _ClothMap3.y);
+                    float Th = v01 < _ClothMap2.w ? lerp(_ClothMap2.x, _ClothMap2.y, v01 / _ClothMap2.w) : lerp(_ClothMap2.y, _ClothMap2.z, smoothstep(_ClothMap2.w, _ClothMap3.x, v01));
+                    float th = atan2(os.x, -(os.z - _ClothMap.x));        // the angle from the back, round the body's axis
+                    float uu = saturate(th / (2.0 * Th) + 0.5) * (C - 1), vv = v01 * (R - 1);
                     int a0 = min((int)floor(uu), C - 2), b0 = min((int)floor(vv), R - 2); float fa = saturate(uu - a0), fb = saturate(vv - b0);
                     float3 e00 = _ClothGrid[b0 * C + a0].xyz, e01 = _ClothGrid[b0 * C + a0 + 1].xyz, e10 = _ClothGrid[(b0 + 1) * C + a0].xyz, e11 = _ClothGrid[(b0 + 1) * C + a0 + 1].xyz;
                     return ws + lerp(lerp(e00, e01, fa), lerp(e10, e11, fa), fb);

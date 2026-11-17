@@ -174,32 +174,33 @@ namespace AsciiHero
         readonly Vector4[] disp = new Vector4[GRID], nrm = new Vector4[GRID];
         struct Link { public int a, b; public float len, ks, kc; }
         readonly System.Collections.Generic.List<Link> links = new System.Collections.Generic.List<Link>();
-        readonly Vector4 map, map2;
+        readonly Vector4 map, map2, map3;
         float acc; bool ready; Vector3 lastAnchor;
         const float STEP = 1f / 90f;
 
         public CapeSim(Character ch)
         {
             cape = ch.skirt; model = ch.model; H = ch.human; restL = ch.capeRest; nrmL = ch.capeNrm;
-            map = new Vector4(0, ch.capeShape.x, ch.capeShape.y, 1); map2 = new Vector4(ch.capeShape.z, ch.capeShape.w, C, R);
+            map = ch.capeMap; map2 = ch.capeMap2; map3 = ch.capeMap3;
             float sc = cape.lossyScale.y;
             System.Action<int, int, float, float> add = (a, b, ks, kc) => links.Add(new Link { a = a, b = b, len = (restL[a] - restL[b]).magnitude * sc, ks = ks, kc = kc });
             for (int r = 0; r < R; r++)
                 for (int c = 0; c < C; c++)
                 {
                     int i = r * C + c;
-                    if (c + 1 < C) add(i, i + 1, 1f, 0.25f);                                   // across
-                    if (r + 1 < R) add(i, i + C, 1f, 0.5f);                                    // down
-                    if (r + 1 < R && c + 1 < C) { add(i, i + C + 1, 0.5f, 0.1f); add(i + 1, i + C, 0.5f, 0.1f); }   // shear
-                    if (c + 2 < C) add(i, i + 2, 0.2f, 0.02f);                                 // bend
-                    if (r + 2 < R) add(i, i + 2 * C, 0.3f, 0.05f);
+                    // cloth: hard to stretch, easy to squash (it folds) and to bend (it does not keep its shape)
+                    if (c + 1 < C) add(i, i + 1, 1f, 0.12f);                                   // across
+                    if (r + 1 < R) add(i, i + C, 1f, 0.25f);                                   // down
+                    if (r + 1 < R && c + 1 < C) { add(i, i + C + 1, 0.35f, 0.03f); add(i + 1, i + C, 0.35f, 0.03f); }   // shear
+                    if (c + 2 < C) add(i, i + 2, 0.06f, 0.01f);                                // bend
+                    if (r + 2 < R) add(i, i + 2 * C, 0.12f, 0.02f);
                 }
             // the length of cloth from each particle up its column to the shoulders (the tether's limit)
             for (int c = 0; c < C; c++) { float L = 0; for (int r = 1; r < R; r++) { L += (restL[r * C + c] - restL[(r - 1) * C + c]).magnitude * sc; tether[r * C + c] = L * 1.02f; } }
         }
 
         // body capsules
-        readonly Vector3[] capA = new Vector3[10], capB = new Vector3[10]; readonly float[] capR = new float[10]; int nCap;
+        readonly Vector3[] capA = new Vector3[12], capB = new Vector3[12]; readonly float[] capR = new float[12]; int nCap;
         void Capsules()
         {
             nCap = 0;
@@ -208,8 +209,10 @@ namespace AsciiHero
                 var ta = H.Bone(a); var tb = H.Bone(b); if (ta == null || tb == null || ta.lossyScale.x < 0.01f) return;
                 capA[nCap] = ta.position; capB[nCap] = tb.position; capR[nCap] = r; nCap++;
             };
-            cap("spine01", "spine04", 0.19f); cap("spine05", "root", 0.18f);
-            cap("upperarm01.L", "lowerarm01.L", 0.085f); cap("upperarm01.R", "lowerarm01.R", 0.085f);
+            cap("spine01", "spine04", 0.2f); cap("spine05", "root", 0.18f);
+            cap("upperarm01.L", "upperarm01.R", 0.12f);                                // across the shoulders (the pauldrons)
+            cap("neck01", "head", 0.085f);
+            cap("upperarm01.L", "lowerarm01.L", 0.095f); cap("upperarm01.R", "lowerarm01.R", 0.095f);
             cap("upperleg01.L", "lowerleg01.L", 0.11f); cap("upperleg01.R", "lowerleg01.R", 0.11f);
             cap("lowerleg01.L", "foot.L", 0.08f); cap("lowerleg01.R", "foot.R", 0.08f);
         }
@@ -221,12 +224,9 @@ namespace AsciiHero
                 Vector3 p = capA[k] + ab * t, d = x[i] - p; float l = d.magnitude, rr = capR[k] + 0.025f;
                 if (l < rr) x[i] = p + (l > 1e-5f ? d / l : -model.forward) * rr;
             }
-            // backstop: out of a sphere on the body side of the rest place
-            const float BR = 0.45f;
-            Vector3 cs = rest[i] - rn[i] * BR, e = x[i] - cs; float el = e.magnitude;
-            if (el < BR - 0.012f) x[i] = cs + (el > 1e-5f ? e / el : rn[i]) * (BR - 0.012f);
-            // max distance from the rest place
-            float v = r / (R - 1f), md = 0.06f + 0.85f * v;
+            // (no backstop: the body's capsules alone keep it out, so wind from behind lays it on the back and it flows
+            // round the body)  max distance from the rest place:
+            float v = r / (R - 1f), md = 0.05f + 1.15f * v;
             Vector3 dr = x[i] - rest[i]; if (dr.sqrMagnitude > md * md) x[i] = rest[i] + dr.normalized * md;
             float g = model.position.y + 0.02f; if (x[i].y < g) x[i].y = g;
         }
@@ -260,12 +260,13 @@ namespace AsciiHero
                     Vector3 n = NormalAt(r, c);
                     float fl = 0.7f + 0.6f * Mathf.PerlinNoise(t * 1.7f + c * 0.31f, r * 0.27f + t * 0.9f);
                     Vector3 rel = windW * fl - vel;
-                    Vector3 a = Physics.gravity + n * (Vector3.Dot(rel, n) * 2.2f) + rel * 0.15f;
-                    Vector3 step = (x[i] - ox[i]) * 0.986f;                                 // drag
+                    float dn = Vector3.Dot(rel, n);
+                    Vector3 a = Physics.gravity + n * (dn * Mathf.Abs(dn) * 0.9f + dn * 1.4f) + rel * 0.25f;     // pressure on the sheet + skin drag
+                    Vector3 step = (x[i] - ox[i]) * 0.99f;                                  // air drag
                     ox[i] = x[i]; x[i] += step + a * (STEP * STEP);
-                    x[i] += (rest[i] - x[i]) * (0.003f + 0.03f * (1 - v) * (1 - v));       // anim drive, weak and weaker down
+                    x[i] += (rest[i] - x[i]) * (0.0015f + 0.05f * Mathf.Pow(1 - v, 4));    // anim drive: holds it on the shoulders, not below
                 }
-                for (int it = 0; it < 5; it++)
+                for (int it = 0; it < 6; it++)
                 {
                     foreach (var L in links)
                     {
@@ -306,7 +307,7 @@ namespace AsciiHero
             Shader.SetGlobalVectorArray("_ClothGrid", disp);
             Shader.SetGlobalVectorArray("_ClothNrm", nrm);
             Shader.SetGlobalVector("_ClothMap", map);
-            Shader.SetGlobalVector("_ClothMap2", map2);
+            Shader.SetGlobalVector("_ClothMap2", map2); Shader.SetGlobalVector("_ClothMap3", map3);
             foreach (var r in rs)
             {
                 if (r == null) continue;

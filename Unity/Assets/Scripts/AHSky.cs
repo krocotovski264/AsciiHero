@@ -85,7 +85,7 @@ namespace AsciiHero
         /// indoors and in the editor: no weather, no tint
         public static void Neutral()
         {
-            Shader.SetGlobalVector("_AsciiGrade", new Vector4(1, 1, 1, 1)); Shader.SetGlobalVector("_AsciiPrecip", Vector4.zero);
+            Shader.SetGlobalVector("_AsciiGrade", new Vector4(1, 1, 1, 1)); Shader.SetGlobalVector("_AsciiPrecip", Vector4.zero); Shader.SetGlobalVector("_AsciiPrecipW", Vector4.zero);
             Shader.SetGlobalVector("_AsciiSeason", Vector4.zero); Shader.SetGlobalFloat("_AsciiWet", 0); Shader.SetGlobalFloat("_AsciiDayK", 0);
         }
         /// the precipitation leans with the wind (in screen cells per cell of fall)

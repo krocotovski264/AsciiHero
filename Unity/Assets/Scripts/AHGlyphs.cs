@@ -235,6 +235,34 @@ namespace AsciiHero
             return go;
         }
 
+        /// Rain and snow (see AsciiPrecip): n drops, three characters each (the streak); one mesh, its places worked out
+        /// in the shader (always drawn: the bounds take in the whole world)
+        public static GameObject MakePrecip(int n)
+        {
+            var sh = Shader.Find("AsciiHero/Precip"); if (sh == null) { Debug.LogError("AsciiHero/Precip shader not found"); return null; }
+            var rnd = new System.Random(4242);
+            var verts = new List<Vector3>(n * 12); var corners = new List<Vector2>(n * 12); var seeds = new List<Vector2>(n * 12); var tris = new List<int>(n * 18);
+            Vector2[] C = { new Vector2(-0.5f, -0.5f), new Vector2(0.5f, -0.5f), new Vector2(0.5f, 0.5f), new Vector2(-0.5f, 0.5f) };
+            for (int i = 0; i < n; i++)
+            {
+                var p = new Vector3((float)rnd.NextDouble(), (float)rnd.NextDouble(), (float)rnd.NextDouble()); float sd = (float)rnd.NextDouble();
+                for (int tr = 0; tr < 3; tr++)
+                {
+                    int o = verts.Count;
+                    for (int k = 0; k < 4; k++) { verts.Add(p); corners.Add(C[k]); seeds.Add(new Vector2(sd, tr)); }
+                    tris.Add(o); tris.Add(o + 2); tris.Add(o + 1); tris.Add(o); tris.Add(o + 3); tris.Add(o + 2);
+                }
+            }
+            var m = new Mesh { name = "precip", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+            m.SetVertices(verts); m.SetUVs(0, corners); m.SetUVs(1, seeds); m.SetTriangles(tris, 0);
+            m.bounds = new Bounds(Vector3.zero, Vector3.one * 20000);
+            var go = new GameObject("Precip"); go.layer = LAYER;
+            go.AddComponent<MeshFilter>().sharedMesh = m;
+            var r = go.AddComponent<MeshRenderer>(); r.sharedMaterial = new Material(sh);
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; r.receiveShadows = false;
+            return go;
+        }
+
         /// Grass. The blades are split into tiles of 4 x 4 m, each its own mesh, so the tiles outside the view are not
         /// sent to the GPU at all (as one mesh, every blade of the field ran the vertex shader every frame).
         public static GameObject MakeGrass(List<Vector3> pts, List<float> seedList, Transform parent) { return MakeGrass(pts, seedList, parent, new Color(0.16f, 0.50f, 0.24f), new Color(0.50f, 0.78f, 0.36f), 1f); }

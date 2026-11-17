@@ -117,8 +117,6 @@ Shader "Hidden/AsciiHero/Final"
                     float la = dot(a, float3(0.3, 0.5, 0.2));
                     a = lerp(la.xxx, a, _AsciiGrade.w) * _AsciiGrade.rgb;
                     bg = lerp(bg, float3(0.05, 0.06, 0.08), _AsciiDayK * 0.6) + _AsciiPrecip.w * float3(0.12, 0.13, 0.16);
-                    float4 pr = Precip(i.uv);
-                    a = lerp(a, pr.yzw, saturate(pr.x * 1.6));          // over the picture (it shows on a bright day too)
                 }
                 float3 c = bg + a + b * _Bloom * 1.6;
                 // values are display-referred; in a Linear project convert so the sRGB output shows them unchanged

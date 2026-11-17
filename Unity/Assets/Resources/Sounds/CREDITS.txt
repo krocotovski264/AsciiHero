@@ -22,5 +22,8 @@ CC BY - freesound.org (credit required; keep these lines in the game's credits):
                   (sounds 63842, 63220), CC BY 4.0
   (collected from github.com/muges/ambientsounds and github.com/rivea0/ambient-sounds-web-components)
 
-Made for the game: step_water, splash (noise and bubbles).
+CC BY-SA 3.0 - Citadel Station 13 (github.com/Citadel-Station-13/Citadel-Station-13-RP, sound/effects/footstep),
+  via Space Station 14 (github.com/space-wizards/space-station-14, Resources/Audio/Effects/Footsteps):
+  step_water      water1-4.ogg (footsteps in water)
+  splash          the same, slowed and layered two at a time (wading deep); these derived files are CC BY-SA 3.0 too
 All the loops were trimmed, made seamless (cross-faded end into start), mixed to mono and levelled.

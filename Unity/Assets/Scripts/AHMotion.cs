@@ -521,6 +521,7 @@ namespace AsciiHero
                 b.localScale = present[l] ? Vector3.one : Vector3.one * 1e-4f;
                 foreach (var r in b.GetComponentsInChildren<Renderer>(true)) r.enabled = present[l];   // rigid gear on that limb
             }
+            if (ch.hoodDown != null) ch.hoodDown.SetActive(!present[0]);           // no head: the hood hangs down the back
             if (mpb == null) mpb = new MaterialPropertyBlock();
             mpb.SetFloatArray("_LimbGone", gone);
             foreach (var r in ch.glyphs) if (r != null) r.SetPropertyBlock(mpb);

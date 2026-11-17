@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.68 · Unity";
+        public const string VERSION = "beta 0.69 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -830,8 +830,17 @@ namespace AsciiHero
                     moonLight.color = skyS.sunCol; moonLight.transform.rotation = Quaternion.LookRotation(-skyS.sunDir);
                 }
                 heroLight.intensity = hl * skyS.heroK; ascii.exposure = ex * skyS.expK;
-                var wsv = sceneCam != null ? sceneCam.transform.InverseTransformDirection(windV) : Vector3.zero;
-                skyS.Wind(new Vector2(Mathf.Clamp(wsv.x * 0.35f, -0.8f, 0.8f), 0));
+                // rain and snow in the world (not in the cave: it has a roof)
+                {
+                    float roofless = loc == cave ? 0 : 1, amt = (skyS.Rain + skyS.Snow) * roofless;
+                    if (precipGo == null && amt > 0.01f) precipGo = GlyphLayer.MakePrecip(4000);
+                    if (precipGo != null)
+                    {
+                        if (precipGo.activeSelf != amt > 0.01f) precipGo.SetActive(amt > 0.01f);
+                        Shader.SetGlobalVector("_AsciiPrecipW", new Vector4(skyS.Rain * roofless, skyS.Snow * roofless, skyS.DayK, 0));
+                        Shader.SetGlobalVector("_PrecipBox", new Vector4(camTgt.x, 0, camTgt.z, 34));
+                    }
+                }
             }
         }
         /// all the armour lies in new places every time the hero comes into the world (the places themselves stay)
@@ -1016,7 +1025,7 @@ namespace AsciiHero
             if (where == 0)
             {
                 if (moonLight != null) { moonLight.enabled = true; moonLight.intensity = 0.3f; }
-                heroLight.intensity = 1.6f; Sky.Neutral();
+                heroLight.intensity = 1.6f; Sky.Neutral(); if (precipGo != null) precipGo.SetActive(false);
                 if (moonLight != null) { moonLight.color = Mats.Hex(0x8aa6ff); moonLight.transform.rotation = Quaternion.LookRotation(-new Vector3(-0.12f, 0.788f, -0.604f).normalized); }
                 SetAmbient(Mats.Hex(0x50465a) * 0.45f, Mats.Hex(0x342b32) * 0.45f, Mats.Hex(0x18100a) * 0.45f);
                 if (at == null) ShowToast("Трактир «Пьяный дракон»");
@@ -1068,7 +1077,7 @@ namespace AsciiHero
         static readonly int[] GRASS = { 0, 25, 50, 75, 100 }, RES = { 50, 67, 75, 85, 100 }, FPS = { 30, 60, 90, 120 };
         static readonly string[] DEVELOPERS = { "krocotovski264", "Тёма — программист", "", "Анимация ходьбы и передвижения в бою: набор 100STYLE —", "I. Mason, S. Starke, T. Komura (CC BY 4.0)", "", "Скелеты в пещере: BodyParts3D, DBCLS —", "© The Database Center for Life Science (CC BY 4.0)", "",
             "Звуки: Kenney (CC0); freesound: felix.blume, inchadney, sengjinn, BlueDelta, straget (CC0);",
-            "mystiscool, Corsica_S, D W, inchadney, gregswinford, Benboncan (CC BY)" };
+            "mystiscool, Corsica_S, D W, inchadney, gregswinford, Benboncan (CC BY);", "шаги по воде: Citadel Station 13 (CC BY-SA 3.0)" };
         void LoadSettings()
         {
             bool phone = Application.isMobilePlatform;
@@ -1527,7 +1536,7 @@ namespace AsciiHero
 
         // ---------- actions: attack, guard, dash ----------
         ICloth cloak; readonly List<Renderer> cloakRs = new List<Renderer>(); MaterialPropertyBlock clothMpb;
-        readonly Sky skyS = new Sky(); bool skyOpen;
+        readonly Sky skyS = new Sky(); bool skyOpen; GameObject precipGo;
         Vector3 windV; float windA = 0.7f, windStr = 0.3f, windTarget = 0.4f, windPhaseT, windRun; int windPhase = 1;
         class Piece { public string kind = ""; public List<Renderer> rs = new List<Renderer>(); public float delay, om = 11, zeta = 0.45f, lift = 0.3f, wob, turns = 1, side; public Vector3 axis = Vector3.up; }
         readonly List<Piece> pieces = new List<Piece>(); MaterialPropertyBlock shiftMpb;
