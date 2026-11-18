@@ -284,6 +284,9 @@ namespace AsciiHero
             public int state; public float t, cd, seenT, lostT, dodgeCd, parryCd, leapT, stagger, deadT, barkCd, guardT, strafe = 1, dmgK = 1, think, biteT = -1, biteCd = 2; public bool fortitudeUsed;
             public Vector2 leapV, step; public float stepT; public bool noticed, hurtBark, swingHit, raged; public int combo; public Vector3 lastSeen;
             public BoneArm bones; public bool gone; public Vector3 dFrom, dTo, triB; public float dropY; public Vector2 runDir; public float dDur, dT, trailT, seqT, triCd, summonCd = 8; public int seq; public bool grabber; public Foe grabbed; public float fourK, fourPh, retreatT, throwCd = 3, windT = -1; public bool parryRiposte; public Quaternion[] hunchRest, hunchPre, hunchSet; public bool hunchOn;
+            // the rat's body language: crouch, paws, the nervous head, the tail (a sprung chain of bones)
+            public float crouch, pawK, washK, curlK, jerk, lookY, lookT, fidT, lastStag; public int fid; public Vector3[] feetA = new Vector3[2];
+            public Transform[] tailB; public Vector3[] tailP, tailQ, tailRest; public Transform tailRoot; public Vector3 tailOff; public float tailSeg;
             public bool Dead => hp <= 0;
             public bool Boss => kind == "boss";
         }
@@ -379,6 +382,7 @@ namespace AsciiHero
             };
             var ch = Character.Build(cfgF, actorMats, name);
             var hb = ch.human;
+            Transform[] tB = null; Vector3[] tRest = null; Transform tRoot = null; Vector3 tOff = Vector3.zero; float tSeg = 0;
             // the skin: grey-brown fur on the rats (near black on the chief), grey-green dead flesh on the risen
             var fur = actorMats.Tint("SKIN", boss ? 0x2c2826u : zombie ? 0x6c745au : 0x5e5650u);
             var hair = actorMats.Tint("HAIR", boss ? 0x1c1a18u : zombie ? 0x3a3a30u : 0x4a4440u);
@@ -413,14 +417,37 @@ namespace AsciiHero
                         cape.transform.SetParent(sp1, true);
                     }
                 }
-                // the tail: a long bare tube from the base of the spine, curling down and back
+                // the tail: a long bare tube from the base of the spine, curling down and back - skinned on a chain of
+                // bones that a spring pulls after the body (it lags on a turn and lashes the other way, trails straight
+                // out behind at a run)
                 Transform pel = hb.Bone("pelvis") ?? hb.Bone("root") ?? hb.Bone("spine05");
                 if (pel != null)
                 {
                     var b0 = pel.position + ch.go.transform.forward * -0.12f; var fw = ch.go.transform.forward; var path = new List<Vector3>();
-                    for (int k2 = 0; k2 <= 10; k2++) { float u = k2 / 10f; path.Add(b0 - fw * (0.75f * u * (boss ? 1.3f : 1)) + Vector3.down * (0.75f * u * u) + ch.go.transform.right * (0.18f * Mathf.Sin(u * 3.3f))); }
-                    var tail = MeshGen.Obj(MeshGen.Tube(path, boss ? 0.035f : 0.026f, 6), actorMats.Tint("SKIN", 0xc89a98u), ch.go.transform, Vector3.zero, Quaternion.identity, true, "Tail");
-                    tail.transform.SetParent(pel, true);
+                    for (int k2 = 0; k2 <= TAIL_N; k2++) { float u = k2 / (float)TAIL_N; path.Add(b0 - fw * (0.75f * u * (boss ? 1.3f : 1)) + Vector3.down * (0.75f * u * u) + ch.go.transform.right * (0.18f * Mathf.Sin(u * 3.3f))); }
+                    var tg = new GameObject("Tail"); tg.transform.SetParent(ch.go.transform, false);
+                    var lp = new List<Vector3>(); foreach (var q in path) lp.Add(tg.transform.InverseTransformPoint(q));
+                    float r0 = boss ? 0.04f : 0.03f; var tm = MeshGen.Tube(lp, r0, 6);
+                    var tv = tm.vertices; int ring = 7; var bw = new BoneWeight[tv.Length];
+                    for (int vi = 0; vi < tv.Length; vi++)
+                    {
+                        int ri = Mathf.Min(vi / ring, TAIL_N); float u = ri / (float)TAIL_N;
+                        tv[vi] = lp[ri] + (tv[vi] - lp[ri]) * (1 - 0.7f * u);             // tapering to the tip
+                        bw[vi] = new BoneWeight { boneIndex0 = ri, weight0 = 1 };
+                    }
+                    tm.vertices = tv; tm.boneWeights = bw; tm.RecalculateNormals(); tm.RecalculateBounds();
+                    tB = new Transform[TAIL_N + 1]; var bp = new Matrix4x4[TAIL_N + 1]; tRest = new Vector3[TAIL_N + 1];
+                    var cr = Quaternion.Inverse(ch.go.transform.rotation);
+                    for (int k2 = 0; k2 <= TAIL_N; k2++)
+                    {
+                        var bt = new GameObject("TailBone" + k2).transform; bt.SetParent(ch.go.transform, false); bt.position = path[k2]; bt.rotation = ch.go.transform.rotation;
+                        tB[k2] = bt; bp[k2] = bt.worldToLocalMatrix * tg.transform.localToWorldMatrix; tRest[k2] = cr * (path[k2] - path[0]);
+                    }
+                    tm.bindposes = bp;
+                    var smr = tg.AddComponent<SkinnedMeshRenderer>(); smr.sharedMesh = tm; smr.bones = tB; smr.rootBone = tB[0]; smr.updateWhenOffscreen = true;
+                    smr.sharedMaterial = actorMats.Tint("SKIN", 0xc89a98u);
+                    tRoot = pel; tOff = pel.InverseTransformPoint(b0); tSeg = (path[1] - path[0]).magnitude;
+                    for (int k2 = 1; k2 < TAIL_N; k2++) tSeg = Mathf.Max(tSeg, (path[k2 + 1] - path[k2]).magnitude);
                 }
                 if (boss)
                 {   // bone spikes on the shoulders and a jagged iron crown
@@ -454,7 +481,8 @@ namespace AsciiHero
             ch.go.transform.SetParent(L.root.transform, true); ch.go.transform.position = w; ch.go.transform.rotation = Quaternion.Euler(0, heading * Mathf.Rad2Deg, 0);
             GlyphLayer.Build(ch.go);
             var f = new Foe { id = id, name = name, kind = kind, ch = ch, act = new MotionActor(ch), L = L, p = w, home = w, goal = w };
-            f.bones = arm; f.act.heading = heading; f.act.maxSpeed = boss ? player.maxSpeed * 1.05f : zombie ? 1.3f : player.maxSpeed;       // (as fast as the hero runs)
+            f.bones = arm; f.act.heading = heading;
+            if (tB != null) { f.tailB = tB; f.tailRest = tRest; f.tailRoot = tRoot; f.tailOff = tOff; f.tailSeg = tSeg; } f.act.maxSpeed = boss ? player.maxSpeed * 1.05f : zombie ? 1.3f : player.maxSpeed;       // (as fast as the hero runs)
             f.maxHp = f.hp = boss ? 70 : zombie ? 40 : 30;
             f.think = Random.value * 2; f.cd = 1;
             if (kind == "drunk") { f.act.PlayCut("talk", false, true, 0.7f + 0.3f * Random.value); }
@@ -544,7 +572,7 @@ namespace AsciiHero
                 f.ch.go.transform.position = f.p; f.ch.go.transform.rotation = Quaternion.Euler(0, f.act.heading * Mathf.Rad2Deg, 0);
                 if (f.kind != "zombie") HunchReset(f);
                 f.act.Animate(tNow, dt);
-                if (f.kind != "zombie") { Hunch(f); Fours(f, dist, dt); }
+                if (f.kind != "zombie") RatBody(f, dist, dt);
                 if (f.bones != null) f.bones.Follow();
                 if (f.kind != "drunk") { StrikeHero(f, dist, toH); Bite(f, dist, toH, dt); }
             }
@@ -767,7 +795,7 @@ namespace AsciiHero
                 grabT -= dt;
                 g.p = pos - back; g.act.heading = player.heading;
                 g.ch.go.transform.position = g.p; g.ch.go.transform.rotation = Quaternion.Euler(0, g.act.heading * Mathf.Rad2Deg, 0);
-                g.act.Locomotion(dt, null, 0, null, new Vector2(g.p.x, g.p.z), null); g.act.Animate(tNow, dt);
+                g.act.Locomotion(dt, null, 0, null, new Vector2(g.p.x, g.p.z), null); g.act.Animate(tNow, dt); RatTail(g, dt);
                 return;
             }
             grabT = 0;
@@ -775,7 +803,7 @@ namespace AsciiHero
             if (g.runDir == Vector2.zero) { var cf = sceneCam.transform.forward; g.runDir = new Vector2(cf.x, cf.z).normalized; if (g.runDir == Vector2.zero) g.runDir = Vector2.up; }
             var dd = g.act.Locomotion(dt, g.runDir, 2f, null, new Vector2(g.p.x, g.p.z), null);
             g.p += new Vector3(dd.x, 0, dd.y); g.ch.go.transform.position = g.p; g.ch.go.transform.rotation = Quaternion.Euler(0, g.act.heading * Mathf.Rad2Deg, 0);
-            HunchReset(g); g.act.Animate(tNow, dt); Hunch(g); Fours(g, 99, dt);
+            HunchReset(g); g.act.Animate(tNow, dt); RatBody(g, 99, dt);
             var vp = sceneCam.WorldToViewportPoint(g.p);
             if (vp.x < -0.1f || vp.x > 1.1f || vp.y < -0.1f || vp.y > 1.1f || (g.p - pos).magnitude > 18f) { g.gone = true; g.hp = 0; Destroy(g.ch.go); }
         }
@@ -905,7 +933,8 @@ namespace AsciiHero
         void Fours(Foe f, float dist, float dt)
         {
             float sp = f.act.Velocity.magnitude;
-            bool on = !f.act.Attacking && f.windT <= 0 && f.guardT <= 0 && f.biteT < 0 && f.kind != "drunk";       // (on all fours but to strike or guard)
+            bool fast = sp > f.act.maxSpeed * 0.6f || (f.noticed || f.grabber) && sp > 0.4f || f.fourK > 0.5f && sp > 0.25f;          // (a sneaking walk stays on the hind legs)
+            bool on = fast && !f.act.Attacking && f.windT <= 0 && f.guardT <= 0 && f.biteT < 0 && f.kind != "drunk";       // (on all fours but to strike or guard)
             f.fourK = Mathf.MoveTowards(f.fourK, on ? 1 : 0, dt / (on ? 0.25f : 0.18f));
             if (f.fourK < 0.01f) return;
             float q = Mathf.SmoothStep(0, 1, f.fourK);
@@ -924,6 +953,154 @@ namespace AsciiHero
                 lo.rotation = Quaternion.Slerp(Quaternion.identity, Quaternion.FromToRotation(cl, dl), q) * lo.rotation;
             }
             tr.position = f.p + Vector3.down * (0.1f * q);
+        }
+        const int TAIL_N = 10;
+        /// a rat's body language, laid over the motion: low on bent, heel-raised legs; the forearms held up before the
+        /// chest like a rodent's front paws, the hands hanging; a nervous head that jerks round and holds, sniffs, looks
+        /// over the shoulder, and washes the snout with both paws; curling up under the forearms to guard; jerking back
+        /// when hit. Sharp starts and stops, no easing.
+        void RatBody(Foe f, float dist, float dt)
+        {
+            var tr = f.ch.go.transform; var hb = f.ch.human;
+            Hunch(f);
+            // where the feet are before the body is lowered (they stay there: the knees bend instead)
+            Transform[] hipB = new Transform[2], kneeB = new Transform[2], footB = new Transform[2];
+            for (int s = 0; s < 2; s++)
+            {
+                string sd = s == 0 ? "L" : "R";
+                hipB[s] = hb.Bone("upperleg01." + sd); kneeB[s] = hb.Bone("lowerleg01." + sd); footB[s] = hb.Bone("foot." + sd);
+                if (footB[s] != null) f.feetA[s] = footB[s].position;
+            }
+            Fours(f, dist, dt);
+            bool drunk = f.kind == "drunk";
+            if (drunk) { RatTail(f, dt); return; }
+            Vector3 ax = tr.right, fw = tr.forward, up = Vector3.up;
+            float sp = f.act.Velocity.magnitude, four = Mathf.SmoothStep(0, 1, f.fourK), stand = 1 - four;
+            bool atk = f.act.Attacking || f.windT > 0, curl = f.guardT > 0 && !f.Boss, cut = f.act.InCut;
+            // hit: a jerk back, the tail lashing
+            if (f.stagger > f.lastStag + 0.05f)
+            {
+                f.jerk = 1;
+                if (f.tailQ != null) { float sg = Random.value < 0.5f ? -1 : 1; for (int i = 1; i <= TAIL_N; i++) f.tailQ[i] -= ax * (sg * 0.07f * i / TAIL_N); }
+            }
+            f.lastStag = f.stagger; f.jerk = Mathf.MoveTowards(f.jerk, 0, dt * 4);
+            // -- the legs: crouched low, coiled lower to spring (the wind-up, a dodge), half up in the blow
+            float cr = f.Boss ? 0.06f : 0.16f;
+            if (curl) cr += 0.1f;
+            if (f.leapT > 0) cr += 0.08f;
+            if (f.windT > 0) cr *= 1.35f; else if (f.act.Attacking) cr *= 0.45f;
+            f.crouch = Mathf.MoveTowards(f.crouch, cr * stand, dt * 1.6f);
+            float heel = (f.Boss ? 0.03f : 0.06f) * stand;
+            tr.position += Vector3.down * f.crouch;
+            for (int s = 0; s < 2; s++)
+            {
+                if (hipB[s] == null || kneeB[s] == null || footB[s] == null) continue;
+                var fq = footB[s].rotation;
+                LegIK(hipB[s], kneeB[s], footB[s], f.feetA[s] + up * heel, fw + ax * (s == 0 ? -0.2f : 0.2f));
+                footB[s].rotation = Quaternion.AngleAxis(32 * heel / 0.06f, ax) * fq;          // up on the toes
+            }
+            // -- the nervous head (not the chief: he does not fidget)
+            if (!f.Boss)
+            {
+                f.fidT -= dt;
+                if (f.fidT <= 0)
+                {
+                    if (f.fid != 0 || f.lookT != 0) { f.fid = 0; f.lookT = 0; f.fidT = cut ? 0.25f + 0.4f * Random.value : 0.4f + 1.2f * Random.value; }
+                    else if (f.noticed) { f.lookT = (Random.value < 0.5f ? -1 : 1) * (8 + 10 * Random.value); f.fidT = 0.15f + 0.25f * Random.value; }
+                    else
+                    {
+                        float r = Random.value; bool still = sp < 0.2f && !cut;
+                        if (r < 0.45f || cut || sp > 1.5f) { f.fid = 1; f.lookT = (Random.value < 0.5f ? -1 : 1) * (sp > 1.5f ? 30 : 45 + 45 * Random.value); f.fidT = 0.35f + 0.8f * Random.value; }
+                        else if (r < 0.68f) { f.fid = 2; f.fidT = 0.9f + 0.8f * Random.value; }
+                        else if (r < 0.84f && still) { f.fid = 3; f.fidT = 1.6f + 1.2f * Random.value; }
+                        else { f.fid = 4; f.lookT = (Random.value < 0.5f ? -1 : 1) * 120; f.fidT = 0.6f + 0.5f * Random.value; }
+                    }
+                }
+                if (f.fid == 3 && (sp > 0.3f || atk || f.noticed)) { f.fid = 0; f.fidT = 0.3f; }
+            }
+            f.lookY = Mathf.MoveTowards(f.lookY, f.lookT, 900 * dt);          // a snap, then a hold
+            // -- the arms: the paws before the chest; washing; curled up under the forearms
+            bool free = !atk && !cut && !f.Boss && f.grabbed == null;
+            f.pawK = Mathf.MoveTowards(f.pawK, free && !curl ? stand : 0, dt * 5);
+            f.washK = Mathf.MoveTowards(f.washK, f.fid == 3 ? 1 : 0, dt * 4);
+            f.curlK = Mathf.MoveTowards(f.curlK, curl ? 1 : 0, dt * 9);
+            float pw = f.pawK * (1 - f.curlK);
+            if (pw > 0.01f || f.curlK > 0.01f)
+                foreach (var side in new[] { "L", "R" })
+                {
+                    Transform u = hb.Bone("upperarm01." + side), lo = hb.Bone("lowerarm01." + side), w = hb.Bone("wrist." + side);
+                    if (u == null || lo == null || w == null) continue;
+                    var sv = ax * (side == "L" ? -1 : 1);
+                    float rub = Mathf.Sin(f.t * 16 + (side == "L" ? 0 : 3.1f));
+                    Vector3 du = Vector3.Lerp((-up * 0.85f + fw * 0.45f + sv * 0.12f).normalized, (-up * 0.35f + fw * 0.9f + sv * 0.1f).normalized, f.washK);
+                    Vector3 dl = Vector3.Lerp((fw * 0.75f + up * 0.35f - sv * 0.25f).normalized, (up * 0.95f + fw * (0.05f + 0.15f * rub) - sv * 0.3f).normalized, f.washK);
+                    du = Vector3.Slerp(du, (fw * 0.7f + up * 0.55f + sv * 0.2f).normalized, f.curlK);          // forearms over the head
+                    dl = Vector3.Slerp(dl, (-sv * 0.85f + up * 0.35f + fw * 0.1f).normalized, f.curlK);
+                    float k = Mathf.Max(pw, f.curlK);
+                    var cu = (lo.position - u.position).normalized; u.rotation = Quaternion.Slerp(Quaternion.identity, Quaternion.FromToRotation(cu, du), k) * u.rotation;
+                    var cl = (w.position - lo.position).normalized; lo.rotation = Quaternion.Slerp(Quaternion.identity, Quaternion.FromToRotation(cl, dl), k) * lo.rotation;
+                    w.rotation = Quaternion.AngleAxis(70 * pw * (1 - f.washK), ax) * w.rotation;          // the hands hang
+                }
+            // -- the spine and the head: the curl, the jerk back, the sniff, the wash, the look round
+            void B(string n, float deg, Vector3 axis) { if (Mathf.Abs(deg) < 0.01f) return; var b = hb.Bone(n); if (b != null) b.rotation = Quaternion.AngleAxis(deg, axis) * b.rotation; }
+            float sniff = f.fid == 2 ? 1 : 0;
+            B("spine03", 12 * f.curlK - 16 * f.jerk, ax); B("spine01", 8 * f.curlK - 10 * f.jerk, ax);
+            B("head", 22 * f.curlK + 18 * f.washK - 22 * sniff + sniff * 4 * Mathf.Sin(f.t * 45) + f.jerk * 10 * Mathf.Sin(f.t * 60), ax);
+            B("neck01", -10 * sniff, ax);
+            float ly = f.lookY;
+            B("spine03", ly * 0.25f, up); B("neck01", ly * 0.35f, up); B("head", ly * 0.4f, up);
+            RatTail(f, dt);
+        }
+        static void LegIK(Transform hip, Transform knee, Transform foot, Vector3 target, Vector3 pole)
+        {
+            Vector3 hp = hip.position, kp = knee.position, ap = foot.position;
+            float l1 = (kp - hp).magnitude, l2 = (ap - kp).magnitude; if (l1 < 1e-4f || l2 < 1e-4f) return;
+            Vector3 toT = target - hp; float d = Mathf.Clamp(toT.magnitude, Mathf.Abs(l1 - l2) + 0.01f, (l1 + l2) * 0.995f); toT.Normalize();
+            Vector3 perp = pole - toT * Vector3.Dot(pole, toT); if (perp.sqrMagnitude < 1e-8f) return; perp.Normalize();
+            float a = Mathf.Acos(Mathf.Clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1, 1));
+            Vector3 nk = hp + toT * (Mathf.Cos(a) * l1) + perp * (Mathf.Sin(a) * l1);
+            hip.rotation = Quaternion.FromToRotation((kp - hp).normalized, (nk - hp).normalized) * hip.rotation;
+            Vector3 kp2 = knee.position, ap2 = foot.position;
+            knee.rotation = Quaternion.FromToRotation((ap2 - kp2).normalized, (hp + toT * d - kp2).normalized) * knee.rotation;
+        }
+        /// the tail: each joint pulled toward its place (stiff at the root, loose at the tip, so the tip lags and
+        /// lashes), drooping to the floor at rest, straight out behind at a run; kept above the ground
+        void RatTail(Foe f, float dt)
+        {
+            if (f.tailB == null || f.tailRoot == null || dt <= 0) return;
+            var tr = f.ch.go.transform; int N = TAIL_N;
+            Vector3 root = f.tailRoot.TransformPoint(f.tailOff);
+            Vector3 runDir = (-tr.forward * 0.985f + Vector3.up * 0.17f).normalized;
+            float runK = Mathf.Clamp01(f.act.Velocity.magnitude / Mathf.Max(0.1f, f.act.maxSpeed * 0.7f)) * (f.Dead ? 0 : 1);
+            float ground = f.p.y + 0.025f;
+            bool fresh = f.tailP == null || (f.tailP[0] - root).sqrMagnitude > 1f;
+            if (fresh) { f.tailP = new Vector3[N + 1]; f.tailQ = new Vector3[N + 1]; }
+            float kRoot = 1 - Mathf.Exp(-dt * 24), kTip = 1 - Mathf.Exp(-dt * 4.5f);
+            for (int i = 0; i <= N; i++)
+            {
+                float u = i / (float)N;
+                Vector3 rest = tr.rotation * f.tailRest[i], run = runDir * (f.tailSeg * i) + tr.right * (0.04f * u * Mathf.Sin(f.t * 9 + i * 0.7f));
+                Vector3 tgt = root + Vector3.Lerp(rest, run, runK) + tr.right * (0.03f * u * Mathf.Sin(Time.time * 1.7f + i * 0.5f));
+                if (fresh) { f.tailP[i] = f.tailQ[i] = tgt; continue; }
+                if (i == 0) { f.tailP[0] = f.tailQ[0] = root; continue; }
+                Vector3 v = f.tailP[i] - f.tailQ[i]; f.tailQ[i] = f.tailP[i];
+                f.tailP[i] += v * 0.9f + Vector3.down * (2f * dt * dt);
+                f.tailP[i] += (tgt - f.tailP[i]) * Mathf.Lerp(kRoot, kTip, u);
+            }
+            for (int it = 0; it < 2; it++)
+                for (int i = 1; i <= N; i++)
+                {
+                    var d = f.tailP[i] - f.tailP[i - 1]; float m = d.magnitude;
+                    if (m > 1e-5f) f.tailP[i] = f.tailP[i - 1] + d * (f.tailSeg / m);
+                    if (f.tailP[i].y < ground) f.tailP[i].y = ground;
+                }
+            for (int i = 0; i <= N; i++)
+            {
+                var b = f.tailB[i]; b.position = f.tailP[i];
+                int a0 = Mathf.Min(i, N - 1);
+                Vector3 restD = tr.rotation * (f.tailRest[a0 + 1] - f.tailRest[a0]), curD = f.tailP[a0 + 1] - f.tailP[a0];
+                b.rotation = (curD.sqrMagnitude > 1e-8f && restD.sqrMagnitude > 1e-8f ? Quaternion.FromToRotation(restD, curD) : Quaternion.identity) * tr.rotation;
+            }
         }
         /// a long dash to a point (the chief): in a set time, from where he stands
         void DashTo(Foe f, Vector3 to, float time)
@@ -1004,6 +1181,7 @@ namespace AsciiHero
         void Die(Foe f)
         {
             BestMark(f.kind, true);
+            f.ch.go.transform.position = f.p;          // (out of the crouch: he falls from where he stands)
             f.deadT = 0; f.act.guardHeld = false; f.act.PlayCut("die", false, false, 1, true); SpawnPuff(f.p + Vector3.up * 0.8f, 0.06f, Vector3.up * 0.4f, 0.8f);
             Sound("plates", 0.6f, f.p);
             if (f.Boss) { Play("boss_dead"); autoAfterScene = true; }
@@ -1015,6 +1193,7 @@ namespace AsciiHero
             f.deadT += dt;
             f.act.Locomotion(dt, null, 0, null, new Vector2(f.p.x, f.p.z), null); f.act.Animate(tNow, dt);
             if (f.bones != null) f.bones.Follow();
+            RatTail(f, dt);
         }
         Vector2? StoryNearest(Vector2? best, ref float bd)
         {
