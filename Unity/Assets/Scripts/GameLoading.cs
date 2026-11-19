@@ -14,7 +14,7 @@ namespace AsciiHero
     public partial class Game
     {
         // ---- the intro ----
-        VideoPlayer introVp; RenderTexture introRT; bool introOn;
+        VideoPlayer introVp; RenderTexture introRT; bool introOn, introPending = true;      // (pending: from the first frame until the intro is over or skipped - only black on the screen, no flash of the loading)
         IEnumerator PlayIntro()
         {
             // (from StreamingAssets as it is: the build machine cannot import the movie as a clip)
@@ -27,17 +27,17 @@ namespace AsciiHero
             introVp.Prepare();
             float t0 = Time.realtimeSinceStartup;
             while (!introVp.isPrepared && !err && Time.realtimeSinceStartup - t0 < 3f) yield return null;
-            if (!introVp.isPrepared) { Debug.LogWarning("Заставка не подготовилась: пропущена"); Destroy(go); introRT.Release(); introRT = null; yield break; }
+            if (!introVp.isPrepared) { Debug.LogWarning("Заставка не подготовилась: пропущена"); Destroy(go); introRT.Release(); introRT = null; introPending = false; yield break; }
             introVp.SetDirectAudioVolume(0, Mathf.Clamp01(setSound / 100f));
             introOn = true; introVp.Play();
             float len = (float)introVp.length; if (len <= 0) len = 6.5f; t0 = Time.realtimeSinceStartup;
             while (!err && Time.realtimeSinceStartup - t0 < len + 1.5f && (introVp.isPlaying || Time.realtimeSinceStartup - t0 < 0.5f)) yield return null;
-            introOn = false; Destroy(go); introRT.Release(); introRT = null;
+            introOn = false; introPending = false; Destroy(go); introRT.Release(); introRT = null;
         }
         void IntroGUI(float W, float H)
         {
             Fill(new Rect(0, 0, W, H), Color.black);
-            if (introRT == null) return;
+            if (introRT == null || !introOn) return;
             float a = introRT.width / (float)introRT.height, w = W, h = W / a; if (h > H) { h = H; w = H * a; }
             GUI.DrawTexture(new Rect((W - w) / 2, (H - h) / 2, w, h), introRT, ScaleMode.StretchToFill, false);
         }
@@ -53,28 +53,27 @@ namespace AsciiHero
             dt = Mathf.Min(dt, 1 / 30f);                         // (after a long frame the bar runs on, it does not leap)
             loadShown = Mathf.MoveTowards(loadShown, loadTarget, dt * LOAD_PACE);
         }
+        /// the bar is smoke: the part done is a billow of the interface's smoke growing from the left, a thin trace
+        /// shows how far it has to go, motes break off its head and rise
         void LoadBar(float W, float H, string label, float p, float alpha = 1)
         {
-            float dt = Mathf.Min(Time.unscaledDeltaTime, 1 / 20f);
-            float pw = Mathf.Min(560 * k, W * 0.52f), ph = 46 * k;
-            var panel = new Rect((W - pw) / 2, H - (H - safe.yMax) - ph - 26 * k, pw, ph);
+            float dt = Mathf.Min(Time.unscaledDeltaTime, 1 / 20f), t = Time.unscaledTime;
+            float bw = Mathf.Min(560 * k, W * 0.52f), bh = 14 * k;
+            var bar = new Rect((W - bw) / 2, H - (H - safe.yMax) - 44 * k, bw, bh);
             var old = GUI.color; GUI.color = new Color(1, 1, 1, alpha);
-            Smoke(panel, false, 0, 0.95f);
-            var bar = new Rect(panel.x + 18 * k, panel.y + ph * 0.62f, pw - 36 * k, Mathf.Max(3, 5 * k));
-            GUI.Label(new Rect(panel.x + 18 * k, panel.y + 4 * k, pw - 36 * k, 18 * k), label + "…", sSmall);
-            GUI.Label(new Rect(panel.x + 18 * k, panel.y + 4 * k, pw - 36 * k, 18 * k), Mathf.RoundToInt(p * 100) + " %", sRight);
-            Fill(bar, new Color(0.16f, 0.13f, 0.24f, 0.9f * alpha));
-            float t = Time.unscaledTime, fw = bar.width * Mathf.Clamp01(p);
-            // the filled part shimmers, its head glows
-            Fill(new Rect(bar.x, bar.y, fw, bar.height), new Color(0.55f + 0.08f * Mathf.Sin(t * 3), 0.38f, 0.95f, alpha));
-            if (fw > 2) Fill(new Rect(bar.x + fw - 4 * k, bar.y - 2 * k, 4 * k, bar.height + 4 * k), new Color(0.9f, 0.8f, 1f, 0.9f * alpha));
-            // motes: from the head of the bar and, fewer, from along the filled part, rising and drifting off as smoke
-            moteAcc += dt * (40 + 30 * Mathf.Abs(loadTarget - loadShown) * 10);
+            GUI.Label(new Rect(bar.x, bar.y - 26 * k, bw, 18 * k), label + "…", sSmall);
+            GUI.Label(new Rect(bar.x, bar.y - 26 * k, bw, 18 * k), Mathf.RoundToInt(p * 100) + " %", sRight);
+            // the way to go: a faint dotted trace
+            for (float x = bar.x; x < bar.xMax; x += 7 * k) Fill(new Rect(x, bar.center.y - 0.5f * k, 2 * k, Mathf.Max(1, k)), new Color(0.55f, 0.45f, 0.8f, 0.35f * alpha));
+            // the part done: smoke (its billows and wisps are the interface's own, drawn by the smoke layer)
+            float fw = bw * Mathf.Clamp01(p);
+            if (fw > 6 * k) Smoke(new Rect(bar.x, bar.y, fw, bh), true, 0, 0.95f);
+            moteAcc += dt * (30 + 300 * Mathf.Abs(loadTarget - loadShown));
             while (moteAcc >= 1 && motes.Count < 140)
             {
-                moteAcc -= 1; bool head = Random.value < 0.6f;
-                float x = head ? bar.x + fw + Random.Range(-3f, 2f) * k : bar.x + Random.value * Mathf.Max(1, fw);
-                motes.Add(new Mote { p = new Vector2(x, bar.y + Random.Range(-1f, 1f) * k), v = new Vector2(Random.Range(-14f, 6f) * k, -Random.Range(10f, 34f) * k), life = Random.Range(0.6f, 1.4f), size = Random.Range(1.2f, 2.8f) * k });
+                moteAcc -= 1; bool head = Random.value < 0.65f;
+                float x = head ? bar.x + fw + Random.Range(-4f, 2f) * k : bar.x + Random.value * Mathf.Max(1, fw);
+                motes.Add(new Mote { p = new Vector2(x, bar.center.y + Random.Range(-bh / 2, bh / 2)), v = new Vector2(Random.Range(-14f, 8f) * k, -Random.Range(10f, 34f) * k), life = Random.Range(0.6f, 1.4f), size = Random.Range(1.2f, 2.8f) * k });
             }
             if (moteAcc > 1) moteAcc = 1;
             for (int i = motes.Count - 1; i >= 0; i--)

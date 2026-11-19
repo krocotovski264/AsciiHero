@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.1.3 · Unity";
+        public const string VERSION = "beta 0.1.4 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -2305,7 +2305,7 @@ namespace AsciiHero
             uiRects.Clear();
             float W = Screen.width, H = Screen.height;
             if (LogHub.errors > seenErrors) { seenErrors = LogHub.errors; if (setDev) consoleOpen = true; }
-            if (introOn) { IntroGUI(W, H); FinishGui(); return; }
+            if (introOn || introPending) { IntroGUI(W, H); FinishGui(); return; }      // (right after Unity's splash: black, then the intro)
             if (!ready || ascii == null) { LoadingScreen(W, H); ConsoleUI(W, H, true); FinishGui(); return; }
             var vr = ViewRect();
             if (!ascii.plain)
