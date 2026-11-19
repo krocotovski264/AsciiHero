@@ -15,6 +15,33 @@ using UnityEngine;
 
 namespace AsciiHero
 {
+    /// long builds cut into frames: the work yields a frame when this frame's slice of time is spent (so the loading's
+    /// smoke goes on moving). Run drains the same work at once, with no frames between.
+    public static class Slicer
+    {
+        public static float budget = 0.008f; static float t0;
+        public static bool Due { get { return Time.realtimeSinceStartup - t0 > budget; } }
+        public static void Mark() { t0 = Time.realtimeSinceStartup; }
+        /// work with nested work (an IEnumerator yielded runs inside): null from it = a frame may pass here
+        public static System.Collections.IEnumerator Frames(System.Collections.IEnumerator work)
+        {
+            var st = new Stack<System.Collections.IEnumerator>(); st.Push(work); Mark();
+            while (st.Count > 0)
+            {
+                var top = st.Peek();
+                if (!top.MoveNext()) { st.Pop(); continue; }
+                var sub = top.Current as System.Collections.IEnumerator;
+                if (sub != null) { st.Push(sub); continue; }
+                if (Due) { yield return null; Mark(); }
+            }
+        }
+        public static void Run(System.Collections.IEnumerator work)
+        {
+            var st = new Stack<System.Collections.IEnumerator>(); st.Push(work);
+            while (st.Count > 0) { var top = st.Peek(); if (!top.MoveNext()) { st.Pop(); continue; } var sub = top.Current as System.Collections.IEnumerator; if (sub != null) st.Push(sub); }
+        }
+    }
+
     /// a tiny JSON reader: objects are Dictionary<string, object>, arrays List<object>, numbers double
     public static class MiniJson
     {
@@ -244,18 +271,23 @@ namespace AsciiHero
         // ---------------- building ----------------
         public bool outdoor, useVis = true, gridCollide = true; public Tavern inn; HashSet<long> mountain; float margin = 3;
         public static StoryLocation Build(Mats mats, StoryMap map, string region, HashSet<long> tileSet, bool withCircles, List<StoryPassage> allPassages, Vector3 at, int seed, bool outdoor = false, HashSet<long> mountainTiles = null)
+        { var o = new StoryLocation[1]; Slicer.Run(BuildCo(o, mats, map, region, tileSet, withCircles, allPassages, at, seed, outdoor, mountainTiles)); return o[0]; }
+        public static System.Collections.IEnumerator BuildCo(StoryLocation[] o, Mats mats, StoryMap map, string region, HashSet<long> tileSet, bool withCircles, List<StoryPassage> allPassages, Vector3 at, int seed, bool outdoor = false, HashSet<long> mountainTiles = null)
         {
+            float tb = Time.realtimeSinceStartup;
             var L = new StoryLocation { map = map, region = region, rnd = new System.Random(seed), id = "story:" + region, outdoor = outdoor, useVis = !outdoor, mountain = mountainTiles, margin = outdoor ? 11 : 3 };
             L.root = new GameObject("Story_" + region);
             foreach (var t in map.tiles) if (tileSet.Contains(Key(t.i, t.j))) L.myTiles.Add(t);
             if (withCircles) L.myCircles.AddRange(map.circles);
             foreach (var p in allPassages) if (p.Has(region)) L.passages.Add(p);
-            L.Grid();
-            L.Geometry(mats);
-            L.PlaceAt(at);
+            o[0] = L;
+            L.Grid(); yield return null;
+            yield return L.GeometryCo(mats);
+            L.PlaceAt(at); yield return null;
             L.CollectCull();
-            return L;
+            Debug.Log(region + ": построено за " + ((Time.realtimeSinceStartup - tb) * 1000).ToString("0") + " мс (" + L.tLog + ")");
         }
+        string tLog = "";
         /// an inn: the test world's tavern, its walk grid from its own walls and furniture (map x = -local x)
         public static StoryLocation BuildInn(Mats mats, StoryMap map, string region, List<StoryPassage> allPassages, Vector3 at, int seed)
         {
@@ -340,9 +372,10 @@ namespace AsciiHero
         static string FloorMat(string b) { return b == "cave" ? "CAVEFLOOR" : b == "tavern" ? "FLOOR" : b == "meadow" ? "GROUND" : b == "road" ? "ROAD" : b == "snow" ? "SAND" : b == "wastes" ? "SAND" : "GROUND"; }
         string WallStyle(string b) { return b == "cave" || b == "crystal" ? "rock" : b == "tavern" || b == "city" || b == "grim" ? "plank" : "hedge"; }
 
-        void Geometry(Mats mats)
+        System.Collections.IEnumerator GeometryCo(Mats mats)
         {
-            var T = root.transform;
+            var T = root.transform; float tp = Time.realtimeSinceStartup;
+            System.Func<string, string> Lap = nm => { float n = Time.realtimeSinceStartup; string r = nm + " " + ((n - tp) * 1000).ToString("0") + "; "; tp = n; return r; };
             // floors: tiles as they are, a round arena as rings of small cells where no tile is
             foreach (var t in myTiles)
             {
@@ -374,10 +407,12 @@ namespace AsciiHero
                 m.RecalculateNormals(); m.RecalculateBounds(); MeshGen.AddGlyphUV(m, false);
                 MeshGen.Obj(m, mats[matName], T, Vector3.zero, Quaternion.identity, false, "Ground");
             }
-            Fields();
-            Rock(mats);
-            foreach (var g in passages) PassageLook(mats, g);
-            Decor(mats);
+            tLog += Lap("пол"); yield return null;
+            Fields(); tLog += Lap("поля"); yield return null;
+            yield return Rock(mats); tLog += Lap("скала");
+            foreach (var g in passages) { PassageLook(mats, g); yield return null; }
+            tLog += Lap("проходы");
+            Decor(mats); tLog += Lap("убранство");
         }
 
         // ================= the walls: the surface of one field over the whole place =================
@@ -467,7 +502,7 @@ namespace AsciiHero
             float grain = (Cave.N3(x * 5.1f + nOx, y * 5.1f, z * 5.1f + nOz) - 0.5f) * 0.05f;
             return f + (big - crease + 0.08f + grain) * rough;
         }
-        void Rock(Mats mats)
+        System.Collections.IEnumerator Rock(Mats mats)
         {
             var T = root.transform;
             var mRock = new Material(mats["WETROCK"]) { name = "StoryRock" }; mRock.SetFloat("_SeeThrough", 1); mRock.SetFloat("_Cull", 0); mRock.SetVector("_GlyphCell", new Vector4(0.12f, 0.2f, 0, 0));
@@ -484,6 +519,7 @@ namespace AsciiHero
             for (float cz = Z0; cz < Z1; cz += CH)
                 for (float cx = X0; cx < X1; cx += CH)
                 {
+                    yield return null;            // (a frame may pass between the chunks)
                     // anything of the rock here? (between the edge of the ground and the end of the band)
                     bool any = false;
                     float maxBand = mountain != null && mountain.Count > 0 ? 9.6f : 2.2f;

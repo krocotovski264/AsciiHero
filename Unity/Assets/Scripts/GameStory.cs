@@ -25,9 +25,11 @@ namespace AsciiHero
 
         StoryLocation SLoc(string region) { foreach (var l in sLocs) if (l.region == region) return l; return null; }
 
-        void BuildStory()
+        void BuildStory() { Slicer.Run(BuildStoryCo()); }
+        /// the story's places, cut into frames under the loading (Slicer.Frames)
+        System.Collections.IEnumerator BuildStoryCo()
         {
-            smap = StoryMap.Load("Maps/start");
+            smap = StoryMap.Load("Maps/start"); yield return null;
             // the places: every run of tiles of one kind joined side to side - inns (tavern), caves (cave, the round
             // arenas with them), the open land (everything else)
             string Kind(string b) { return b == "tavern" ? "inn" : b == "cave" || b == "crystal" ? "cave" : "out"; }
@@ -107,9 +109,11 @@ namespace AsciiHero
                 else
                 {
                     bool circles = circleRegion.Contains(kv.Key);
-                    L = StoryLocation.Build(mats, smap, kv.Key, regionTiles[kv.Key], circles, sPass, at, 11 + k2, kv.Value == "out", kv.Value == "out" ? caveTiles : null);
+                    var o = new StoryLocation[1];
+                    yield return StoryLocation.BuildCo(o, mats, smap, kv.Key, regionTiles[kv.Key], circles, sPass, at, 11 + k2, kv.Value == "out", kv.Value == "out" ? caveTiles : null);
+                    L = o[0];
                 }
-                sLocs.Add(L);
+                sLocs.Add(L); yield return null;
             }
             sMain = null; foreach (var l in sLocs) if (l.outdoor && sMain == null) sMain = l;
             foreach (var l in sLocs)
@@ -120,12 +124,14 @@ namespace AsciiHero
                 if (kind == "out") { l.ambSky = Mats.Hex(0x8fa4d8) * 0.55f; l.ambEq = Mats.Hex(0x4a5a58) * 0.55f; l.ambGround = Mats.Hex(0x1a2414) * 0.55f; l.moonK = 1; l.heroLightK = 1.6f; l.exposure = 1.3f; }
                 else { l.ambSky = Mats.Hex(0x40506a) * 0.16f; l.ambEq = Mats.Hex(0x303840) * 0.14f; l.ambGround = Mats.Hex(0x181410) * 0.12f; l.moonK = 0; l.heroLightK = 1.05f; l.exposure = 1.3f; }
                 if (kind == "inn") { l.ambSky = Mats.Hex(0x50465a) * 0.45f; l.ambEq = Mats.Hex(0x342b32) * 0.45f; l.ambGround = Mats.Hex(0x18100a) * 0.45f; l.heroLightK = 1f; }
+                yield return null;
                 GlyphLayer.Build(l.root);
                 CollectGlows(l.root);
                 var LL = l; l.addRipple = (x, z, a) => AddRipple(x + LL.origin.x, z + LL.origin.z, a);
                 l.onDrip = (x, z) => Sound("drip", 0.5f, new Vector3(x + LL.origin.x, 0, z + LL.origin.z));
             }
-            LoadScenes();
+            yield return null;
+            LoadScenes(); yield return null;
             SpawnStoryThings();          // (while the places are on: the characters of what is switched off are not laid out)
             storyFresh = true;
             foreach (var l in sLocs) l.SetActive(false);

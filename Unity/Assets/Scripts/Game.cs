@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.1.5 · Unity";
+        public const string VERSION = "beta 0.1.6 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -1196,7 +1196,7 @@ namespace AsciiHero
                 if (any)
                 {   // a game is going: go on with the newest save, or start again (asked first)
                     float hw = (bw - 8 * k) / 2;
-                    if (Button(new Rect(cx - bw / 2, y, hw, bh), "ПРОДОЛЖИТЬ")) { int ns = NewestSave(); if (ns != -2) RunLoading("Загрузка сохранения", () => { worldBuilt = true; if (tavern == null) SetupWorld(); }, () => { if (smap == null) BuildStory(); }, () => LoadGame(ns)); }
+                    if (Button(new Rect(cx - bw / 2, y, hw, bh), "ПРОДОЛЖИТЬ")) { int ns = NewestSave(); if (ns != -2) RunLoading("Загрузка сохранения", () => { worldBuilt = true; if (tavern == null) SetupWorld(); }, () => { if (smap == null) loadWork = BuildStoryCo(); }, () => LoadGame(ns)); }
                     if (Button(new Rect(cx - bw / 2 + hw + 8 * k, y, hw, bh), "НОВАЯ ИГРА")) confirmNew = true;
                 }
                 else if (Button(new Rect(cx - bw / 2, y, bw, bh), "ИГРАТЬ")) NewGame();
@@ -2504,7 +2504,7 @@ namespace AsciiHero
             if (Button(new Rect(x0, bottom, setDev ? (cw - 30 * k) / 6 : bw3, 32 * k), "СЛУЧ.")) Randomize();
             if (!setDev)
             {   // the game: the first location (the test places are the developer's)
-                if (Button(new Rect(x0 + bw3 + 6 * k, bottom, cw - bw3 - 6 * k, 32 * k), "В ПУТЬ ▶", true)) { PlayerPrefs.SetInt("char_made", 1); PlayerPrefs.Save(); RunLoading("Мир собирается", () => { worldBuilt = true; if (tavern == null) SetupWorld(); }, () => { if (smap == null) BuildStory(); }, () => StartStory(false)); }
+                if (Button(new Rect(x0 + bw3 + 6 * k, bottom, cw - bw3 - 6 * k, 32 * k), "В ПУТЬ ▶", true)) { PlayerPrefs.SetInt("char_made", 1); PlayerPrefs.Save(); RunLoading("Мир собирается", () => { worldBuilt = true; if (tavern == null) SetupWorld(); }, () => { if (smap == null) loadWork = BuildStoryCo(); }, () => StartStory(false)); }
                 return;
             }
             float bw4 = (cw - 30 * k) / 6;

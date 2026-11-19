@@ -26,7 +26,7 @@ namespace AsciiHero
             if (installed) return; installed = true;
             try { file = new StreamWriter(FilePath, false) { AutoFlush = true }; } catch (Exception) { file = null; }
             Application.logMessageReceivedThreaded += OnLog;
-            Debug.Log("ASCII Hero " + Application.version + " · Unity " + Application.unityVersion + " · " + SystemInfo.deviceModel);
+            Debug.Log("ASCII Hero " + Game.VERSION + " · движок " + Application.unityVersion + " · " + SystemInfo.deviceModel);
             Debug.Log("GPU: " + SystemInfo.graphicsDeviceName + " · " + SystemInfo.graphicsDeviceType + " · " + SystemInfo.graphicsDeviceVersion);
             Debug.Log("Screen " + Screen.width + "×" + Screen.height + " dpi " + Screen.dpi + " · RAM " + SystemInfo.systemMemorySize + " MB · ARGBHalf RT " +
                       SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGBHalf) + " · colour space " + QualitySettings.activeColorSpace);

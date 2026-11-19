@@ -87,6 +87,7 @@ namespace AsciiHero
         }
         /// a loading over everything: steps one after another (a frame between them, so the bar is drawn), the bar
         /// running after them; the screen stays until the bar is full, then fades
+        IEnumerator loadWork;        // (a step may hand over work to be cut into frames)
         void RunLoading(string label, params System.Action[] steps) { if (!loadBusy) StartCoroutine(LoadingCo(label, steps)); }
         IEnumerator LoadingCo(string label, System.Action[] steps)
         {
@@ -101,7 +102,21 @@ namespace AsciiHero
             {
                 loadTarget = Mathf.Max(loadTarget, (i + 0.25f) / steps.Length);
                 float t0 = Time.realtimeSinceStartup;
-                try { steps[i](); } catch (System.Exception e) { Debug.LogException(e); }
+                IEnumerator work = null;
+                try { steps[i](); work = loadWork; } catch (System.Exception e) { Debug.LogException(e); }
+                loadWork = null;
+                if (work != null)
+                {   // a step cut into frames: the bar keeps moving through it
+                    var frm = Slicer.Frames(work);
+                    while (true)
+                    {
+                        bool more;
+                        try { more = frm.MoveNext(); } catch (System.Exception e) { Debug.LogException(e); more = false; }
+                        if (!more) break;
+                        loadTarget = Mathf.Min((i + 0.95f) / steps.Length, loadTarget + 0.004f);
+                        yield return null;
+                    }
+                }
                 sw.Append(" шаг ").Append(i + 1).Append(" ").Append(((Time.realtimeSinceStartup - t0) * 1000).ToString("0")).Append(" мс;");
                 loadTarget = (i + 1f) / steps.Length;
                 yield return null;
