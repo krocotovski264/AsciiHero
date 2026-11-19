@@ -42,6 +42,7 @@ Shader "AsciiHero/Water"
             TEXTURE2D(_AsciiNDTex); SAMPLER(sampler_AsciiNDTex);
             SAMPLER(ascii_point_clamp_sampler); float _AsciiDepthLit;
             float _AsciiRows, _AsciiTime; float4 _GlyphInk[224];
+            float4 _WxIce;      // x how far the ice has come in from the shore (0 .. 1 frozen over), y snow lying on it
             float4 _AsciiWind; float4 _WaterRip[8]; float4 _MoonDir; float4 _AsciiGrade; float _AsciiDayK;
             float4 _WaterBody[16]; float _WaterBodyN; float4 _WaterTrees[8]; float _WaterTreeN;
             float _WaterReflOn, _AsciiReflPass; TEXTURE2D(_WaterReflTex); SAMPLER(sampler_WaterReflTex);
@@ -211,6 +212,13 @@ Shader "AsciiHero/Water"
                     col *= 0.75 + 0.35 * fres;
                     float rk = saturate(ring * 1.6);          // where a ring passes: whiter, no tint
                     col = lerp(col, dot(col, float3(0.3, 0.5, 0.2)) * 0.8 + 0.15, rk * 0.4);
+                }
+                if (_WaterMode.x < 0.5 && _WxIce.x > 0.0 && shore > 1.0 - _WxIce.x)
+                {   // frozen: a still crust of ice, lines of cracks and the odd glint, white where snow lies on it
+                    float cr = WHash(floor(p.xz * 6.0) + 3.1);
+                    row = 11.0; gi = cr > 0.88 ? 10.0 : cr > 0.55 ? 3.0 : 8.0;
+                    float sn = _WxIce.y * step(0.3, WHash(floor(p.xz * 2.5) + 7.7));
+                    col = lerp(float3(0.40, 0.52, 0.64), float3(0.80, 0.85, 0.93), sn) * (0.55 + 0.5 * _AsciiDayK) + lit * 1.2 + sky * 0.25 * fres * (1.0 - sn);
                 }
                 if (_WaterReflOn > 0.5)
                 {

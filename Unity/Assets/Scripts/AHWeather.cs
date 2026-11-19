@@ -24,6 +24,7 @@ namespace AsciiHero
     public class Weather
     {
         public bool auto = true;
+        public bool mountain;                   // the snowy mountains: snow in every season, it never melts
         public int level = -1;                  // -1 nothing falls, 0 light, 1 medium, 2 heavy
         public bool snowFalls, stormy;
         public float puddle, snow, ice, wet, white, actorWet, actorSnow, storm;
@@ -59,7 +60,7 @@ namespace AsciiHero
         /// tod: 0 morning, 1 day, 2 evening, 3 night; outside: the hero is under the open sky
         public void Update(float dt, int season, int tod, bool outside)
         {
-            bool winter = season == 3;
+            bool winter = season == 3 || mountain;
             // the turn of the year: puddles freeze when winter comes
             if (lastSeason != season) { lastSeason = season; }
             if (auto)
@@ -67,7 +68,7 @@ namespace AsciiHero
                 if (level < 0) { wait -= dt; if (wait <= 0) { double r = R.NextDouble(); Start(r < 0.45 ? 0 : r < 0.8 ? 1 : 2, 120 + 360 * (float)R.NextDouble()); } }
                 else { left -= dt; if (left <= 0) Stop(); }
             }
-            snowFalls = level >= 0 && (winter || (season == 0 || season == 2) && tod == 3 && wetSnowNight);
+            snowFalls = level >= 0 && (winter || mountain || (season == 0 || season == 2) && tod == 3 && wetSnowNight);
             bool day = tod <= 1, eve = tod == 2;
             float dry = day ? 1 / 500f : eve ? 1 / 1000f : 0;               // 1 % in 5 s, in 10 s, none at night
             float melt = winter ? 0 : day ? 1 / 800f : eve ? 1 / 2000f : 0;    // 1 % in 8 s, in 20 s, none at night

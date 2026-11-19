@@ -8,26 +8,44 @@ namespace AsciiHero
 {
     public partial class Game
     {
-        readonly Weather wx = new Weather();
-        float precipS = 24;
+        readonly Weather wxMain = new Weather(), wxMount = new Weather { mountain = true };
+        /// the weather where the hero is: the snowy mountains of the test world have their own
+        Weather wx => !story && loc is Mockup mk && mk.kind == "snow" ? wxMount : wxMain;
+        float precipS = 24, lakeIce;
 
         /// each frame of the story (outside: under the sky; in a cave or an inn the weather goes on outside)
-        void StoryWeather(float dt, bool outside)
+        void StoryWeather(float dt, bool outside) { WeatherFrame(dt, outside); }
+        /// each frame in a world with a sky (the story's or the test world's)
+        void WeatherFrame(float dt, bool outside)
         {
-            wx.Update(dt, skyS.season, skyS.tod, outside);
-            skyS.precip = wx.Falling; skyS.level = Mathf.Max(0, wx.level); skyS.fallSet = wx.snowFalls ? 1 : 0;
-            skyS.wetSet = wx.wet; skyS.coverSet = Mathf.Clamp01(wx.white * 0.9f);
-            if (!outside) { if (player != null) { player.slip = 0; player.speedK = 1; } return; }
-            Shader.SetGlobalVector("_WxGround", new Vector4(Weather.Threshold(wx.puddle), Weather.Threshold(wx.ice), Weather.Threshold(wx.snow), wx.DriftH));
-            Shader.SetGlobalVector("_WxState", new Vector4(wx.wet, skyS.Rain, wx.white, 0));
-            Shader.SetGlobalVector("_WxActor", new Vector4(wx.actorWet, wx.actorSnow, 0, 0));
+            var w = wx;
+            wxMain.Update(dt, skyS.season, skyS.tod, outside && w == wxMain);
+            if (!story) wxMount.Update(dt, skyS.season, skyS.tod, outside && w == wxMount);
+            skyS.precip = w.Falling; skyS.level = Mathf.Max(0, w.level); skyS.fallSet = w.snowFalls ? 1 : 0;
+            skyS.wetSet = w.wet; skyS.coverSet = Mathf.Clamp01(w.white * 0.9f);
+            // the lakes: in winter the ice creeps in from the shores over three minutes, by spring it thaws
+            bool winter = skyS.season == 3;
+            lakeIce = Mathf.MoveTowards(lakeIce, winter ? 1 : 0, dt / (winter ? 180f : skyS.IsDay ? 240f : 1e9f));
+            if (!story) foreach (var l in outdoor) l.iceK = l is Mockup m && m.kind == "snow" ? 1 : lakeIce;
+            if (!outside)
+            {
+                if (player != null) { player.slip = 0; player.speedK = 1; }
+                Shader.SetGlobalVector("_WxGround", new Vector4(-1, -1, -1, 0)); Shader.SetGlobalVector("_WxState", Vector4.zero);
+                Shader.SetGlobalVector("_WxActor", Vector4.zero); Shader.SetGlobalVector("_WxTrailRect", Vector4.zero); Shader.SetGlobalVector("_WxIce", Vector4.zero);
+                return;
+            }
+            Shader.SetGlobalVector("_WxGround", new Vector4(Weather.Threshold(w.puddle), Weather.Threshold(w.ice), Weather.Threshold(w.snow), w.DriftH));
+            Shader.SetGlobalVector("_WxState", new Vector4(w.wet, skyS.Rain, w.white, 0));
+            Shader.SetGlobalVector("_WxActor", new Vector4(w.actorWet, w.actorSnow, 0, 0));
+            Shader.SetGlobalVector("_WxIce", new Vector4(loc != null ? loc.iceK : 0, Mathf.Clamp01(w.white), 0, 0));
             Shader.SetGlobalVectorArray("_WaterRip", ripples);
             Trail(dt);
             // the hero's footing
             if (player != null)
             {
-                float depth; int s = wx.SurfaceAt(pos, TrailAt(pos), out depth);
-                player.slip = Mathf.MoveTowards(player.slip, s == 2 && wx.snow < 0.15f ? 1 : 0, dt * 3);
+                float depth; int s = w.SurfaceAt(pos, TrailAt(pos), out depth);
+                bool ice = (s == 2 || loc != null && loc.FrozenW(pos)) && w.snow < 0.15f;
+                player.slip = Mathf.MoveTowards(player.slip, ice ? 1 : 0, dt * 3);
                 player.speedK = depth > 0.25f ? 1 - 0.3f * Mathf.Clamp01((depth - 0.25f) / 0.65f) : 1;
             }
             // the box the rain and snow fall through: 120 % of what the camera sees, wider on a run or a dash, pushed
@@ -47,16 +65,18 @@ namespace AsciiHero
         /// the wind follows the weather: stronger while it falls, a storm blows past 80 %
         float WeatherWind(float target)
         {
-            if (!story) return target;
-            return Mathf.Max(target, wx.Falling ? 0.25f + 0.12f * wx.level : 0, wx.storm * (0.88f + 0.12f * Mathf.Sin(tNow * 0.8f)));
+            var w = wx;
+            return Mathf.Max(target, w.Falling ? 0.25f + 0.12f * wx.level : 0, w.storm * (0.88f + 0.12f * Mathf.Sin(tNow * 0.8f)));
         }
         void WeatherOff()
         {
             skyS.fallSet = -1; skyS.wetSet = -1; skyS.coverSet = -1; skyS.precip = false;
             Shader.SetGlobalVector("_WxGround", new Vector4(-1, -1, -1, 0)); Shader.SetGlobalVector("_WxState", Vector4.zero);
-            Shader.SetGlobalVector("_WxActor", Vector4.zero); Shader.SetGlobalVector("_WxTrailRect", Vector4.zero);
+            Shader.SetGlobalVector("_WxActor", Vector4.zero); Shader.SetGlobalVector("_WxTrailRect", Vector4.zero); Shader.SetGlobalVector("_WxIce", Vector4.zero);
             if (player != null) { player.slip = 0; player.speedK = 1; }
         }
+        /// the world is entered: the lakes as the season has them (frozen in winter)
+        void WeatherEnter() { lakeIce = skyS.season == 3 ? 1 : 0; }
         /// a creature's footing (rats slide on the ice and wade through drifts too)
         void FoeFooting(MotionActor a, Vector3 p)
         {
@@ -179,7 +199,8 @@ namespace AsciiHero
         /// what the feet step on out on the meadow
         string WeatherSurface()
         {
-            float depth; int s = wx.SurfaceAt(pos, TrailAt(pos), out depth);
+            float depth; var w = wx; int s = w.SurfaceAt(pos, TrailAt(pos), out depth);
+            if (loc != null && loc.FrozenW(pos)) return w.snow > 0.15f ? "snow" : "stone";
             return s == 1 ? "puddle" : s == 2 ? "stone" : s == 3 ? "snow" : "grass";
         }
 

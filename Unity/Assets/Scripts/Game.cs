@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.82 · Unity";
+        public const string VERSION = "beta 0.1.1 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -870,6 +870,7 @@ namespace AsciiHero
             {
                 sky /= wsum; eq /= wsum; gnd /= wsum; moon /= wsum; hl /= wsum; ex /= wsum;
                 // the time of day, the season and the weather over it (night, summer and a clear sky leave it as it was)
+                WeatherFrame(Time.deltaTime, loc != cave && !(loc is Mockup mu && mu.Underground));
                 skyS.Update(Time.deltaTime);
                 Color atn = skyS.ambTint * skyS.ambK;
                 SetAmbient(sky * atn, eq * atn, gnd * atn);
@@ -881,13 +882,12 @@ namespace AsciiHero
                 heroLight.intensity = hl * skyS.heroK; ascii.exposure = ex * skyS.expK;
                 // rain and snow in the world (not in the cave: it has a roof)
                 {
-                    float roofless = loc == cave ? 0 : 1, amt = (skyS.Rain + skyS.Snow) * roofless;
-                    if (precipGo == null && amt > 0.01f) precipGo = GlyphLayer.MakePrecip(4000);
+                    float roofless = loc == cave || loc is Mockup mu2 && mu2.Underground ? 0 : 1, amt = (skyS.Rain + skyS.Snow) * roofless;
+                    if (precipGo == null && amt > 0.01f) precipGo = GlyphLayer.MakePrecip(1200);
                     if (precipGo != null)
                     {
                         if (precipGo.activeSelf != amt > 0.01f) precipGo.SetActive(amt > 0.01f);
                         Shader.SetGlobalVector("_AsciiPrecipW", new Vector4(skyS.Rain * roofless, skyS.Snow * roofless, skyS.DayK, 0));
-                        Shader.SetGlobalVector("_PrecipBox", new Vector4(camTgt.x, 0, camTgt.z, 34));
                     }
                 }
             }
@@ -1066,7 +1066,7 @@ namespace AsciiHero
             foreach (var l in outdoor) l.SetActive(false);
             if (where != 0 && !wasOut) RespawnPiles();
             worldLightsRoot.SetActive(true); editorRoot.SetActive(false);
-            pos = at ?? loc.SpawnW; heroTrail = pos; player.heading = Mathf.PI; player.ResetSim(); player.noLock = false;
+            pos = at ?? loc.SpawnW; heroTrail = pos; player.heading = Mathf.PI; player.ResetSim(); player.noLock = false; WeatherEnter();
             hero.go.transform.position = pos; hero.go.transform.rotation = Quaternion.Euler(0, 180, 0);
             camTgt = new Vector3(pos.x, 0.6f, pos.z);
             sceneCam.fieldOfView = 30; ascii.exposure = 1.3f; ascii.actorBoost = 1; Shader.SetGlobalFloat("_AsciiLod", ISO_LOD); Shader.SetGlobalFloat("_GlyphFarRef", GLYPH_FAR);
@@ -2513,7 +2513,7 @@ namespace AsciiHero
             string sf = Surface(); float v = Mathf.Lerp(0.3f, 0.6f, Mathf.Clamp01(sp / 4.5f));
             if (sf == "water") { sfx.Play(loc.DepthW(pos) > 0.3f ? "splash" : "step_water", v * 0.9f); return; }
             if (sf == "puddle") { sfx.Play("step_water", v * 0.9f, 1, 0.09f); WxSpray(false, sp); return; }      // a puddle on the meadow: a splash, rings
-            if (sf == "snow" && story && sp > 2.6f) WxSpray(true, sp);                                                  // snow kicked up on a run
+            if (sf == "snow" && sp > 2.6f) WxSpray(true, sp);                                                  // snow kicked up on a run
             if (sf == "snow") v *= 1.2f; if (sf == "mud") v *= 0.9f;
             sfx.Play("step_" + sf, v, 1, 0.09f, null, 0, true);
             if (skyS.Rain > 0.3f && sf != "stone" && sf != "wood") sfx.Play("step_water", v * 0.35f * skyS.Rain, 1.2f);      // wet ground
@@ -2525,7 +2525,7 @@ namespace AsciiHero
             float wd = loc.DepthW(pos);
             if (wd > 0.04f) return "water";
             if (loc is StoryLocation) { var b = ((StoryLocation)loc).BiomeAtW(pos); return b == "tavern" ? "wood" : b == "meadow" ? (story ? WeatherSurface() : skyS.SnowCover > 0.45f ? "snow" : "grass") : "stone"; }
-            if (skyS.SnowCover > 0.45f && loc != cave) return "snow";
+            if (loc != cave && !(loc is Mockup mw && mw.Underground)) { var ws = WeatherSurface(); if (ws != "grass") return ws; }      // puddles, ice, snow
             if (loc == cave) return "stone";
             if (loc == field || loc == forest) return "grass";
             var m = loc as Mockup;
@@ -2628,12 +2628,12 @@ namespace AsciiHero
             // precipitation: on/off, then how strong (snow in winter, rain otherwise)
             if (Button(new Rect(x1 - 4 * (bw + gap) + gap, y, bw, bh), (skyS.precip ? "[x] " : "[ ] ") + "Осадки", skyS.precip))
             {
-                if (story) { if (wx.Falling) wx.Stop(); else wx.Start(1, 600); } else skyS.precip = !skyS.precip;
+                if (wx.Falling) wx.Stop(); else wx.Start(1, 600);
             }
             for (int i = 0; i < 3; i++)
-                if (Button(new Rect(x1 - (3 - i) * (bw + gap) + gap, y, bw, bh), Sky.LEVEL[i], skyS.precip && skyS.level == i)) { if (story) wx.Start(i, 600); else { skyS.level = i; skyS.precip = true; } }
+                if (Button(new Rect(x1 - (3 - i) * (bw + gap) + gap, y, bw, bh), Sky.LEVEL[i], skyS.precip && skyS.level == i)) wx.Start(i, 600);
             y += bh + gap;
-            if (story) WeatherDevRow(x1, ref y, bw, bh, gap);
+            WeatherDevRow(x1, ref y, bw, bh, gap);
         }
 
         // ---------- backpack ----------

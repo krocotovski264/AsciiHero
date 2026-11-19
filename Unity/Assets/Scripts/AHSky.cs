@@ -107,7 +107,7 @@ namespace AsciiHero
         {
             Shader.SetGlobalVector("_AsciiGrade", new Vector4(1, 1, 1, 1)); Shader.SetGlobalVector("_AsciiPrecip", Vector4.zero); Shader.SetGlobalVector("_AsciiPrecipW", Vector4.zero);
             Shader.SetGlobalVector("_AsciiSeason", Vector4.zero); Shader.SetGlobalFloat("_AsciiWet", 0); Shader.SetGlobalFloat("_AsciiDayK", 0);
-            Shader.SetGlobalVector("_WxGround", new Vector4(-1, -1, -1, 0)); Shader.SetGlobalVector("_WxState", Vector4.zero); Shader.SetGlobalVector("_WxActor", Vector4.zero); Shader.SetGlobalVector("_WxTrailRect", Vector4.zero);
+            Shader.SetGlobalVector("_WxGround", new Vector4(-1, -1, -1, 0)); Shader.SetGlobalVector("_WxState", Vector4.zero); Shader.SetGlobalVector("_WxActor", Vector4.zero); Shader.SetGlobalVector("_WxTrailRect", Vector4.zero); Shader.SetGlobalVector("_WxIce", Vector4.zero);
         }
         /// the precipitation leans with the wind (in screen cells per cell of fall)
         public void Wind(Vector2 screenWind) { Shader.SetGlobalVector("_AsciiPrecipWind", new Vector4(screenWind.x, screenWind.y, 0, 0)); }

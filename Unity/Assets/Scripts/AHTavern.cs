@@ -71,7 +71,12 @@ namespace AsciiHero
         public virtual float WaterSink(float x, float z) { return Mathf.Min(Depth(x, z), WaterDepth.WAIST); }
         /// how deep the water is here (m; 0 = dry) - see WaterDepth for how each kind of water is shaped
         public virtual float Depth(float x, float z) { return 0; }
-        public float DepthW(Vector3 w) { return Depth(w.x - origin.x, w.z - origin.z); }
+        public float DepthW(Vector3 w) { return FrozenW(w) ? 0 : Depth(w.x - origin.x, w.z - origin.z); }
+        // ---- winter: the open water freezes from the shore in (iceK 0 .. 1 = frozen over); on the ice it is dry ground ----
+        public float iceK;
+        /// where the water is between its middle (0) and its shore (1), for water that can freeze; -1 = none here
+        public virtual float ShoreK(float x, float z) { return -1; }
+        public bool FrozenW(Vector3 w) { if (iceK <= 0) return false; float k = ShoreK(w.x - origin.x, w.z - origin.z); return k >= 0 && k > 1 - iceK - 1e-3f; }
         /// the most of his normal pace he can go here (1 = no limit)
         public virtual float SpeedK(float x, float z) { return 1; } public virtual float WaterY => 0.04f;            // the height of the water surface (the mirror's plane)
         public void SetActive(bool on) { root.SetActive(on); }
@@ -88,9 +93,9 @@ namespace AsciiHero
         public Vector2 CollideW(Vector2 w, float r) { var q = Collide(L(w), r); return new Vector2(q.x + origin.x, q.y + origin.z); }
         /// only the colliders (no clamping to the bounds): a neighbour's trees and rocks near the seam
         public Vector2 CollideNoClampW(Vector2 w, float r) { var q = CollideRaw(L(w), r); return new Vector2(q.x + origin.x, q.y + origin.z); }
-        public bool InWaterW(Vector3 w) { return InWater(w.x - origin.x, w.z - origin.z); }
-        public float WaterSinkW(Vector3 w) { return WaterSink(w.x - origin.x, w.z - origin.z); }
-        public float SpeedKW(Vector3 w) { return SpeedK(w.x - origin.x, w.z - origin.z); }
+        public bool InWaterW(Vector3 w) { return !FrozenW(w) && InWater(w.x - origin.x, w.z - origin.z); }
+        public float WaterSinkW(Vector3 w) { return FrozenW(w) ? 0 : WaterSink(w.x - origin.x, w.z - origin.z); }
+        public float SpeedKW(Vector3 w) { return FrozenW(w) ? 1 : SpeedK(w.x - origin.x, w.z - origin.z); }
         public Vector3 SpawnW => spawn + origin;
         /// the light of the place: ambient (sky, horizon, ground), the moon's share, the hero's lantern, exposure
         public Color ambSky = new Color(0.3f, 0.35f, 0.45f), ambEq = new Color(0.2f, 0.22f, 0.22f), ambGround = new Color(0.08f, 0.1f, 0.06f);

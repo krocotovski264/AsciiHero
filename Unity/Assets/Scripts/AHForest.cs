@@ -32,6 +32,7 @@ namespace AsciiHero
             return Mathf.Sqrt(dx * dx + dz * dz) / wob;
         }
         public override bool InWater(float x, float z) { return LakeK(x, z) < 0.97f; }
+        public override float ShoreK(float x, float z) { float k = LakeK(x, z); return k < 0.97f ? k : -1; }
         /// a forest lake: a shelf by the shore, the middle too deep to wade
         public override float Depth(float x, float z) { float k = LakeK(x, z); return k >= 0.97f ? 0 : WaterDepth.Lake(Mathf.Clamp01((0.97f - k) / 0.97f), 0.42f, 2.0f); }
         public static float PathD(float x, float z)

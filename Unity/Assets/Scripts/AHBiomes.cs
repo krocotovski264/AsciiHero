@@ -37,6 +37,14 @@ namespace AsciiHero
         }
         float WaterK(float x, float z) { float k = 9; foreach (var p in pools) k = Mathf.Min(k, PoolK(p, x, z)); return k; }
         public override bool HasWater => pools.Count > 0;
+        public bool Underground => kind == "crystal";
+        /// (acid does not freeze, nor the water under the ground)
+        public override float ShoreK(float x, float z)
+        {
+            if (Underground || walks.Count > 0 && OnWalk(x, z)) return -1;
+            float k = 9; foreach (var p in pools) if (p.kind != 3) k = Mathf.Min(k, PoolK(p, x, z));
+            return k < 0.97f ? k : -1;
+        }
         public override List<Bounds> MirrorWater()
         {
             var l = new List<Bounds>();
