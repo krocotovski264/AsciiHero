@@ -68,7 +68,7 @@ Shader "AsciiHero/Grass"
             }
 
             struct Attributes { float4 positionOS : POSITION; float2 corner : TEXCOORD0; float2 seed : TEXCOORD1; };
-            struct Varyings { float4 positionCS : SV_POSITION; float2 local : TEXCOORD0; float3 col : TEXCOORD1; float gi : TEXCOORD2; };
+            struct Varyings { float4 positionCS : SV_POSITION; float2 local : TEXCOORD0; float3 col : TEXCOORD1; float gi : TEXCOORD2; float3 colB : TEXCOORD3; };
 
             Varyings vert (Attributes i)
             {
@@ -91,6 +91,9 @@ Shader "AsciiHero/Grass"
                 float fl = sin(_AsciiTime * (3.0 + 4.0 * ws) * (0.8 + 0.4 * frac(s * 3.3)) + s * 40.0);
                 float2 wind = wd * ((0.05 + 0.1 * ws) + 0.85 * wave / stiff - 0.28 * recoil * sin(_AsciiTime * 5.0 + s * 9.0 + 1.5))
                             + float2(-wd.y, wd.x) * fl * (0.015 + 0.06 * ws * (0.3 + wave)) + wd * fl * 0.03 * ws * wave;
+                // a slow sway of its own even in still air (a noise over the field, so neighbours sway together)
+                float2 idle = float2(WNoise(a.xz * 0.35 + _AsciiTime * 0.25) - 0.5, WNoise(a.xz * 0.35 + 7.3 - _AsciiTime * 0.21) - 0.5);
+                wind += idle * (0.16 + 0.1 * frac(s * 4.3)) * (1.0 - 0.5 * saturate(ws));
                 float2 lean = wind; float push = 0;
                 for (int k = 0; k < 4; k++)
                 {
@@ -116,8 +119,21 @@ Shader "AsciiHero/Grass"
                 float lum = saturate(dot(lit, float3(0.299, 0.587, 0.114)) * 2.6 * _AsciiExposure);
                 float depthK = clamp(1.0 - (myZ - _AsciiDepthRef) * 0.09, 0.5, 1.2);
                 float3 green = SeasonGreen(lerp(_GrassA.rgb, _GrassB.rgb, frac(s * 13.7)), s);
-                o.col = (green * (0.22 + 0.95 * lum) + lit * 0.5) * depthK * (1.0 - 0.35 * push);
-                o.col *= 1.0 + 0.5 * wave;       // a pressed-down band shows lighter (the blades turn their sides to the light)
+                // near and far (the stylised grass of Binary Lunar): close blades warmer and yellower, far ones cooler, bluer
+                float nf = smoothstep(4.0, 20.0, myZ);
+                green = lerp(green * float3(1.12, 1.07, 0.78) + float3(0.035, 0.03, 0.0), green * float3(0.82, 0.94, 1.12), nf);
+                float3 top = green * (0.22 + 0.95 * lum) + lit * 0.35;
+                // in shadow the tips go towards a cool shadow colour, not just darker
+                float shd = saturate(1.0 - lum * 1.7);
+                top = lerp(top, top * float3(0.55, 0.66, 1.0) + float3(0.0, 0.01, 0.03), shd * 0.6);
+                // a pressed-down band of the wind shows lighter on the tips (the blades turn their sides to the light)
+                top = top * (1.0 + 0.3 * wave) + float3(0.16, 0.18, 0.1) * wave * (0.4 + lum);
+                // the root: dark and of the ground's own colour, so the grass grows out of the earth instead of lying on it
+                float3 root = lerp(green * 0.35, lit * 1.15, 0.55) * (0.35 + 0.65 * lum);
+                float kk = depthK * (1.0 - 0.35 * push);
+                o.col = top * kk; o.colB = root * kk;
+                // a little more colour (as the saturation of the lesson's post), the grey of the scene stays as it was
+                float lc0 = dot(o.col, float3(0.3, 0.5, 0.2)); o.col = max(0.0, lerp(lc0.xxx, o.col, 1.18));
                 // the quad covers only the part of the cell the stroke is in (an upright '|' is a third of its cell, a
                 // trodden '_' a fifth): the many blades lying over each other fill far fewer pixels
                 float4 ink = _GlyphInk[(int)(12.0 * 16.0 + o.gi + 0.5)];
@@ -133,7 +149,8 @@ Shader "AsciiHero/Grass"
                 float rows = max(_AsciiRows, 1.0);
                 float mk = SAMPLE_TEXTURE2D_BIAS(_AsciiAtlas, sampler_AsciiAtlas, float2((i.gi + l.x) / 16.0, 1.0 - 13.0 / rows + l.y / rows), -0.6).r;   // row 12
                 mk = saturate((mk - 0.22) * 1.9);
-                return half4(i.col * mk, 1);
+                float3 c = lerp(i.colB, i.col, i.gi > 3.5 ? 0.7 : smoothstep(0.05, 0.8, l.y));      // root to tip (a trodden blade lies flat: its own colour)
+                return half4(c * mk, 1);
             }
             ENDHLSL
         }
