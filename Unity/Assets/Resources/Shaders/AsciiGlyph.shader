@@ -30,6 +30,7 @@ Shader "AsciiHero/Glyph"
             #pragma fragment frag
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "AsciiWeather.hlsl"
+            float _GlyphSceneK;
 
             CBUFFER_START(UnityPerMaterial)
                 float _AsciiRow;
@@ -271,7 +272,7 @@ Shader "AsciiHero/Glyph"
                 float2 lc = lerp(ink.xy, ink.zw, i.corner + 0.5);
                 o.local = lc;
                 if (drift > 0.001) pVS = TransformWorldToView(pWS + float3(0, drift, 0));
-                pVS.xy += (lc - 0.5) * _GlyphCell.xy * GLYPH_SCALE * (_AsciiActor > 0.5 ? 1.18 * max(1.0, _AsciiActorLod) : lod * farL);   // upright character in the view plane; on characters dense and overlapping so no gaps show
+                pVS.xy += (lc - 0.5) * _GlyphCell.xy * GLYPH_SCALE * (_AsciiActor > 0.5 ? 1.18 * max(1.0, _AsciiActorLod) : lod * farL * max(1.0, _GlyphSceneK));     // (_GlyphSceneK: scenery laid out sparser on a low graphics preset, each character as much larger)   // upright character in the view plane; on characters dense and overlapping so no gaps show
                 o.positionCS = vis ? TransformWViewToHClip(pVS) : float4(2, 2, 2, 1);
                 return o;
             }

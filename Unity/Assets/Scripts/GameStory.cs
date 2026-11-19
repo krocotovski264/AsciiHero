@@ -159,6 +159,7 @@ namespace AsciiHero
         /// the new game (or the game going on, if one is): the hero wakes in the dungeon
         void StartStory(bool fresh)
         {
+            worldBuilt = true;
             try { if (tavern == null) SetupWorld(); if (smap == null) BuildStory(); }
             catch (System.Exception e) { Debug.LogException(e); ShowToast("Не удалось собрать локацию"); return; }
             if (fresh && sDone.Count > 0) { ResetStory(); }
@@ -192,7 +193,7 @@ namespace AsciiHero
             pos = at; heroTrail = pos; player.heading = heading; player.ResetSim(); player.noLock = false;
             hero.go.transform.position = pos; hero.go.transform.rotation = Quaternion.Euler(0, heading * Mathf.Rad2Deg, 0);
             camTgt = new Vector3(pos.x, 0.6f, pos.z);
-            sceneCam.fieldOfView = 30; ascii.exposure = 1.3f; ascii.actorBoost = 1; Shader.SetGlobalFloat("_AsciiLod", ISO_LOD); Shader.SetGlobalFloat("_GlyphFarRef", GLYPH_FAR);
+            sceneCam.fieldOfView = 30; ascii.exposure = 1.3f; ascii.actorBoost = 1; Shader.SetGlobalFloat("_AsciiLod", ISO_LOD); Shader.SetGlobalFloat("_GlyphFarRef", GlyphFar);
             SetShadowDistance(26);
             L.focus = pos - L.origin; L.CullNow(); visT = 0;
             StoryLight(true);

@@ -10,6 +10,8 @@ namespace AsciiHero
     {
         public const int LAYER = 31;
         public static int count;
+        /// the graphics preset: the scenery's characters are laid out this much sparser (and drawn as much larger), 1 = as designed
+        public static float sceneryK = 1;
         static readonly Dictionary<string, Material> MATS = new Dictionary<string, Material>();
 
         static Material GlyphMaterial(float row, Vector4 cell, float actor, float smoke, float cloth = 0, float see = 0)
@@ -51,9 +53,10 @@ namespace AsciiHero
                 int[] cum = null; Mesh mesh;
                 // the same static mesh with the same cell (trees, wheat, flowers placed many times): its characters are
                 // laid out once and shared
-                string ckey = smr == null && limbOfBone == null && mat.GetFloat("_AsciiActor") < 0.5f ? src.GetInstanceID() + ":" + mat.GetVector("_GlyphCell") : null;
+                bool scenery = mat.GetFloat("_AsciiActor") < 0.5f; Vector4 cellV = mat.GetVector("_GlyphCell"); if (scenery && sceneryK > 1.001f) { cellV.x *= sceneryK; cellV.y *= sceneryK; }
+                string ckey = smr == null && limbOfBone == null && scenery ? src.GetInstanceID() + ":" + cellV : null;
                 if (ckey != null && SAMPLED.TryGetValue(ckey, out mesh)) { }
-                else { mesh = Sample(src, mat.GetVector("_GlyphCell"), smr != null, limbOfBone, out cum); if (ckey != null && mesh != null) SAMPLED[ckey] = mesh; }
+                else { mesh = Sample(src, cellV, smr != null, limbOfBone, out cum); if (ckey != null && mesh != null) SAMPLED[ckey] = mesh; }
                 if (mesh == null) continue;
                 bool actorMesh = mat.GetFloat("_AsciiActor") > 0.5f;
                 var go = new GameObject("Glyphs"); go.layer = LAYER;

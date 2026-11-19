@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.1.1 · Unity";
+        public const string VERSION = "beta 0.1.2 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -233,6 +233,7 @@ namespace AsciiHero
             if (!Step("База движений (mocap)", MotionDB.Load)) yield break;
             yield return null;
             if (!Step("Герой и символы", () => { Rebuild(); Debug.Log("Символов на сцене: " + GlyphLayer.count); })) yield break;
+            AutoPreset();
             ready = true;
             Debug.Log("Загрузка завершена за " + (Time.realtimeSinceStartup - loadT0).ToString("0.0") + " с");
         }
@@ -697,6 +698,7 @@ namespace AsciiHero
         void SetupOutdoor()
         {
             long tB = System.Diagnostics.Stopwatch.GetTimestamp(); bool fresh = field == null || mockups.Count == 0;
+            worldBuilt = true;
             try { SetupOutdoorInner(); } finally { if (fresh) { worldBuildMs = (float)Ms(tB); System.GC.Collect(); Debug.Log("Мир построен за " + (worldBuildMs / 1000f).ToString("0.0") + " с"); } }      // (the building's scraps cleared at once, not over the next frames)
         }
         void SetupOutdoorInner()
@@ -1069,7 +1071,7 @@ namespace AsciiHero
             pos = at ?? loc.SpawnW; heroTrail = pos; player.heading = Mathf.PI; player.ResetSim(); player.noLock = false; WeatherEnter();
             hero.go.transform.position = pos; hero.go.transform.rotation = Quaternion.Euler(0, 180, 0);
             camTgt = new Vector3(pos.x, 0.6f, pos.z);
-            sceneCam.fieldOfView = 30; ascii.exposure = 1.3f; ascii.actorBoost = 1; Shader.SetGlobalFloat("_AsciiLod", ISO_LOD); Shader.SetGlobalFloat("_GlyphFarRef", GLYPH_FAR);
+            sceneCam.fieldOfView = 30; ascii.exposure = 1.3f; ascii.actorBoost = 1; Shader.SetGlobalFloat("_AsciiLod", ISO_LOD); Shader.SetGlobalFloat("_GlyphFarRef", GlyphFar);
             SetShadowDistance(26);      // (the view reaches about 21 m from the camera; a shorter range keeps the shadow map sharp at half its old size)
             if (where == 0)
             {
@@ -1160,6 +1162,7 @@ namespace AsciiHero
             bool land = Screen.width >= Screen.height; int big = Mathf.Max(sw, sh), small = Mathf.Min(sw, sh);
             float f = RES[setRes] / 100f; int tw = Mathf.RoundToInt((land ? big : small) * f), th = Mathf.RoundToInt((land ? small : big) * f);
             if (Mathf.Abs(Screen.width - tw) > 2 || Mathf.Abs(Screen.height - th) > 2) Screen.SetResolution(tw, th, FullScreenMode.FullScreenWindow);
+            ApplyGlyphQuality();
         }
         Material landMat;
         /// the main menu's background: a night landscape in characters (Hidden/AsciiHero/Landscape), alive
@@ -1226,7 +1229,8 @@ namespace AsciiHero
                 GUI.Label(new Rect(x0 + 258 * k, yy, 160 * k, rh - 3 * k), value, sBtn);
                 if (Button(new Rect(x0 + 422 * k, yy, 34 * k, rh - 3 * k), ">")) { inc(); changed = true; }
             }
-            Row("Качество изображения", QUALITY[setQuality], () => setQuality--, () => setQuality++);
+            void Preset(int p) { p = Mathf.Clamp(p, 0, 2); if (p == setQuality) return; ApplyPreset(p); if (worldBuilt) ShowToast("Плотность символов на пейзаже изменится после перезапуска игры"); }
+            Row("Качество изображения", QUALITY[setQuality], () => Preset(setQuality - 1), () => Preset(setQuality + 1));      // (a preset: grass, resolution, glow, outlines and the frame limit with it)
             Row("Растительность", GRASS[setGrass] + " %", () => setGrass--, () => setGrass++);
             Row("Разрешение", RES[setRes] + " %" + (setRes == RES.Length - 1 ? " (макс.)" : ""), () => setRes--, () => setRes++);
             Row("Свечение", setBloom ? "вкл" : "выкл", () => setBloom = !setBloom, () => setBloom = !setBloom);
@@ -1260,7 +1264,13 @@ namespace AsciiHero
             ("осень, дождь средний", 3, 2, true, 1), ("зима, без осадков (снег на земле)", 3, 3, false, 1),
             ("зима, снег лёгкий", 3, 3, true, 0), ("зима, снег средний", 3, 3, true, 1), ("зима, снег сильный", 3, 3, true, 2), ("день, зима, снег сильный", 1, 3, true, 2) };
         (int tod, int season, bool pr, int lvl) perfSkySaved; float perfSkyBase, perfSkyMs; Location perfSkyLoc;
-        void PerfSky(int tod, int season, bool pr, int lvl) { skyS.tod = tod; skyS.season = season; skyS.precip = pr; skyS.level = lvl; skyS.Update(30f); }     // (30 s at once: the sky settles before the measurement)
+        /// (the weather is the weather system's: the test sets it there, not on the sky, which the system overrides each frame)
+        void PerfSky(int tod, int season, bool pr, int lvl)
+        {
+            skyS.tod = tod; skyS.season = season;
+            foreach (var w in new[] { wxMain, wxMount }) { w.auto = false; if (pr) w.Start(lvl, 1e6f); else w.Stop(); }
+            WeatherFrame(0.01f, true); skyS.Update(30f);     // (30 s at once: the sky settles before the measurement)
+        }
         bool perfRun, perfNoAnim, perfNoGui, perfFullActors, perfWalk; int perfIx; float perfT, perfBase, pWorst; int pN, pFt, savedVsync;
         double pSum, pMain, pRender, pGpu, accU, accA, accG; readonly FrameTiming[] ftBuf = new FrameTiming[1];
         double fMain, fGpu; int fFt;
@@ -1292,7 +1302,7 @@ namespace AsciiHero
             if (!world || loc != field) EnterWorld(true);
             if (!world) return;
             worldZoomT = 1; perfRun = true; perfIx = 0; PerfReset();
-            perfSkySaved = (skyS.tod, skyS.season, skyS.precip, skyS.level); PerfSky(3, 1, false, 1);
+            perfSkySaved = (skyS.tod, skyS.season, wx.Falling, Mathf.Max(0, wx.level)); PerfSky(3, 1, false, 1);
             savedVsync = QualitySettings.vSyncCount; QualitySettings.vSyncCount = 0; Application.targetFrameRate = 240;
             Debug.Log("ТЕСТ НАГРУЗКИ · " + VERSION + " · " + SystemInfo.deviceModel + " · " + SystemInfo.graphicsDeviceName + " · экран " + Screen.width + "×" + Screen.height +
                       " @" + Screen.currentResolution.refreshRateRatio.value.ToString("0") + " Гц · качество " + QUALITY[setQuality] + ", трава " + GRASS[setGrass] + " %, разрешение " + RES[setRes] + " %, ограничение в игре " + FPS[setFps] + " к/с (тест идёт без ограничения)");
@@ -1324,7 +1334,7 @@ namespace AsciiHero
                 case 10: perfFullActors = on; break;
                 case 11: if (on) { int old = setRes; setRes = 1; ApplySettings(false); setRes = old; } else ApplySettings(false); break;
                 case 12: if (hero != null) foreach (var r in hero.glyphs) if (r != null) r.enabled = !on; break;
-                case 14: Shader.SetGlobalFloat("_GlyphFarRef", on ? 0f : GLYPH_FAR); break;
+                case 14: Shader.SetGlobalFloat("_GlyphFarRef", on ? 0f : GlyphFar); break;
                 case 13: if (loc != null && loc.root != null) foreach (Transform c in loc.root.transform) if (c.name != "Ground" && c.name != "Grass" && c.name != "Path") c.gameObject.SetActive(!on); break;
             }
             if (perfRun) { QualitySettings.vSyncCount = 0; Application.targetFrameRate = 240; }
@@ -1389,7 +1399,8 @@ namespace AsciiHero
                 perfRows.Add(new PerfRow { name = "погода: " + sk.n, ms = ms, worst = pWorst, miss = miss, gpu = pFt > 0 ? (float)(pGpu / pFt) : -1, glyphs = GlyphLayer.count });
                 perfIx++;
                 if (perfIx < PERF_SKY.Length) { var nx = PERF_SKY[perfIx]; PerfSky(nx.tod, nx.season, nx.pr, nx.lvl); PerfGo(perfSkyLoc); PerfReset(); return; }
-                PerfSky(perfSkySaved.tod, perfSkySaved.season, perfSkySaved.pr, perfSkySaved.lvl);
+                PerfSky(perfSkySaved.tod, perfSkySaved.season, perfSkySaved.pr, perfSkySaved.lvl); wxMain.auto = wxMount.auto = true;
+                foreach (var w in new[] { wxMain, wxMount }) if (w.Falling) w.Start(w.level, 240);      // (the player's weather goes on, for a while)
                 PerfFinish(); return;
             }
             // ---- part 2: one stage done ----
@@ -1425,7 +1436,7 @@ namespace AsciiHero
             Debug.Log(sb.ToString());
             Debug.Log("ТЕСТ ЗАВЕРШЁН · «к базе» со знаком минус — сколько миллисекунд кадра стоит выключенная часть");
             EnterWorld(1);
-            consoleOpen = true; ShowToast("Тест завершён: открой лог, нажми «Копировать» и пришли его");
+            consoleOpen = true; PerfRecommend();
         }
         bool fFtFrame;
         void FrameTimes()
@@ -2308,6 +2319,7 @@ namespace AsciiHero
                 if (!perfNoGui) GUI.Label(new Rect(L, T, 600 * k, 22 * k), (perfPhase == 0 ? "Тест нагрузки: прогрев " + (perfLocIx + 1) + " из " + perfLocs.Count : perfPhase == 1 ? "Тест нагрузки: биом " + (perfLocIx + 1) + " из " + perfLocs.Count + " · " + LocTitle(loc) : "Тест нагрузки: " + LocTitle(loc) + " · " + (perfIx + 1) + " из " + PERF.Length + " · " + PERF[perfIx]), sTitle);
                 FinishGui(); accG += Ms(tG); return;
             }
+            if (gfxDlg != null) { GfxDialogUI(W, H); ConsoleUI(W, H, false); FinishGui(); accG += Ms(tG); return; }      // (over everything: a word about the graphics)
             if (world) DrawDanger(W, H);
             if (inMenu && !world) { MenuUI(W, H); ConsoleUI(W, H, false); FinishGui(); return; }
             if (world && menuFromWorld) { MenuUI(W, H); ConsoleUI(W, H, false); FinishGui(); accG += Ms(tG); return; }
