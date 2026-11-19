@@ -127,6 +127,7 @@ namespace AsciiHero
             }
             LoadScenes();
             SpawnStoryThings();          // (while the places are on: the characters of what is switched off are not laid out)
+            storyFresh = true;
             foreach (var l in sLocs) l.SetActive(false);
         }
         readonly Dictionary<long, string> regionOf = new Dictionary<long, string>(); readonly List<string> circleRegion = new List<string>();
@@ -181,8 +182,10 @@ namespace AsciiHero
         }
 
         /// put the hero into one of the story's places (the others are switched off, as they are)
+        bool storyFresh;      // (the story was built and nothing has happened in it yet)
         void StoryGo(StoryLocation L, Vector3 at, float heading)
         {
+            storyFresh = false;
             SaveCfg();
             story = true; world = true;
             if (tavern != null) { tavern.SetActive(false); bartenderChar.go.SetActive(false); }
@@ -1716,7 +1719,7 @@ namespace AsciiHero
         }
         void StoryLoadFrom(SaveData d)
         {
-            try { if (tavern == null) SetupWorld(); if (smap == null) BuildStory(); else ResetStory(); }
+            try { if (tavern == null) SetupWorld(); if (smap == null) BuildStory(); else if (!storyFresh) ResetStory(); }      // (just built under the loading: not built a second time)
             catch (System.Exception e) { Debug.LogException(e); ShowToast("Не удалось собрать локацию"); return; }
             inventory.Clear(); if (d.items != null) inventory.AddRange(d.items);
             if (d.storyDone != null) foreach (var x in d.storyDone) sDone.Add(x);

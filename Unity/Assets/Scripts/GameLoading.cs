@@ -50,7 +50,7 @@ namespace AsciiHero
         /// the bar runs after what is done (called each frame the bar is shown)
         void LoadStep(float dt)
         {
-            dt = Mathf.Min(dt, 1 / 30f);                         // (after a long frame the bar runs on, it does not leap)
+            dt = Mathf.Min(dt, 1 / 15f);                         // (after a long frame the bar runs on, it does not leap)
             loadShown = Mathf.MoveTowards(loadShown, loadTarget, dt * LOAD_PACE);
         }
         /// the bar is smoke: the part done is a billow of the interface's smoke growing from the left, a thin trace
@@ -92,17 +92,26 @@ namespace AsciiHero
         {
             loadBusy = true; loadLabel = label; loadShown = 0; loadTarget = 0.06f; loadFade = 1; motes.Clear();
             yield return null; yield return null;            // (the dark and the bar are on the screen before the work begins)
+            // under the dark nothing of the world is drawn: every frame of the loading is only the bar (the world being
+            // built behind it was drawn each frame, a third of a second a frame)
+            if (ascii != null) ascii.SetEnabled(false);
+            var sw = new System.Text.StringBuilder("Загрузка «" + label + "»:");
+            float tAll = Time.realtimeSinceStartup;
             for (int i = 0; i < steps.Length; i++)
             {
                 loadTarget = Mathf.Max(loadTarget, (i + 0.25f) / steps.Length);
-                // the bar has caught up with this step before it starts (a long step freezes the frame)
-                float w0 = Time.realtimeSinceStartup;
-                while (loadShown < loadTarget - 0.01f && Time.realtimeSinceStartup - w0 < 0.6f) yield return null;
+                float t0 = Time.realtimeSinceStartup;
                 try { steps[i](); } catch (System.Exception e) { Debug.LogException(e); }
+                sw.Append(" шаг ").Append(i + 1).Append(" ").Append(((Time.realtimeSinceStartup - t0) * 1000).ToString("0")).Append(" мс;");
                 loadTarget = (i + 1f) / steps.Length;
                 yield return null;
             }
-            while (loadShown < 0.999f) yield return null;
+            int fr = 0; float tw = Time.realtimeSinceStartup;
+            while (loadShown < 0.999f) { fr++; yield return null; }
+            sw.Append(" полоса догоняла ").Append(fr).Append(" кадров, ").Append(fr > 0 ? ((Time.realtimeSinceStartup - tw) * 1000 / fr).ToString("0") : "0").Append(" мс на кадр; всего ").Append(((Time.realtimeSinceStartup - tAll) * 1000).ToString("0")).Append(" мс");
+            Debug.Log(sw.ToString());
+            if (ascii != null) ascii.SetEnabled(true);
+            yield return null;
             float f0 = Time.realtimeSinceStartup;
             while (Time.realtimeSinceStartup - f0 < 0.35f) { loadFade = 1 - (Time.realtimeSinceStartup - f0) / 0.35f; yield return null; }
             loadFade = 0; loadBusy = false;
