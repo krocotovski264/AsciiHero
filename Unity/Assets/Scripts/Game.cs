@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.1.2 · Unity";
+        public const string VERSION = "beta 0.1.3 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -199,6 +199,7 @@ namespace AsciiHero
             display = new GameObject("DisplayCamera").AddComponent<Camera>();
             display.cullingMask = 0; display.clearFlags = CameraClearFlags.SolidColor; display.backgroundColor = Color.black; display.depth = 0;
             { var dd = display.GetUniversalAdditionalCameraData(); dd.renderShadows = false; dd.renderPostProcessing = false; }
+            yield return StartCoroutine(PlayIntro());       // (after Unity's splash: the helmet's intro, whole)
             if (!Step("Интерфейс", MakeUiAssets)) yield break;
             yield return null;
             if (!Step("Камеры и ASCII-рендер", () =>
@@ -233,6 +234,7 @@ namespace AsciiHero
             if (!Step("База движений (mocap)", MotionDB.Load)) yield break;
             yield return null;
             if (!Step("Герой и символы", () => { Rebuild(); Debug.Log("Символов на сцене: " + GlyphLayer.count); })) yield break;
+            loadTarget = 1; while (loadShown < 0.999f) yield return null;       // (the bar fills smoothly before the game shows)
             AutoPreset();
             ready = true;
             Debug.Log("Загрузка завершена за " + (Time.realtimeSinceStartup - loadT0).ToString("0.0") + " с");
@@ -1194,7 +1196,7 @@ namespace AsciiHero
                 if (any)
                 {   // a game is going: go on with the newest save, or start again (asked first)
                     float hw = (bw - 8 * k) / 2;
-                    if (Button(new Rect(cx - bw / 2, y, hw, bh), "ПРОДОЛЖИТЬ")) { int ns = NewestSave(); if (ns != -2) LoadGame(ns); }
+                    if (Button(new Rect(cx - bw / 2, y, hw, bh), "ПРОДОЛЖИТЬ")) { int ns = NewestSave(); if (ns != -2) RunLoading("Загрузка сохранения", () => { worldBuilt = true; if (tavern == null) SetupWorld(); }, () => { if (smap == null) BuildStory(); }, () => LoadGame(ns)); }
                     if (Button(new Rect(cx - bw / 2 + hw + 8 * k, y, hw, bh), "НОВАЯ ИГРА")) confirmNew = true;
                 }
                 else if (Button(new Rect(cx - bw / 2, y, bw, bh), "ИГРАТЬ")) NewGame();
@@ -2043,7 +2045,7 @@ namespace AsciiHero
 
         void LateUpdate()
         {
-            if (!ready || ascii == null) return;
+            if (!ready || ascii == null) { if (texWhite != null) SmokeLayerPrepare(); return; }      // (the loading bar's smoke)
             k = Mathf.Max(0.5f, Mathf.Min(Screen.height / 390f, Screen.width / 844f));
             safe = Screen.safeArea; safe.y = Screen.height - safe.yMax;   // to GUI coordinates
             var vr = ViewRect(); float W0 = Screen.width;
@@ -2303,6 +2305,7 @@ namespace AsciiHero
             uiRects.Clear();
             float W = Screen.width, H = Screen.height;
             if (LogHub.errors > seenErrors) { seenErrors = LogHub.errors; if (setDev) consoleOpen = true; }
+            if (introOn) { IntroGUI(W, H); FinishGui(); return; }
             if (!ready || ascii == null) { LoadingScreen(W, H); ConsoleUI(W, H, true); FinishGui(); return; }
             var vr = ViewRect();
             if (!ascii.plain)
@@ -2319,6 +2322,7 @@ namespace AsciiHero
                 if (!perfNoGui) GUI.Label(new Rect(L, T, 600 * k, 22 * k), (perfPhase == 0 ? "Тест нагрузки: прогрев " + (perfLocIx + 1) + " из " + perfLocs.Count : perfPhase == 1 ? "Тест нагрузки: биом " + (perfLocIx + 1) + " из " + perfLocs.Count + " · " + LocTitle(loc) : "Тест нагрузки: " + LocTitle(loc) + " · " + (perfIx + 1) + " из " + PERF.Length + " · " + PERF[perfIx]), sTitle);
                 FinishGui(); accG += Ms(tG); return;
             }
+            if (loadBusy) { LoadingOverlayGUI(W, H); FinishGui(); accG += Ms(tG); return; }      // (a loading over everything)
             if (gfxDlg != null) { GfxDialogUI(W, H); ConsoleUI(W, H, false); FinishGui(); accG += Ms(tG); return; }      // (over everything: a word about the graphics)
             if (world) DrawDanger(W, H);
             if (inMenu && !world) { MenuUI(W, H); ConsoleUI(W, H, false); FinishGui(); return; }
@@ -2338,18 +2342,20 @@ namespace AsciiHero
         // ---------- loading screen and on-screen log ----------
         void LoadingScreen(float W, float H)
         {
-            Fill(new Rect(0, 0, W, H), new Color(0.02f, 0.02f, 0.03f, 1));
-            float x = safe.x + 24 * k, y = safe.y + 24 * k, w = Mathf.Min(520 * k, W - 48 * k);
-            GUI.Label(new Rect(x, y, w, 26 * k), "ASCII HERO", sTitle);
-            GUI.Label(new Rect(x, y + 26 * k, w, 18 * k), Game.VERSION, sSmall);
-            string st = failed ? "Ошибка на шаге: " + stage : "Загрузка: " + stage + "…";
-            var stStyle = new GUIStyle(sBadge); stStyle.normal.textColor = failed ? new Color(1f, 0.45f, 0.4f) : new Color(0.86f, 0.84f, 0.78f);
-            GUI.Label(new Rect(x, y + 56 * k, w, 22 * k), st, stStyle);
-            var bar = new Rect(x, y + 84 * k, w, 6 * k);
-            Fill(bar, new Color(0.2f, 0.19f, 0.17f));
-            Fill(new Rect(bar.x, bar.y, bar.width * Mathf.Clamp01(stageIndex / (float)stageCount), bar.height), failed ? new Color(0.9f, 0.3f, 0.25f) : new Color(0.72f, 0.52f, 1.0f));
-            GUI.Label(new Rect(x, y + 96 * k, w, 18 * k), (Time.realtimeSinceStartup - loadT0).ToString("0.0") + " с · шаг " + stageIndex + " из " + stageCount, sSmall);
-            if (!consoleOpen) consoleOpen = failed;
+            Fill(new Rect(0, 0, W, H), new Color(0.01f, 0.01f, 0.02f, 1));
+            float x = safe.x + 24 * k, y = safe.y + 20 * k, w = Mathf.Min(520 * k, W - 48 * k);
+            GUI.Label(new Rect(x, y, w, 18 * k), Game.VERSION, sSmall);
+            if (failed)
+            {
+                var stStyle = new GUIStyle(sBadge); stStyle.normal.textColor = new Color(1f, 0.45f, 0.4f);
+                GUI.Label(new Rect(x, y + 24 * k, w, 22 * k), "Ошибка на шаге: " + stage, stStyle);
+                consoleOpen = true;
+            }
+            // the bar at the bottom, in the middle: it runs after the steps done
+            loadTarget = Mathf.Max(loadTarget, Mathf.Clamp01(stageIndex / (float)Mathf.Max(1, stageCount)));
+            if (Event.current.type == EventType.Repaint) LoadStep(Time.unscaledDeltaTime);
+            SmokeLayerDraw();
+            LoadBar(W, H, failed ? "Ошибка" : "Загрузка", loadShown);
         }
 
         void ConsoleUI(float W, float H, bool loading)
@@ -2498,7 +2504,7 @@ namespace AsciiHero
             if (Button(new Rect(x0, bottom, setDev ? (cw - 30 * k) / 6 : bw3, 32 * k), "СЛУЧ.")) Randomize();
             if (!setDev)
             {   // the game: the first location (the test places are the developer's)
-                if (Button(new Rect(x0 + bw3 + 6 * k, bottom, cw - bw3 - 6 * k, 32 * k), "В ПУТЬ ▶", true)) { PlayerPrefs.SetInt("char_made", 1); PlayerPrefs.Save(); StartStory(false); }
+                if (Button(new Rect(x0 + bw3 + 6 * k, bottom, cw - bw3 - 6 * k, 32 * k), "В ПУТЬ ▶", true)) { PlayerPrefs.SetInt("char_made", 1); PlayerPrefs.Save(); RunLoading("Мир собирается", () => { worldBuilt = true; if (tavern == null) SetupWorld(); }, () => { if (smap == null) BuildStory(); }, () => StartStory(false)); }
                 return;
             }
             float bw4 = (cw - 30 * k) / 6;

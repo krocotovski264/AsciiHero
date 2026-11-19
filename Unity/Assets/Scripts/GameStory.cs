@@ -1592,11 +1592,32 @@ namespace AsciiHero
                 }
             }
             var go = new GameObject("KK_" + name); go.transform.SetParent(parent, false); go.transform.localPosition = localPos; go.transform.localRotation = rot;
+            bool skullPart = name == "yskull" || name == "yjaw";
+            Vector3 skullC = Vector3.zero;
+            if (skullPart) { var bb = new Bounds(); bool f0 = true; foreach (var kv in KK["yskull"]) { if (f0) { bb = kv.Key.bounds; f0 = false; } else bb.Encapsulate(kv.Key.bounds); } skullC = bb.center * scale; }
             foreach (var kv in KK[name])
             {
                 // the size is baked into the vertices (the characters are laid out on the mesh as it is)
                 var src = kv.Key; var vv = src.vertices; for (int i = 0; i < vv.Length; i++) vv[i] *= scale;
-                var m = new Mesh { name = src.name }; m.vertices = vv; m.uv = new Vector2[vv.Length]; m.triangles = src.triangles; m.RecalculateNormals(); m.RecalculateBounds(); MeshGen.AddGlyphUV(m, false);
+                var tris = src.triangles;
+                if (skullPart)
+                {   // the skull's inside (the palate, the inner side of the jaw and the teeth, the vault): no characters, black -
+                    // the open mouth shows darkness. A face is inside when it looks toward the skull's middle.
+                    var outT = new List<int>(); var inT = new List<int>();
+                    for (int t = 0; t + 2 < tris.Length; t += 3)
+                    {
+                        Vector3 a0 = vv[tris[t]], a1 = vv[tris[t + 1]], a2 = vv[tris[t + 2]], nrm = Vector3.Cross(a1 - a0, a2 - a0), cen = (a0 + a1 + a2) / 3;
+                        bool inward = Vector3.Dot(nrm.normalized, (skullC - cen).normalized) > 0.2f;
+                        (inward ? inT : outT).Add(tris[t]); (inward ? inT : outT).Add(tris[t + 1]); (inward ? inT : outT).Add(tris[t + 2]);
+                    }
+                    if (inT.Count > 0)
+                    {
+                        var mi = new Mesh { name = src.name + "_in" }; mi.vertices = vv; mi.triangles = inT.ToArray(); mi.RecalculateNormals(); mi.RecalculateBounds();
+                        MeshGen.Obj(mi, actorMats["DARK"], go.transform, Vector3.zero, Quaternion.identity, false, "inside");
+                    }
+                    tris = outT.ToArray();
+                }
+                var m = new Mesh { name = src.name }; m.vertices = vv; m.uv = new Vector2[vv.Length]; m.triangles = tris; m.RecalculateNormals(); m.RecalculateBounds(); MeshGen.AddGlyphUV(m, false);
                 var mat = actorMats.Tint("LEATHER", kv.Value);
                 MeshGen.Obj(m, mat, go.transform, Vector3.zero, Quaternion.identity, true, "piece");
             }

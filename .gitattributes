@@ -59,3 +59,7 @@
 # The game sounds are small: kept in git itself (no LFS)
 Unity/Assets/Resources/Sounds/*.ogg -filter -diff -merge binary
 Unity/Assets/Resources/Voice/*.ogg -filter -diff -merge binary
+
+# small binaries kept out of LFS (the build machine's LFS upload is not always reachable)
+Unity/Assets/Icons/*.png -filter -diff -merge binary
+Unity/Assets/Resources/intro.mp4 -filter -diff -merge binary

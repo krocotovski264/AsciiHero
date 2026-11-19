@@ -31,6 +31,7 @@ namespace AsciiHero.Editor
             {
                 ProjectBootstrap.Ensure();
                 AnimatorProjectPatcher.Patch(false);
+                SetIcons();
                 AssetDatabase.SaveAssets();
 
                 var scenes = EditorBuildSettings.scenes.Where(s => s.enabled && File.Exists(s.path)).Select(s => s.path).ToArray();
@@ -74,6 +75,34 @@ namespace AsciiHero.Editor
                 code = 1;
             }
             if (exitWhenDone) EditorApplication.Exit(code);
+        }
+
+        /// the app's icon: the helmet with the violet light in the slots of its visor (Assets/Icons/icon.png) on every
+        /// Android icon kind (the adaptive one: the picture as its background, an empty foreground)
+        static void SetIcons()
+        {
+            try
+            {
+                AssetDatabase.ImportAsset("Assets/Icons/icon.png", ImportAssetOptions.ForceUpdate);
+                AssetDatabase.ImportAsset("Assets/Icons/icon_fg_empty.png", ImportAssetOptions.ForceUpdate);
+                var tex = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Icons/icon.png");
+                var empty = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Icons/icon_fg_empty.png");
+                if (tex == null) { Debug.LogWarning("[CIBuild] Assets/Icons/icon.png not found: the default icon stays"); return; }
+                var target = UnityEditor.Build.NamedBuildTarget.Android;
+                foreach (var kind in PlayerSettings.GetSupportedIconKinds(target))
+                {
+                    var icons = PlayerSettings.GetPlatformIcons(target, kind);
+                    foreach (var ic in icons)
+                    {
+                        var layers = new Texture2D[Math.Max(1, ic.maxLayerCount)];
+                        for (int i = 0; i < layers.Length; i++) layers[i] = i == 0 ? tex : (empty != null ? empty : tex);
+                        ic.SetTextures(layers);
+                    }
+                    PlayerSettings.SetPlatformIcons(target, kind, icons);
+                }
+                Debug.Log("[CIBuild] icon set: " + tex.width + "x" + tex.height);
+            }
+            catch (Exception e) { Debug.LogWarning("[CIBuild] the icon could not be set: " + e.Message); }
         }
 
         static string Arg(string name)
