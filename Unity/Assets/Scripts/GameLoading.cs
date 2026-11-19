@@ -1,5 +1,5 @@
 // The intro and the loading:
-//   - after Unity's own splash the intro plays (Resources/intro.mp4: the helmet's visor slams down, the violet light
+//   - after Unity's own splash the intro plays (StreamingAssets/intro.mp4: the helmet's visor slams down, the violet light
 //     comes up in its slots), not to be skipped
 //   - loading is a bar at the bottom in the middle, in the interface's smoke, with motes rising from it; the bar never
 //     jumps: it runs after what is done at a set pace (so a long step makes it run on after it rather than leap),
@@ -17,21 +17,21 @@ namespace AsciiHero
         VideoPlayer introVp; RenderTexture introRT; bool introOn;
         IEnumerator PlayIntro()
         {
-            VideoClip clip = null;
-            try { clip = Resources.Load<VideoClip>("intro"); } catch (System.Exception e) { Debug.LogWarning("Заставка не загрузилась: " + e.Message); }
-            if (clip == null) yield break;
-            introRT = new RenderTexture((int)clip.width, (int)clip.height, 0) { name = "Intro" }; introRT.Create();
+            // (from StreamingAssets as it is: the build machine cannot import the movie as a clip)
+            string url = System.IO.Path.Combine(Application.streamingAssetsPath, "intro.mp4");
+            introRT = new RenderTexture(1920, 1080, 0) { name = "Intro" }; introRT.Create();
             var go = new GameObject("Intro"); introVp = go.AddComponent<VideoPlayer>();
-            introVp.playOnAwake = false; introVp.clip = clip; introVp.renderMode = VideoRenderMode.RenderTexture; introVp.targetTexture = introRT;
+            introVp.playOnAwake = false; introVp.source = VideoSource.Url; introVp.url = url; introVp.renderMode = VideoRenderMode.RenderTexture; introVp.targetTexture = introRT;
             introVp.audioOutputMode = VideoAudioOutputMode.Direct; introVp.isLooping = false; introVp.skipOnDrop = true;
+            bool err = false; introVp.errorReceived += (v, m) => { err = true; Debug.LogWarning("Заставка: " + m); };
             introVp.Prepare();
             float t0 = Time.realtimeSinceStartup;
-            while (!introVp.isPrepared && Time.realtimeSinceStartup - t0 < 4f) yield return null;
-            if (!introVp.isPrepared) { Debug.LogWarning("Заставка не подготовилась за 4 с: пропущена"); Destroy(go); yield break; }
+            while (!introVp.isPrepared && !err && Time.realtimeSinceStartup - t0 < 3f) yield return null;
+            if (!introVp.isPrepared) { Debug.LogWarning("Заставка не подготовилась: пропущена"); Destroy(go); introRT.Release(); introRT = null; yield break; }
             introVp.SetDirectAudioVolume(0, Mathf.Clamp01(setSound / 100f));
             introOn = true; introVp.Play();
-            float len = (float)clip.length; t0 = Time.realtimeSinceStartup;
-            while (Time.realtimeSinceStartup - t0 < len + 1.5f && (introVp.isPlaying || Time.realtimeSinceStartup - t0 < 0.5f)) yield return null;
+            float len = (float)introVp.length; if (len <= 0) len = 6.5f; t0 = Time.realtimeSinceStartup;
+            while (!err && Time.realtimeSinceStartup - t0 < len + 1.5f && (introVp.isPlaying || Time.realtimeSinceStartup - t0 < 0.5f)) yield return null;
             introOn = false; Destroy(go); introRT.Release(); introRT = null;
         }
         void IntroGUI(float W, float H)
