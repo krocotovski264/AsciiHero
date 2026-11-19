@@ -92,8 +92,9 @@ Shader "AsciiHero/Grass"
                 float2 wind = wd * ((0.05 + 0.1 * ws) + 0.85 * wave / stiff - 0.28 * recoil * sin(_AsciiTime * 5.0 + s * 9.0 + 1.5))
                             + float2(-wd.y, wd.x) * fl * (0.015 + 0.06 * ws * (0.3 + wave)) + wd * fl * 0.03 * ws * wave;
                 // a slow sway of its own even in still air (a noise over the field, so neighbours sway together)
-                float2 idle = float2(WNoise(a.xz * 0.35 + _AsciiTime * 0.25) - 0.5, WNoise(a.xz * 0.35 + 7.3 - _AsciiTime * 0.21) - 0.5);
-                wind += idle * (0.16 + 0.1 * frac(s * 4.3)) * (1.0 - 0.5 * saturate(ws));
+                // (small: it bends the blade a little but never turns its character, or the whole field flickers | / \ at once)
+                float2 idle = float2(WNoise(a.xz * 0.6 + _AsciiTime * 0.12) - 0.5, WNoise(a.xz * 0.6 + 7.3 - _AsciiTime * 0.1) - 0.5);
+                float2 sway = idle * (0.05 + 0.03 * frac(s * 4.3)) * (1.0 - 0.5 * saturate(ws));
                 float2 lean = wind; float push = 0;
                 for (int k = 0; k < 4; k++)
                 {
@@ -103,7 +104,8 @@ Shader "AsciiHero/Grass"
                     lean += normalize(d + 1e-4) * pk * 0.95; push = max(push, pk);
                 }
                 float ll = length(lean); if (ll > 0.96) { lean *= 0.96 / ll; ll = 0.96; }
-                float3 tip = a + float3(lean.x, sqrt(1.0 - ll * ll), lean.y) * h;
+                float2 leanS = lean + sway; float lls = min(length(leanS), 0.96);
+                float3 tip = a + float3(leanS.x, sqrt(1.0 - lls * lls), leanS.y) * h;
                 float3 pVS = TransformWorldToView((a + tip) * 0.5);
                 float4 bclip = TransformWorldToHClip(a);
                 float4 sp = ComputeScreenPos(bclip);
