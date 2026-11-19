@@ -28,6 +28,8 @@ Shader "AsciiHero/Lit"
 
         HLSLINCLUDE
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+        #include "AsciiWeather.hlsl"
+        float4 _WaterRip[8];
         CBUFFER_START(UnityPerMaterial)
             float4 _Color;
             float4 _MainTex_ST;
@@ -220,14 +222,38 @@ Shader "AsciiHero/Lit"
                 half4 albedo = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv) * _Color;
                 float gloss = _Glossiness;
                 if (_AsciiFlat > 0.5 && nWS.y > 0.5)
-                {   // the ground under the sky: white with snow, dark and glinting when wet
-                    float up = saturate((nWS.y - 0.55) * 3.0);
+                {   // the ground under the sky: white with snow (frost, then drifts; trodden paths greyer), dark and
+                    // glinting when wet, puddles (rings from the rain and from steps), ice
+                    float up = saturate((nWS.y - 0.55) * 3.0), flatK = saturate((nWS.y - 0.82) * 12.0);
                     float2 sp = i.positionWS.xz;
                     float n = frac(sin(dot(floor(sp * 3.0), float2(12.9898, 78.233))) * 43758.5453);
                     float sn = up * saturate(_AsciiSeason.w * 1.25 - 0.25 * n);
-                    albedo.rgb = lerp(albedo.rgb, half3(0.82, 0.86, 0.94), sn);
+                    float tr = WxTrail(sp);
+                    sn = max(sn, WxDrift(sp) * flatK);
+                    albedo.rgb = lerp(albedo.rgb, lerp(half3(0.82, 0.86, 0.94), half3(0.55, 0.59, 0.67), tr), sn);
                     float wt = _AsciiWet * up * (1.0 - sn);
                     albedo.rgb *= 1.0 - 0.35 * wt; gloss = lerp(gloss, 0.8, wt);
+                    float pn = WxNoise(sp);
+                    float pd = saturate((_WxGround.x - pn) / 0.025) * flatK * (1.0 - sn);
+                    float ic = saturate((_WxGround.y - pn) / 0.025) * flatK * (1.0 - sn);
+                    if (pd > 0.001)
+                    {
+                        float2 cg = floor(sp * 2.0); float ph = frac(_AsciiTime * 1.1 + WxHash((int2)cg));
+                        float rip = _WxState.y * exp(-abs(length(frac(sp * 2.0) - 0.5) - ph * 0.45) * 40.0) * (1.0 - ph);
+                        for (int k = 0; k < 8; k++)
+                        {
+                            float4 r = _WaterRip[k]; float age = _AsciiTime - r.z;
+                            if (age < 0.0 || age > 1.6 || r.w <= 0.0) continue;
+                            rip += exp(-abs(length(sp - r.xy) - age * 0.7 * r.w) * 25.0) * (1.0 - age / 1.6) * 0.8;
+                        }
+                        albedo.rgb = lerp(albedo.rgb, half3(0.07, 0.09, 0.12) + rip * 0.35, pd); gloss = lerp(gloss, 0.95, pd);
+                    }
+                    albedo.rgb = lerp(albedo.rgb, half3(0.6, 0.7, 0.8), ic * 0.85); gloss = lerp(gloss, 0.9, ic);
+                }
+                else if (_AsciiActor > 0.5)
+                {   // a creature out in the weather: soaked (darker, glossier), snow settling on what faces up
+                    albedo.rgb *= 1.0 - 0.28 * _WxActor.x; gloss = lerp(gloss, 0.75, _WxActor.x * 0.8);
+                    albedo.rgb = lerp(albedo.rgb, half3(0.85, 0.88, 0.95), saturate((nWS.y - 0.6) * 4.0) * _WxActor.y);
                 }
 
                 InputData d = (InputData)0;

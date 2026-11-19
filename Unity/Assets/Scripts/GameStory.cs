@@ -220,22 +220,23 @@ namespace AsciiHero
             StoryClock(Time.deltaTime);
             if (L.outdoor)
             {
+                StoryWeather(Time.deltaTime, true);
                 skyS.Update(Time.deltaTime);
                 Color atn = skyS.ambTint * skyS.ambK;
                 SetAmbient(L.ambSky * atn, L.ambEq * atn, L.ambGround * atn);
                 if (moonLight != null) { moonLight.intensity = skyS.sunK * L.moonK; moonLight.enabled = moonLight.intensity > 0.01f; moonLight.color = skyS.sunCol; moonLight.transform.rotation = Quaternion.LookRotation(-skyS.sunDir); }
                 heroLight.intensity = L.heroLightK * skyS.heroK; ascii.exposure = L.exposure * skyS.expK;
                 float amt = skyS.Rain + skyS.Snow;
-                if (precipGo == null && amt > 0.01f) precipGo = GlyphLayer.MakePrecip(4000);
+                if (precipGo == null && amt > 0.01f) precipGo = GlyphLayer.MakePrecip(1200);          // (no more than 1200 drops or flakes at once)
                 if (precipGo != null)
                 {
                     if (precipGo.activeSelf != amt > 0.01f) precipGo.SetActive(amt > 0.01f);
                     Shader.SetGlobalVector("_AsciiPrecipW", new Vector4(skyS.Rain, skyS.Snow, skyS.DayK, 0));
-                    Shader.SetGlobalVector("_PrecipBox", new Vector4(camTgt.x, 0, camTgt.z, 34));
                 }
                 sBiome = "out";
                 return;
             }
+            StoryWeather(Time.deltaTime, false);
             string b = L.inn != null ? "tavern" : "cave";
             if (!force && b == sBiome) return;
             sBiome = b;
@@ -247,7 +248,7 @@ namespace AsciiHero
         void StoryHide()
         {
             Shader.SetGlobalFloat("_VisOn", 0);
-            if (skyS != null) skyS.clock = false;
+            if (skyS != null) { skyS.clock = false; WeatherOff(); }
             foreach (var l in sLocs) l.SetActive(false);
             if (story && loc is StoryLocation) { sLast = (StoryLocation)loc; sLastPos = pos; sLastHeading = player != null ? player.heading : 0; }
             story = false; letter = 0; sDir = null;
@@ -558,6 +559,7 @@ namespace AsciiHero
                 if (f.leapT > 0) { f.leapT -= dt; extra = f.leapV * dt; f.leapV *= Mathf.Exp(-dt * 5); }
                 if (f.stagger > 0) { dir2 = null; mag = 0; }
                 if (f.dDur > 0) { dir2 = null; mag = 0; lockP = new Vector2(pos.x, pos.z); }
+                if (L.outdoor) FoeFooting(f.act, f.p);
                 var dd = f.act.Locomotion(dt, dir2, mag, lockP, me, q => FoeCollide(f, q));
                 dd += f.act.TakeAttackDrift() + extra;
                 var np = FoeCollide(f, me + dd);

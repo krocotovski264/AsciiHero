@@ -29,6 +29,7 @@ Shader "AsciiHero/Glyph"
             #pragma vertex vert
             #pragma fragment frag
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "AsciiWeather.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
                 float _AsciiRow;
@@ -165,6 +166,14 @@ Shader "AsciiHero/Glyph"
                 // puff (a burst of smoke where a limb is torn off): the glyphs fly apart from the centre, rise and thin out
                 if (_GlyphPuff > 0.0) pOS += i.normalOS * _GlyphPuff * (0.18 + 0.5 * i.seed.x);
                 float3 pWS = DashWS(ClothWS(TransformObjectToWorld(pOS), i.positionOS.xyz));
+                // snow drifts: the ground's characters stand up off level ground where the snow lies (they take their
+                // colour and their place in depth from the ground under them; trodden paths sink back)
+                float drift = 0.0;
+                if (_AsciiActor < 0.5 && _WxGround.w > 0.0 && pWS.y < 0.35)
+                {
+                    float3 nW = TransformObjectToWorldNormal(i.normalOS);
+                    if (nW.y > 0.82) drift = WxDrift(pWS.xz) * _WxGround.w * (1.0 - 0.85 * WxTrail(pWS.xz)) * (0.65 + 0.35 * WxVN(pWS.xz * 3.1));
+                }
                 // dash, chain mail: every character (a link) flies on its own, a little later or sooner than its neighbours,
                 // on its own wobbling path, and they gather on the body again
                 // dash: the shadow does not move as a body. Each glyph lingers a moment where the body was, then drifts as
@@ -261,6 +270,7 @@ Shader "AsciiHero/Glyph"
                 float4 ink = _GlyphInk[(int)(clamp(_AsciiRow, 0.0, 13.0) * 16.0 + clamp(gi, 0.0, 15.0) + 0.5)];
                 float2 lc = lerp(ink.xy, ink.zw, i.corner + 0.5);
                 o.local = lc;
+                if (drift > 0.001) pVS = TransformWorldToView(pWS + float3(0, drift, 0));
                 pVS.xy += (lc - 0.5) * _GlyphCell.xy * GLYPH_SCALE * (_AsciiActor > 0.5 ? 1.18 * max(1.0, _AsciiActorLod) : lod * farL);   // upright character in the view plane; on characters dense and overlapping so no gaps show
                 o.positionCS = vis ? TransformWViewToHClip(pVS) : float4(2, 2, 2, 1);
                 return o;

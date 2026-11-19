@@ -37,7 +37,9 @@ namespace AsciiHero
             clock = true;
         }
         static readonly float[] AMOUNT = { 0.35f, 0.65f, 1f };
-        int weather => !precip ? 0 : season == 3 ? 3 : level == 2 ? 2 : 1;
+        int weather => !precip ? 0 : (fallSet >= 0 ? fallSet == 1 : season == 3) ? 3 : level == 2 ? 2 : 1;
+        // the story's weather says what falls and how wet and white the ground is (-1: the sky decides, as in the test world)
+        public int fallSet = -1; public float wetSet = -1, coverSet = -1;
 
         // eased state
         float[] todW = { 0, 0, 0, 1 }, seasW = { 0, 1, 0, 0 };
@@ -69,8 +71,10 @@ namespace AsciiHero
             rain += (rT - rain) * k; snow += (sT - snow) * k;
             overcast += ((weather == 0 ? 0 : 0.45f + 0.55f * amt) - overcast) * k;
             wet += ((weather == 1 || weather == 2 ? 1 : 0) - wet) * (rT > wet ? kSlow : (1 - Mathf.Exp(-dt / 20f)));            // dries slowly
+            if (wetSet >= 0) wet = wetSet;
             float coverT = Mathf.Max(seasW[3] * 0.85f, weather == 3 ? 1 : 0);
             snowCover += (coverT - snowCover) * (coverT > snowCover ? (1 - Mathf.Exp(-dt / (weather == 3 ? 6f : 2f))) : (1 - Mathf.Exp(-dt / 8f)));
+            if (coverSet >= 0) snowCover = coverSet;
             // lightning in a downpour: a flash every 6-14 s, sometimes doubled
             flash = Mathf.Max(0, flash - dt * 4);
             if (rain > 0.8f && weather == 2) { flashT -= dt; if (flashT <= 0) { flash = 1; flashT = Random.value < 0.3f ? 0.18f : 6 + 8 * Random.value; } }
@@ -103,6 +107,7 @@ namespace AsciiHero
         {
             Shader.SetGlobalVector("_AsciiGrade", new Vector4(1, 1, 1, 1)); Shader.SetGlobalVector("_AsciiPrecip", Vector4.zero); Shader.SetGlobalVector("_AsciiPrecipW", Vector4.zero);
             Shader.SetGlobalVector("_AsciiSeason", Vector4.zero); Shader.SetGlobalFloat("_AsciiWet", 0); Shader.SetGlobalFloat("_AsciiDayK", 0);
+            Shader.SetGlobalVector("_WxGround", new Vector4(-1, -1, -1, 0)); Shader.SetGlobalVector("_WxState", Vector4.zero); Shader.SetGlobalVector("_WxActor", Vector4.zero); Shader.SetGlobalVector("_WxTrailRect", Vector4.zero);
         }
         /// the precipitation leans with the wind (in screen cells per cell of fall)
         public void Wind(Vector2 screenWind) { Shader.SetGlobalVector("_AsciiPrecipWind", new Vector4(screenWind.x, screenWind.y, 0, 0)); }

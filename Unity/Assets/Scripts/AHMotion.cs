@@ -48,6 +48,7 @@ namespace AsciiHero
         public bool useMM;
         bool loopMode;
         public float maxSpeed = 3.0f;
+        public float slip, speedK = 1;          // on ice the body slides (its speed answers the stick slowly); deep snow holds it back
         /// in water: how deep the hero stands (m), and the most speed the water lets him have (m/s) - set by the game
         public float wadeDepth, speedCap = 99f;
         struct Sim { public float x, z, vx, vz, ax, az, h, w; public bool init; }
@@ -180,6 +181,7 @@ namespace AsciiHero
                 if (lockPos.HasValue) spd = Mathf.Min(spd, 1.7f);
                 if (guardHeld) spd = Mathf.Min(spd, 1.1f);          // behind the shield you only walk
                 spd = Mathf.Min(spd, speedCap);                      // the water holds the legs back
+                spd *= speedK;
                 int legsC = Legs, armsC = (limbs[1] ? 1 : 0) + (limbs[2] ? 1 : 0);
                 if (legsC == 1) spd = Mathf.Min(spd, 1.9f);                                        // hopping on one leg
                 if (legsC == 0) spd = Mathf.Min(spd, armsC == 2 ? 0.5f : armsC == 1 ? 0.35f : 0.18f);   // crawling
@@ -189,7 +191,7 @@ namespace AsciiHero
             float hGoal = S.h;
             if (lockPos.HasValue) hGoal = Mathf.Atan2(lockPos.Value.x - S.x, lockPos.Value.y - S.z);
             else if (dir.HasValue) hGoal = Mathf.Atan2(dir.Value.x, dir.Value.y);
-            const float HV = 0.15f, HR = 0.1f;   // snappy: velocity and facing reach the stick in ~0.25 s
+            float HV = Mathf.Lerp(0.15f, 1.3f, slip); const float HR = 0.1f;   // snappy: velocity and facing reach the stick in ~0.25 s (on ice: slow, it slides)
             SpringChar(ref S.x, ref S.vx, ref S.ax, vgx, HV, dt);
             SpringChar(ref S.z, ref S.vz, ref S.az, vgz, HV, dt);
             SpringAng(ref S.h, ref S.w, hGoal, HR, dt);

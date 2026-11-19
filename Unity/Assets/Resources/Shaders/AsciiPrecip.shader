@@ -49,8 +49,10 @@ Shader "AsciiHero/Precip"
                 float3 p = 0, vel = 0; float row = 1.0, gi = 10.0;
                 if (!snow)
                 {
-                    float sp = 7.5 + 2.5 * frac(s * 17.3);
-                    vel = float3(wd.x * 1.8, -sp, wd.y * 1.8);
+                    // a storm (wind past 80 %): driven almost level from the windward side
+                    float stK = saturate((_AsciiWind.z - 0.8) / 0.2);
+                    float sp = (7.5 + 2.5 * frac(s * 17.3)) * (1.0 - 0.55 * stK);
+                    vel = float3(wd.x * 1.8 * (1.0 + 3.0 * stK), -sp, wd.y * 1.8 * (1.0 + 3.0 * stK));
                     float fy = frac(u.y - t * sp / Hh);
                     p.xz = u.xz * S + vel.xz * (t * 0.25) - vel.xz / sp * trail * 0.2;
                     p.y = fy * Hh + trail * 0.2;                    // the trail: the characters above and behind the head

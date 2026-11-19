@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.81 · Unity";
+        public const string VERSION = "beta 0.82 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -1856,7 +1856,8 @@ namespace AsciiHero
                     else if (r < 0.7f) { windPhase = 1; windTarget = 0.4f + 0.3f * Random.value; windPhaseT = 3f + 5f * Random.value; }                   // breeze
                     else { windPhase = 2; windTarget = 0.9f + 0.5f * Random.value; windPhaseT = 1.5f + 2.5f * Random.value; }                            // gust
                 }
-                windStr += (windTarget - windStr) * (1 - Mathf.Exp(-dt / (windTarget > windStr ? 0.7f : 1.6f)));        // rises quicker than it dies away
+                float wT = WeatherWind(windTarget);
+                windStr += (wT - windStr) * (1 - Mathf.Exp(-dt / (wT > windStr ? 0.7f : 1.6f)));        // rises quicker than it dies away
                 windA += dt * (0.03f * Mathf.Sin(tNow * 0.031f) + (windPhase == 2 ? 0.06f * Mathf.Sin(tNow * 0.9f) : 0));
                 windRun += dt * (0.8f + 3.2f * windStr);
                 Vector2 wd = new Vector2(Mathf.Cos(windA), Mathf.Sin(windA));
@@ -2511,6 +2512,8 @@ namespace AsciiHero
         {
             string sf = Surface(); float v = Mathf.Lerp(0.3f, 0.6f, Mathf.Clamp01(sp / 4.5f));
             if (sf == "water") { sfx.Play(loc.DepthW(pos) > 0.3f ? "splash" : "step_water", v * 0.9f); return; }
+            if (sf == "puddle") { sfx.Play("step_water", v * 0.9f, 1, 0.09f); WxSpray(false, sp); return; }      // a puddle on the meadow: a splash, rings
+            if (sf == "snow" && story && sp > 2.6f) WxSpray(true, sp);                                                  // snow kicked up on a run
             if (sf == "snow") v *= 1.2f; if (sf == "mud") v *= 0.9f;
             sfx.Play("step_" + sf, v, 1, 0.09f, null, 0, true);
             if (skyS.Rain > 0.3f && sf != "stone" && sf != "wood") sfx.Play("step_water", v * 0.35f * skyS.Rain, 1.2f);      // wet ground
@@ -2521,7 +2524,7 @@ namespace AsciiHero
             if (loc == tavern) return "wood";
             float wd = loc.DepthW(pos);
             if (wd > 0.04f) return "water";
-            if (loc is StoryLocation) { var b = ((StoryLocation)loc).BiomeAtW(pos); return b == "tavern" ? "wood" : b == "meadow" ? (skyS.SnowCover > 0.45f ? "snow" : "grass") : "stone"; }
+            if (loc is StoryLocation) { var b = ((StoryLocation)loc).BiomeAtW(pos); return b == "tavern" ? "wood" : b == "meadow" ? (story ? WeatherSurface() : skyS.SnowCover > 0.45f ? "snow" : "grass") : "stone"; }
             if (skyS.SnowCover > 0.45f && loc != cave) return "snow";
             if (loc == cave) return "stone";
             if (loc == field || loc == forest) return "grass";
@@ -2620,13 +2623,17 @@ namespace AsciiHero
                     if (Button(new Rect(x1 - (names.Length - i) * (bw + gap) + gap, y, bw, bh), names[i], cur == i)) set(i);
                 y += bh + gap;
             }
-            RowB(Sky.TOD, skyS.tod, i => skyS.tod = i);
-            RowB(Sky.SEASON, skyS.season, i => skyS.season = i);
+            RowB(Sky.TOD, skyS.tod, i => { if (story) StorySetTod(i); else skyS.tod = i; });
+            RowB(Sky.SEASON, skyS.season, i => { if (story) StorySetSeason(i); else skyS.season = i; });
             // precipitation: on/off, then how strong (snow in winter, rain otherwise)
-            if (Button(new Rect(x1 - 4 * (bw + gap) + gap, y, bw, bh), (skyS.precip ? "[x] " : "[ ] ") + "Осадки", skyS.precip)) skyS.precip = !skyS.precip;
+            if (Button(new Rect(x1 - 4 * (bw + gap) + gap, y, bw, bh), (skyS.precip ? "[x] " : "[ ] ") + "Осадки", skyS.precip))
+            {
+                if (story) { if (wx.Falling) wx.Stop(); else wx.Start(1, 600); } else skyS.precip = !skyS.precip;
+            }
             for (int i = 0; i < 3; i++)
-                if (Button(new Rect(x1 - (3 - i) * (bw + gap) + gap, y, bw, bh), Sky.LEVEL[i], skyS.precip && skyS.level == i)) { skyS.level = i; skyS.precip = true; }
+                if (Button(new Rect(x1 - (3 - i) * (bw + gap) + gap, y, bw, bh), Sky.LEVEL[i], skyS.precip && skyS.level == i)) { if (story) wx.Start(i, 600); else { skyS.level = i; skyS.precip = true; } }
             y += bh + gap;
+            if (story) WeatherDevRow(x1, ref y, bw, bh, gap);
         }
 
         // ---------- backpack ----------
