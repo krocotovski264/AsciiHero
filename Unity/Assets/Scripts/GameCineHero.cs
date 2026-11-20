@@ -64,6 +64,18 @@ namespace AsciiHero
                 }
                 cineEye = eye; cineAt = c - Vector3.up * 0.08f; cineFov = 32; cineRoll = 0;
                 cineRec = t >= 0;
+                if (Mathf.Abs(t) < dt * 0.5f)
+                {
+                    var sb = new System.Text.StringBuilder("cine: near:");
+                    foreach (var r in Object.FindObjectsByType<Renderer>(FindObjectsSortMode.None))
+                    {
+                        if (!r.enabled || !r.gameObject.activeInHierarchy || r.transform.IsChildOf(hero.go.transform)) continue;
+                        var b = r.bounds; if ((b.center - H).magnitude > 4 || b.size.magnitude > 60) continue;
+                        var p = r.transform; string path = p.name; for (int k = 0; k < 3 && p.parent != null; k++) { p = p.parent; path = p.name + "/" + path; }
+                        sb.Append(" [").Append(path).Append(" ").Append(b.size.ToString("0.0")).Append("]");
+                    }
+                    CineLog(sb.ToString());
+                }
                 if (Mathf.Abs(t) < dt * 0.5f) CineLog("cine: sky tod " + skyS.tod + " sunK " + skyS.sunK + " exp " + ascii.exposure);
                 t += dt;
                 yield return null;
