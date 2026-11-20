@@ -77,14 +77,14 @@ namespace AsciiHero
                 if (q.kind == 0)
                 {
                     q.v *= Mathf.Exp(-dt * 2.1f); q.v.y += 3.2f * dt;                     // drag, the hot gas rising
-                    q.v += RndSphere() * 9f * dt;                                         // turbulence
+                    q.v += RndSphere() * 16f * dt;                                        // turbulence
                     if (q.p.y < gy + 0.25f && q.v.y < 0)
                     {                                                                      // it hits the ground: spreads, rolls on
                         var hv = new Vector3(q.v.x, 0, q.v.z); q.v = hv * 0.75f + RndSphere().Flat() * hv.magnitude * 0.35f; q.v.y = Mathf.Abs(q.v.y) * 0.1f + 1.2f;
                         q.p.y = gy + 0.25f;
                         if (Rnd() < 0.18f) SmokeAt(q.p + Vector3.up * 0.4f, q.v * 0.3f + Vector3.up * 1.8f, 0.5f, 2, 1.5f + Rnd() * 1.8f);
                     }
-                    q.heat = Mathf.Clamp01(1 - q.age / q.life * 1.15f);
+                    q.heat = Mathf.Clamp01(1 - q.age / q.life * 1.7f) * (0.75f + 0.25f * Mathf.PerlinNoise(q.p.x * 0.7f, q.p.z * 0.7f + q.age * 3));
                     q.size = 0.26f + 0.5f * Mathf.Sqrt(q.age / q.life);
                     if (q.age > q.life * 0.7f && Rnd() < dt * 2) SmokeAt(q.p, q.v * 0.3f + Vector3.up, 0.5f, 2, 1.5f + Rnd() * 1.5f);
                 }
@@ -118,11 +118,11 @@ namespace AsciiHero
             {
                 float h = q.heat; Color c;
                 if (q.kind == 1) { c = new Color(1.0f, 0.55f, 0.15f) * (0.6f + h); fireP.Add(q.p, c, 0.09f, h > 0.5f ? 2 : 1, 9); continue; }
-                if (h > 0.66f) c = Color.Lerp(new Color(1.0f, 0.55f, 0.12f), new Color(1.0f, 0.86f, 0.45f), (h - 0.66f) / 0.34f);
+                if (h > 0.66f) c = Color.Lerp(new Color(1.0f, 0.55f, 0.12f), new Color(1.0f, 0.74f, 0.3f), (h - 0.66f) / 0.34f);
                 else if (h > 0.3f) c = Color.Lerp(new Color(0.75f, 0.16f, 0.03f), new Color(1.0f, 0.55f, 0.12f), (h - 0.3f) / 0.36f);
                 else c = Color.Lerp(new Color(0.14f, 0.03f, 0.01f), new Color(0.75f, 0.16f, 0.03f), h / 0.3f);
                 int g = Mathf.Clamp(Mathf.RoundToInt(2 + h * 10 + Rnd() * 2), 1, 15);
-                fireP.Add(q.p, c, q.size, g, 9);
+                fireP.Add(q.p, c * (0.75f + 0.35f * Rnd()), q.size, g, Rnd() < 0.5f ? 9 : 8);
             }
             fireP.End();
             // the smoke from the farthest to the nearest (each laid over what is behind it)
@@ -259,10 +259,10 @@ namespace AsciiHero
                 if (t > T_FIRE0 && t < T_FIRE1)
                 {
                     float ramp = Smooth(T_FIRE0, T_FIRE0 + 0.25f, t) * (1 - Smooth(T_FIRE1 - 0.3f, T_FIRE1, t));
-                    int nEmit = Mathf.RoundToInt(300 * ramp * dt * 30);
+                    int nEmit = Mathf.RoundToInt(210 * ramp * dt * 30);
                     for (int i = 0; i < nEmit; i++)
                     {
-                        var d = (mouthDir + RndSphere() * 0.09f).normalized;
+                        var d = (mouthDir + RndSphere() * 0.17f).normalized;
                         FireAt(mouth + d * Rnd() * 0.8f, d * (24 + Rnd() * 8), 0.75f + Rnd() * 0.55f);
                     }
                     glow = ramp;
