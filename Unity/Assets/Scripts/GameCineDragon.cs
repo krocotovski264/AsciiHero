@@ -85,7 +85,7 @@ namespace AsciiHero
                         if (Rnd() < 0.18f) SmokeAt(q.p + Vector3.up * 0.4f, q.v * 0.3f + Vector3.up * 1.8f, 0.5f, 2, 1.5f + Rnd() * 1.8f);
                     }
                     q.heat = Mathf.Clamp01(1 - q.age / q.life * 1.15f);
-                    q.size = 0.11f + 0.26f * Mathf.Sqrt(q.age / q.life);
+                    q.size = 0.26f + 0.5f * Mathf.Sqrt(q.age / q.life);
                     if (q.age > q.life * 0.7f && Rnd() < dt * 2) SmokeAt(q.p, q.v * 0.3f + Vector3.up, 0.5f, 2, 1.5f + Rnd() * 1.5f);
                 }
                 else
@@ -326,10 +326,10 @@ namespace AsciiHero
                 {   // the pull back: over the knight's head to behind his shoulder
                     float u = Smooth(T_PULL0, T_PULL1, t);
                     var e0 = D - f * 19f + side * 1.8f + Vector3.up * 1.45f;
-                    var e1 = H - f * 4.3f + side * 1.15f + Vector3.up * 1.95f;
+                    var e1 = H - f * 3.8f + side * 0.55f + Vector3.up * 1.75f;
                     eye = Vector3.Lerp(e0, e1, u) + Vector3.up * Mathf.Sin(u * Mathf.PI) * 1.4f;
-                    at2 = Vector3.Lerp(new Vector3(D.x, gy, D.z) + Vector3.up * 2.5f - f * 4, new Vector3(D.x, gy, D.z) + Vector3.up * 3.4f - f * 6, u);
-                    fov = Mathf.Lerp(44, 40, u);
+                    at2 = Vector3.Lerp(new Vector3(D.x, gy, D.z) + Vector3.up * 2.5f - f * 4, new Vector3(D.x, gy, D.z) + Vector3.up * 2.2f - f * 8, u);
+                    fov = Mathf.Lerp(44, 46, u);
                     eye += side * Mathf.Sin(t * 0.7f) * 0.05f + Vector3.up * Mathf.Sin(t * 0.9f) * 0.04f;     // (a hand-held drift)
                 }
                 // the ground shakes
