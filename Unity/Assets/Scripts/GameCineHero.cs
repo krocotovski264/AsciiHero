@@ -33,9 +33,9 @@ namespace AsciiHero
                 int hid = 0;
                 foreach (var r in L.root.GetComponentsInChildren<Renderer>(false))
                 {
-                    var nm = r.gameObject.name; if (nm == "Ground" || nm == "Grass" || nm == "Path") continue;           // (their characters too: else they stay in the air)
-                    var b = r.bounds; if (b.size.x > 25 || b.size.z > 25) continue;
-                    if ((new Vector3(b.center.x, H.y, b.center.z) - H).magnitude < 14 + Mathf.Max(b.extents.x, b.extents.z)) { r.gameObject.SetActive(false); hid++; }
+                    var nm = r.gameObject.name; if (nm == "Ground" || nm == "Grass" || nm == "Path" || nm == "Road" || nm == "Rut" || r.transform.parent != null && (r.transform.parent.name == "Ground" || r.transform.parent.name == "Grass" || r.transform.parent.name == "Road" || r.transform.parent.name == "Rut")) continue;
+                    var b = r.bounds; if (b.size.x > 60 || b.size.z > 60) continue;
+                    if ((new Vector3(b.center.x, H.y, b.center.z) - H).magnitude < 400) { r.gameObject.SetActive(false); hid++; }      // (an empty field: only the ground)
                 }
                 CineLog("cine: put away " + hid);
             }
