@@ -82,10 +82,10 @@ namespace AsciiHero
                     {                                                                      // it hits the ground: spreads, rolls on
                         var hv = new Vector3(q.v.x, 0, q.v.z); q.v = hv * 0.75f + RndSphere().Flat() * hv.magnitude * 0.35f; q.v.y = Mathf.Abs(q.v.y) * 0.1f + 1.2f;
                         q.p.y = gy + 0.25f;
-                        if (Rnd() < 0.35f) SmokeAt(q.p + Vector3.up * 0.4f, q.v * 0.3f + Vector3.up * 1.5f, 0.6f);
+                        if (Rnd() < 0.5f) SmokeAt(q.p + Vector3.up * 0.4f, q.v * 0.3f + Vector3.up * 1.8f, 0.75f);
                     }
                     q.heat = Mathf.Clamp01(1 - q.age / q.life * 1.15f);
-                    q.size = 0.13f + 0.32f * Mathf.Sqrt(q.age / q.life);
+                    q.size = 0.11f + 0.26f * Mathf.Sqrt(q.age / q.life);
                     if (q.age > q.life * 0.7f && Rnd() < dt * 6) SmokeAt(q.p, q.v * 0.3f + Vector3.up, 0.8f);
                 }
                 else
@@ -108,7 +108,7 @@ namespace AsciiHero
         void FireAt(Vector3 p, Vector3 v, float life, int kind = 0) { fireL.Add(new Part { p = p, v = v, life = life, kind = kind, size = 0.13f, heat = 1 }); }
         void SmokeAt(Vector3 p, Vector3 v, float sz, int kind = 2, float life = -1)
         {
-            if (smokeL.Count > 5200) return;
+            if (smokeL.Count > 6800) return;
             smokeL.Add(new Part { p = p + RndSphere() * 0.3f, v = v, life = life > 0 ? life : 3.2f + Rnd() * 2.6f, kind = kind, size = sz * (0.7f + Rnd() * 0.6f) });
         }
         void CineFxDraw(Vector3 eye, float fireGlow)
@@ -118,9 +118,9 @@ namespace AsciiHero
             {
                 float h = q.heat; Color c;
                 if (q.kind == 1) { c = new Color(1.0f, 0.55f, 0.15f) * (0.6f + h); fireP.Add(q.p, c, 0.09f, h > 0.5f ? 2 : 1, 9); continue; }
-                if (h > 0.66f) c = Color.Lerp(new Color(1.0f, 0.62f, 0.2f), new Color(1.0f, 0.95f, 0.75f), (h - 0.66f) / 0.34f);
-                else if (h > 0.3f) c = Color.Lerp(new Color(0.85f, 0.22f, 0.04f), new Color(1.0f, 0.62f, 0.2f), (h - 0.3f) / 0.36f);
-                else c = Color.Lerp(new Color(0.18f, 0.04f, 0.02f), new Color(0.85f, 0.22f, 0.04f), h / 0.3f);
+                if (h > 0.66f) c = Color.Lerp(new Color(1.0f, 0.55f, 0.12f), new Color(1.0f, 0.86f, 0.45f), (h - 0.66f) / 0.34f);
+                else if (h > 0.3f) c = Color.Lerp(new Color(0.75f, 0.16f, 0.03f), new Color(1.0f, 0.55f, 0.12f), (h - 0.3f) / 0.36f);
+                else c = Color.Lerp(new Color(0.14f, 0.03f, 0.01f), new Color(0.75f, 0.16f, 0.03f), h / 0.3f);
                 int g = Mathf.Clamp(Mathf.RoundToInt(2 + h * 10 + Rnd() * 2), 1, 15);
                 fireP.Add(q.p, c, q.size, g, 9);
             }
@@ -170,11 +170,12 @@ namespace AsciiHero
                 }
                 CineLog("cine: put away " + hid + " things from the arena");
             }
-            for (int i = 0; i < 150; i++) { pos = H; player.heading = heading; yield return null; }      // (5 s for the light to settle; nothing recorded)
+            for (int i = 0; i < 150; i++) { pos = H; player.heading = heading; Shader.SetGlobalFloat("_VisOn", 0); yield return null; }      // (5 s for the light to settle; nothing recorded)
+            CineLog("cine: sky tod " + skyS.tod + " [" + string.Join(",", skyS.todT) + "] sunK " + skyS.sunK + " ambK " + skyS.ambK + " exp " + ascii.exposure + " clock " + gameClock + " outdoor " + L.outdoor + " moon " + (moonLight != null ? moonLight.intensity + " " + moonLight.enabled : "none"));
             SetShadowDistance(90);
             var D = H + f * 26f;                                   // where the dragon lands (its pelvis over this point)
             float gy = H.y; var ground = new Vector3(0, gy, 0);
-            fireP = new CineParticles(7000); smokeP = new CineParticles(5400, true);
+            fireP = new CineParticles(9000); smokeP = new CineParticles(7000, true);
             fireLight = new GameObject("FireLight").AddComponent<Light>(); fireLight.type = LightType.Point; fireLight.range = 30; fireLight.intensity = 0; fireLight.color = new Color(1f, 0.55f, 0.2f); fireLight.shadows = LightShadows.None;
             int pel = drg.Bone("pelvis"), fb = drg.Bone("fireBreath"), jaw = drg.Bone("jaw_01"), head = drg.Bone("head");
             int n4 = drg.Bone("neck_04"), n8 = drg.Bone("neck_08");
@@ -244,7 +245,7 @@ namespace AsciiHero
                 if (t > T_FIRE0 && t < T_FIRE1)
                 {
                     float ramp = Smooth(T_FIRE0, T_FIRE0 + 0.25f, t) * (1 - Smooth(T_FIRE1 - 0.3f, T_FIRE1, t));
-                    int nEmit = Mathf.RoundToInt(260 * ramp * dt * 30);
+                    int nEmit = Mathf.RoundToInt(300 * ramp * dt * 30);
                     for (int i = 0; i < nEmit; i++)
                     {
                         var d = (mouthDir + RndSphere() * 0.09f).normalized;
@@ -289,8 +290,14 @@ namespace AsciiHero
                     eye = D + side * (44 - u * 6) - f * 4 + Vector3.up * (4.5f - u * 2.5f);
                     at2 = Vector3.Lerp(C, D + Vector3.up * 4, Smooth(0.6f, 1f, u)); fov = 40;
                 }
+                else if (t < T_FIRE1 + 0.25f)
+                {   // three quarters from the side, low: the breath crosses the frame and hits the ground
+                    float u = Mathf.Clamp01((t - T_LAND - 1.3f) / (T_FIRE1 + 0.25f - T_LAND - 1.3f));
+                    eye = D - f * (17f - u * 1.5f) + side * (10.5f - u * 1.0f) + Vector3.up * (1.4f + u * 0.3f);
+                    at2 = new Vector3(D.x, gy, D.z) - f * 9 + Vector3.up * 2.6f; fov = 46;
+                }
                 else if (t < T_PULL0)
-                {   // in front, low, before the jaws (the hero is behind the camera)
+                {   // in front, low, before the jaws, behind the smoke (the hero is behind the camera)
                     float u = Mathf.Clamp01((t - T_LAND - 1.3f) / (T_PULL0 - T_LAND - 1.3f));
                     eye = D - f * (20f - u * 1.0f) + side * 1.8f + Vector3.up * (1.25f + u * 0.2f);
                     at2 = new Vector3(D.x, gy, D.z) + Vector3.up * (3.0f - u * 0.5f) - f * 4; fov = 44;
@@ -310,6 +317,7 @@ namespace AsciiHero
                 eye += new Vector3(Mathf.PerlinNoise(t * 23, 1) - 0.5f, Mathf.PerlinNoise(t * 21, 2) - 0.5f, 0) * shakeK.y;
                 cineEye = eye; cineAt = at2; cineFov = fov; cineRoll = (Mathf.PerlinNoise(t * 19, 3) - 0.5f) * shakeK.x * 6;
                 CineFxDraw(eye, glow);
+                Shader.SetGlobalFloat("_VisOn", 0);          // (no fog of war: the whole field in view)
                 prevC = C; t += dt;
                 yield return null;
             }
