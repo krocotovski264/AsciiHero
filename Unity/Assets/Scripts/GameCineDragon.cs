@@ -170,7 +170,7 @@ namespace AsciiHero
                 int hid = 0; var sideH = new Vector3(f.z, 0, -f.x);
                 foreach (var r in L.root.GetComponentsInChildren<Renderer>(false))
                 {
-                    var nm = r.gameObject.name; if (nm == "Ground" || nm == "Grass" || nm == "Path" || nm == "Glyphs" || r.gameObject.layer == GlyphLayer.LAYER) continue;
+                    var nm = r.gameObject.name; if (nm == "Ground" || nm == "Grass" || nm == "Path") continue;
                     var b = r.bounds; if (b.size.x > 25 || b.size.z > 25) continue;
                     var d = b.center - H; float along = Vector3.Dot(d, f), across = Mathf.Abs(Vector3.Dot(d, sideH));
                     float half = Mathf.Max(b.extents.x, b.extents.z);

@@ -33,7 +33,7 @@ namespace AsciiHero
                 int hid = 0;
                 foreach (var r in L.root.GetComponentsInChildren<Renderer>(false))
                 {
-                    var nm = r.gameObject.name; if (nm == "Ground" || nm == "Grass" || nm == "Path" || nm == "Glyphs" || r.gameObject.layer == GlyphLayer.LAYER) continue;
+                    var nm = r.gameObject.name; if (nm == "Ground" || nm == "Grass" || nm == "Path") continue;           // (their characters too: else they stay in the air)
                     var b = r.bounds; if (b.size.x > 25 || b.size.z > 25) continue;
                     if ((new Vector3(b.center.x, H.y, b.center.z) - H).magnitude < 14 + Mathf.Max(b.extents.x, b.extents.z)) { r.gameObject.SetActive(false); hid++; }
                 }
@@ -43,7 +43,7 @@ namespace AsciiHero
             cineWindOn = true; cineWindA = Mathf.Atan2(-f.z, -f.x);
             string view = CineParam("view", "front");
             const float T_STANCE = 2.7f, T_END = 6.5f;
-            float fps = CineFps(), dt = 1f / fps, t = -1.5f;          // (1.5 s before the recording: the cloak settles in the wind)
+            float fps = CineFps(), dt = 1f / fps, t = -5f;            // (5 s before the recording: the light eases in, the cloak settles in the wind)
             player.combatT = 0; player.guardHeld = false;
             cineCamOn = true;
             while (t < T_END)
@@ -58,12 +58,13 @@ namespace AsciiHero
                 Vector3 c = H + Vector3.up * 1.0f, eye;
                 switch (view)
                 {
-                    case "side": eye = c + side * 4.2f + Vector3.up * 0.15f; break;
-                    case "back": eye = c - f * 4.2f + side * 0.5f + Vector3.up * 0.3f; break;
-                    default: eye = c + f * 4.2f + Vector3.up * 0.15f; break;
+                    case "side": eye = c + side * 5.6f + Vector3.up * 0.1f; break;
+                    case "back": eye = c - f * 5.6f + side * 0.6f + Vector3.up * 0.25f; break;
+                    default: eye = c + f * 5.6f + Vector3.up * 0.1f; break;
                 }
-                cineEye = eye; cineAt = c - Vector3.up * 0.05f; cineFov = 36; cineRoll = 0;
+                cineEye = eye; cineAt = c - Vector3.up * 0.08f; cineFov = 32; cineRoll = 0;
                 cineRec = t >= 0;
+                if (Mathf.Abs(t) < dt * 0.5f) CineLog("cine: sky tod " + skyS.tod + " sunK " + skyS.sunK + " exp " + ascii.exposure);
                 t += dt;
                 yield return null;
             }
