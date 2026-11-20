@@ -199,7 +199,8 @@ namespace AsciiHero
             display = new GameObject("DisplayCamera").AddComponent<Camera>();
             display.cullingMask = 0; display.clearFlags = CameraClearFlags.SolidColor; display.backgroundColor = Color.black; display.depth = 0;
             { var dd = display.GetUniversalAdditionalCameraData(); dd.renderShadows = false; dd.renderPostProcessing = false; }
-            yield return StartCoroutine(PlayIntro());       // (after Unity's splash: the helmet's intro, whole)
+            cineName = CineArg();
+            if (!Cine) yield return StartCoroutine(PlayIntro());       // (after Unity's splash: the helmet's intro, whole; not before a cinematic)
             if (!Step("Интерфейс", MakeUiAssets)) yield break;
             yield return null;
             if (!Step("Камеры и ASCII-рендер", () =>
@@ -237,6 +238,7 @@ namespace AsciiHero
             loadTarget = 1; while (loadShown < 0.999f) yield return null;       // (the bar fills smoothly before the game shows)
             AutoPreset();
             ready = true;
+            if (Cine) StartCoroutine(CineRun());
             Debug.Log("Загрузка завершена за " + (Time.realtimeSinceStartup - loadT0).ToString("0.0") + " с");
         }
 
@@ -1163,7 +1165,7 @@ namespace AsciiHero
             int sw = Display.main.systemWidth, sh = Display.main.systemHeight; if (sw <= 0 || sh <= 0) { sw = Screen.currentResolution.width; sh = Screen.currentResolution.height; }
             bool land = Screen.width >= Screen.height; int big = Mathf.Max(sw, sh), small = Mathf.Min(sw, sh);
             float f = RES[setRes] / 100f; int tw = Mathf.RoundToInt((land ? big : small) * f), th = Mathf.RoundToInt((land ? small : big) * f);
-            if (Mathf.Abs(Screen.width - tw) > 2 || Mathf.Abs(Screen.height - th) > 2) Screen.SetResolution(tw, th, FullScreenMode.FullScreenWindow);
+            if (!Cine && (Mathf.Abs(Screen.width - tw) > 2 || Mathf.Abs(Screen.height - th) > 2)) Screen.SetResolution(tw, th, FullScreenMode.FullScreenWindow);
             ApplyGlyphQuality();
         }
         Material landMat;
@@ -2114,6 +2116,7 @@ namespace AsciiHero
             if (world && invOpen) MirrorPose();
             SmokeLayerPrepare();
             HideHeroBehindPocket(world && invOpen && pocketT > 0.3f && pocketClose < 0.3f);
+            CineCamera();
         }
 
         void ToggleGlyphMode()
@@ -2313,7 +2316,8 @@ namespace AsciiHero
             float W = Screen.width, H = Screen.height;
             if (LogHub.errors > seenErrors) { seenErrors = LogHub.errors; if (setDev) consoleOpen = true; }
             if (introOn || introPending) { IntroGUI(W, H); FinishGui(); return; }      // (right after Unity's splash: black, then the intro)
-            if (!ready || ascii == null) { LoadingScreen(W, H); ConsoleUI(W, H, true); FinishGui(); return; }
+            if (!ready || ascii == null) { if (Cine) { FinishGui(); return; } LoadingScreen(W, H); ConsoleUI(W, H, true); FinishGui(); return; }
+            if (Cine) { if (ascii.final != null) GUI.DrawTexture(new Rect(0, 0, W, H), ascii.final, ScaleMode.StretchToFill, false); FinishGui(); return; }      // (a cinematic: the picture alone)
             var vr = ViewRect();
             if (!ascii.plain)
             {

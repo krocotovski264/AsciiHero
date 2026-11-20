@@ -24,6 +24,34 @@ namespace AsciiHero.Editor
             Build(path, true);
         }
 
+        /// the WebGL build (the cinematics' engine: the page opened with ?cine=<name>)
+        public static void BuildWebGL()
+        {
+            int code = 0;
+            try
+            {
+                ProjectBootstrap.Ensure();
+                AnimatorProjectPatcher.Patch(false);
+                AssetDatabase.SaveAssets();
+                string path = Arg("-customBuildPath"); if (string.IsNullOrEmpty(path)) path = "Builds/WebGL/AsciiHero";
+                var scenes = EditorBuildSettings.scenes.Where(s => s.enabled && File.Exists(s.path)).Select(s => s.path).ToArray();
+                if (scenes.Length == 0) { EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) }; scenes = new[] { ScenePath }; }
+                PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Disabled;     // (served by a plain local server)
+                PlayerSettings.WebGL.decompressionFallback = false;
+                PlayerSettings.WebGL.dataCaching = false;
+                PlayerSettings.WebGL.exceptionSupport = WebGLExceptionSupport.ExplicitlyThrownExceptionsOnly;
+                PlayerSettings.runInBackground = true;
+                Directory.CreateDirectory(Path.GetFullPath(path));
+                var options = new BuildPlayerOptions { scenes = scenes, locationPathName = path, target = BuildTarget.WebGL, targetGroup = BuildTargetGroup.WebGL, options = BuildOptions.None };
+                BuildReport report = BuildPipeline.BuildPlayer(options);
+                var sum = report.summary;
+                Debug.Log("[CIBuild] WebGL " + sum.result + " · " + sum.totalErrors + " errors · " + (sum.totalSize / (1024f * 1024f)).ToString("0.0") + " MB · " + path);
+                if (sum.result != BuildResult.Succeeded) code = 1;
+            }
+            catch (Exception e) { Debug.LogException(e); code = 1; }
+            EditorApplication.Exit(code);
+        }
+
         static void Build(string path, bool exitWhenDone)
         {
             int code = 0;

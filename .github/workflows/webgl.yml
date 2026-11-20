@@ -1,0 +1,91 @@
+# Builds the WebGL version (the engine of the cinematics, opened with ?cine=<name>) from Unity/ on GitHub's servers (game-ci, Unity version from ProjectVersion.txt).
+# Needs three repository secrets: UNITY_LICENSE (contents of Unity_lic.ulf), UNITY_EMAIL, UNITY_PASSWORD.
+# The APK is published to Releases (tag latest-apk) as a plain file, and kept as a run artifact too.
+name: WebGL (cinematics)
+
+on:
+  push:
+    branches: [unity-port]
+  workflow_dispatch:
+
+concurrency:
+  group: webgl-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[web]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    steps:
+      - name: Check Unity license secrets
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          missing=""
+          [ -z "$UNITY_LICENSE" ] && missing="$missing UNITY_LICENSE"
+          [ -z "$UNITY_EMAIL" ] && missing="$missing UNITY_EMAIL"
+          [ -z "$UNITY_PASSWORD" ] && missing="$missing UNITY_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::Add repository secrets:$missing (Settings -> Secrets and variables -> Actions). See README, section 'APK через GitHub Actions'."
+            exit 1
+          fi
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: false
+          swap-storage: false
+
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/cache@v4
+        with:
+          path: Unity/Library
+          key: Library-WebGL-${{ hashFiles('Unity/Assets/**', 'Unity/Packages/**', 'Unity/ProjectSettings/**') }}
+          restore-keys: |
+            Library-WebGL-
+
+      - name: Build APK
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: Unity
+          unityVersion: auto
+          targetPlatform: WebGL
+          buildName: AsciiHero
+          buildMethod: AsciiHero.Editor.CIBuild.BuildWebGL
+          versioning: None
+
+      # the build as one zip: Releases -> latest-webgl -> AsciiHero-WebGL.zip
+      - name: Publish WebGL to Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          D=$(dirname $(find build/WebGL -name index.html | head -n 1))
+          (cd "$D" && zip -qr "$GITHUB_WORKSPACE/AsciiHero-WebGL.zip" .)
+          gh release delete latest-webgl --cleanup-tag --yes || true
+          gh release create latest-webgl AsciiHero-WebGL.zip --target "$GITHUB_SHA" --prerelease \
+            --title "WebGL (синематики)" --notes "Сборка №${GITHUB_RUN_NUMBER}, коммит ${GITHUB_SHA::7}."
+
+      # the Unity image and build output fill the runner's disk; without this the cache save at the end fails
+      - name: Free space before saving the cache
+        if: always()
+        run: |
+          docker system prune -af || true
+          sudo rm -rf build || true
+          df -h /
