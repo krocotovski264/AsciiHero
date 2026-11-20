@@ -76,7 +76,7 @@ namespace AsciiHero
                 if (q.age >= q.life) { fireL[i] = fireL[fireL.Count - 1]; fireL.RemoveAt(fireL.Count - 1); continue; }
                 if (q.kind == 0)
                 {
-                    q.v *= Mathf.Exp(-dt * 1.6f); q.v.y += 3.2f * dt;                     // drag, the hot gas rising
+                    q.v *= Mathf.Exp(-dt * 2.1f); q.v.y += 3.2f * dt;                     // drag, the hot gas rising
                     q.v += RndSphere() * 9f * dt;                                         // turbulence
                     if (q.p.y < gy + 0.25f && q.v.y < 0)
                     {                                                                      // it hits the ground: spreads, rolls on
@@ -341,9 +341,9 @@ namespace AsciiHero
                 {   // the pull back: over the knight's head to behind his shoulder
                     float u = Smooth(T_PULL0, T_PULL1, t);
                     var e0 = D - f * 19f + side * 1.8f + Vector3.up * 1.45f;
-                    var e1 = H - f * 3.8f + side * 0.55f + Vector3.up * 1.75f;
+                    var e1 = H - f * 4.6f + side * 0.3f + Vector3.up * 1.9f;
                     eye = Vector3.Lerp(e0, e1, u) + Vector3.up * Mathf.Sin(u * Mathf.PI) * 1.4f;
-                    at2 = Vector3.Lerp(new Vector3(D.x, gy, D.z) + Vector3.up * 2.5f - f * 4, new Vector3(D.x, gy, D.z) + Vector3.up * 2.2f - f * 8, u);
+                    at2 = Vector3.Lerp(new Vector3(D.x, gy, D.z) + Vector3.up * 2.5f - f * 4, new Vector3(D.x, gy, D.z) + Vector3.up * 2.3f - f * 9, u);
                     fov = Mathf.Lerp(44, 46, u);
                     eye += side * Mathf.Sin(t * 0.7f) * 0.05f + Vector3.up * Mathf.Sin(t * 0.9f) * 0.04f;     // (a hand-held drift)
                 }
