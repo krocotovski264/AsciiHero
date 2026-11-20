@@ -61,9 +61,9 @@ Shader "AsciiHero/Grass"
             {
                 float2 wd = _AsciiWind.xy, wp = float2(-wd.y, wd.x); float run = _AsciiWind.w;
                 float2 q = float2(dot(p, wd) - run, dot(p, wp));
-                float g = WNoise(q * float2(0.17, 0.11) + 3.1);                    // big gusts: long downwind, broad across
-                g = smoothstep(0.2, 0.9, g);            // (soft edges: a gust leans the blades over gradually)
-                float d = WNoise(q * float2(0.6, 0.45) - float2(run * 0.7, 0) + 11.7);   // smaller ripples on top, faster
+                float g = WNoise(q * float2(0.09, 0.08) + 3.1);                    // big gusts: long downwind, broad across
+                g = smoothstep(0.15, 0.95, g);            // (soft edges: a gust leans the blades over gradually)
+                float d = WNoise(q * float2(0.35, 0.3) - float2(run * 0.3, 0) + 11.7);   // smaller ripples on top, faster
                 return saturate(g * (0.7 + 0.6 * d));
             }
 
@@ -85,13 +85,14 @@ Shader "AsciiHero/Grass"
                 //   * the strength rises and falls on the CPU with lulls (pauses) between gusts.
                 float2 wd = _AsciiWind.xy; float ws = _AsciiWind.z;
                 float stiff = 0.6 + 0.8 * frac(s * 7.77);
-                float gNow = WindGust(a.xz - wd * (0.18 * stiff)), gPrev = WindGust(a.xz + wd * (0.9 + 0.5 * stiff));   // (what passed a moment ago is downwind now)
+                float gNow = WindGust(a.xz - wd * (0.18 * stiff)), gPrev = WindGust(a.xz + wd * (2.0 + 0.5 * stiff));   // (what passed a moment ago is downwind now)
+                float gMid = WindGust(a.xz + wd * 1.1); gNow = (gNow + gMid) * 0.5;      // (eased: the gust is felt over a stretch of the field)
                 float wave = gNow * saturate(ws * 1.25);
                 float recoil = max(0.0, gPrev - gNow) * saturate(ws * 1.25);
                 float fl = sin(_AsciiTime * (2.0 + 2.0 * ws) * (0.8 + 0.4 * frac(s * 3.3)) + s * 40.0);
-                // (calmer than before: a gust leans the blade over by about a quarter, not flat; the recoil and flutter are small)
-                float2 wind = wd * ((0.04 + 0.07 * ws) + 0.4 * wave / stiff - 0.1 * recoil * sin(_AsciiTime * 3.0 + s * 9.0 + 1.5))
-                            + float2(-wd.y, wd.x) * fl * (0.01 + 0.025 * ws * (0.3 + wave)) + wd * fl * 0.015 * ws * wave;
+                // (the lean as deep as it was; the recoil springs back slowly, the flutter stays small)
+                float2 wind = wd * ((0.05 + 0.1 * ws) + 0.85 * wave / stiff - 0.18 * recoil * sin(_AsciiTime * 1.6 + s * 9.0 + 1.5))
+                            + float2(-wd.y, wd.x) * fl * (0.012 + 0.03 * ws * (0.3 + wave)) + wd * fl * 0.015 * ws * wave;
                 // a slow sway of its own even in still air (a noise over the field, so neighbours sway together)
                 // (small: it bends the blade a little but never turns its character, or the whole field flickers | / \ at once)
                 float2 idle = float2(WNoise(a.xz * 0.6 + _AsciiTime * 0.12) - 0.5, WNoise(a.xz * 0.6 + 7.3 - _AsciiTime * 0.1) - 0.5);
@@ -116,7 +117,7 @@ Shader "AsciiHero/Grass"
                 float myZ = -pVS.z;
                 bool vis = myZ <= sceneZ + 0.3 && all(suv >= 0.0) && all(suv <= 1.0) && frac(s * 7.31) >= _AsciiGrassThin && frac(s * 5.17) >= _AsciiSeason.w * 0.7;
                 float lv = TransformWorldToViewDir(float3(lean.x, 0, lean.y), false).x;
-                o.gi = push > 0.8 ? 4.0 : (lv > 0.26 ? 2.0 : (lv < -0.26 ? 3.0 : 0.0));
+                o.gi = push > 0.8 ? 4.0 : (lv > 0.22 ? 2.0 : (lv < -0.22 ? 3.0 : 0.0));
                 float3 lit = SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, sampler_AsciiLitTex, suv, 0).rgb;
                 lit = _AsciiLinear > 0.5 ? pow(max(lit, 0.0), 1.0 / 2.2) : max(lit, 0.0);
                 float lum = saturate(dot(lit, float3(0.299, 0.587, 0.114)) * 2.6 * _AsciiExposure);
