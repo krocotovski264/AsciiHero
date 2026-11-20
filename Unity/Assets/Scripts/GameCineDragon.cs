@@ -154,7 +154,7 @@ namespace AsciiHero
             float heading = Mathf.Atan2(f.x, f.z);
             StoryGo(L, H, heading); pos = H;
             // late afternoon, clear: the low warm sun (the sky eases into it over the frames before the recording)
-            gameClock = Sky.DAY_S * 0.545f; wxMain.auto = false; wxMain.Stop(); wxMain.wet = 0; wxMain.puddle = 0;
+            gameClock = Sky.DAY_S * 0.455f; wxMain.auto = false; wxMain.Stop(); wxMain.wet = 0; wxMain.puddle = 0;
             // nothing standing in the arena: the trees and bushes there are put away (their characters with them)
             {
                 int hid = 0; var sideH = new Vector3(f.z, 0, -f.x);
@@ -264,6 +264,11 @@ namespace AsciiHero
                 }
                 glow = Mathf.Max(glow, after * 0.45f);
                 CineFx(dt, ground, C);
+                if (Mathf.Repeat(t, 1f) < dt * 0.999f && t > T_LAND)
+                {
+                    Vector3 mn = Vector3.one * 1e9f, mx = -mn; foreach (var q in fireL) { mn = Vector3.Min(mn, q.p); mx = Vector3.Max(mx, q.p); }
+                    CineLog("cine: t " + t.ToString("0.0") + " mouth " + (mouth - H) + " dir " + mouthDir + " fire " + fireL.Count + " box " + (mn - H) + ".." + (mx - H) + " smoke " + smokeL.Count + " D-H " + (D - H) + " root " + (drg.root.transform.position - H));
+                }
                 fireLight.transform.position = new Vector3(D.x, gy + 2.5f, D.z) - f * 9;
                 fireLight.intensity = glow * (5f + 1.5f * Mathf.PerlinNoise(t * 9, 0.3f));
 
@@ -293,8 +298,8 @@ namespace AsciiHero
                 else if (t < T_FIRE1 + 0.25f)
                 {   // three quarters from the side, low: the breath crosses the frame and hits the ground
                     float u = Mathf.Clamp01((t - T_LAND - 1.3f) / (T_FIRE1 + 0.25f - T_LAND - 1.3f));
-                    eye = D - f * (17f - u * 1.5f) + side * (10.5f - u * 1.0f) + Vector3.up * (1.4f + u * 0.3f);
-                    at2 = new Vector3(D.x, gy, D.z) - f * 9 + Vector3.up * 2.6f; fov = 46;
+                    eye = D - f * (8.5f + u * 1.0f) + side * (29f - u * 2.0f) + Vector3.up * (1.6f + u * 0.3f);
+                    at2 = new Vector3(D.x, gy, D.z) - f * 7.5f + Vector3.up * 3.0f; fov = 50;
                 }
                 else if (t < T_PULL0)
                 {   // in front, low, before the jaws, behind the smoke (the hero is behind the camera)
