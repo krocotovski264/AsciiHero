@@ -141,6 +141,11 @@ namespace AsciiHero
         }
 
         // ---------------- the scene ----------------
+        void CineClearFolk(Vector3 H)
+        {
+            foreach (var k in folk) if (k.ch != null && k.ch.go.activeSelf && (k.ch.go.transform.position - H).magnitude < 70) k.ch.go.SetActive(false);
+            foreach (var k in foes) if (k.ch != null && k.ch.go.activeSelf && (k.ch.go.transform.position - H).magnitude < 70) k.ch.go.SetActive(false);
+        }
         static float SegDist(Vector3 p, Vector3 a, Vector3 b)
         {
             p.y = a.y = b.y = 0; var ab = b - a; float u = Mathf.Clamp01(Vector3.Dot(p - a, ab) / Mathf.Max(1e-4f, ab.sqrMagnitude));
@@ -178,7 +183,7 @@ namespace AsciiHero
                 }
                 CineLog("cine: put away " + hid + " things from the arena");
             }
-            for (int i = 0; i < 150; i++) { pos = H; player.heading = heading; Shader.SetGlobalFloat("_VisOn", 0); yield return null; }      // (5 s for the light to settle; nothing recorded)
+            for (int i = 0; i < 150; i++) { pos = H; player.heading = heading; Shader.SetGlobalFloat("_VisOn", 0); CineClearFolk(H); yield return null; }      // (5 s for the light to settle; nothing recorded)
             CineLog("cine: sky tod " + skyS.tod + " [" + string.Join(",", skyS.todT) + "] sunK " + skyS.sunK + " ambK " + skyS.ambK + " exp " + ascii.exposure + " clock " + gameClock + " outdoor " + L.outdoor + " moon " + (moonLight != null ? moonLight.intensity + " " + moonLight.enabled : "none"));
             SetShadowDistance(90);
             var D = H + f * 26f;                                   // where the dragon lands (its pelvis over this point)
@@ -225,11 +230,12 @@ namespace AsciiHero
                 // head and jaw: the breath
                 float raise = Smooth(T_FIRE0 - 1.1f, T_FIRE0 - 0.35f, t) * (1 - Smooth(T_FIRE0 - 0.35f, T_FIRE0, t));     // draws back
                 float down = Smooth(T_FIRE0 - 0.35f, T_FIRE0, t) * (1 - Smooth(T_FIRE1, T_FIRE1 + 0.9f, t));                // throws it forward and down
-                float pitchNeck = raise * 14 - down * 6;
+                float pitchNeck = raise * 14 - down * 13;
                 drg.Turn(n4, Quaternion.AngleAxis(pitchNeck * 0.35f, Vector3.right));
                 drg.Turn(n8, Quaternion.AngleAxis(pitchNeck * 0.35f, Vector3.right));
                 drg.Turn(head, Quaternion.AngleAxis(pitchNeck * 0.3f, Vector3.right));
                 float open = raise * 10 + down * 30 + Smooth(T_PULL0 + 1.5f, T_PULL0 + 2.0f, t) * (1 - Smooth(T_PULL0 + 3.2f, T_PULL0 + 3.8f, t)) * 22;   // (a growl at the knight)
+                var headDirM = drg.BoneR(fb) * Vector3.right; var headPM = drg.BoneP(fb);       // (the breath goes where the head looks: before the jaw drops, which carries this bone)
                 drg.Turn(jaw, Quaternion.AngleAxis(-open, Vector3.right));
                 drg.Apply();
                 // the pelvis over C
@@ -247,8 +253,8 @@ namespace AsciiHero
                     }
                 }
                 // ---- the breath ----
-                var mouthDir = rot * (drg.BoneR(fb) * Vector3.right);
-                var mouth = drg.root.transform.position + rot * drg.BoneP(fb) + mouthDir * 0.085f * DRG_K;
+                var mouthDir = rot * headDirM;
+                var mouth = drg.root.transform.position + rot * headPM + mouthDir * 0.085f * DRG_K;
                 float glow = 0;
                 if (t > T_FIRE0 && t < T_FIRE1)
                 {
@@ -287,7 +293,8 @@ namespace AsciiHero
                 fireLight.transform.position = new Vector3(D.x, gy + 2.5f, D.z) - f * 9;
                 fireLight.intensity = glow * (5f + 1.5f * Mathf.PerlinNoise(t * 9, 0.3f));
 
-                // ---- the hero: still, then the stance ----
+                // ---- the hero: still, then the stance; nobody else on the field ----
+                CineClearFolk(H);
                 pos = H; player.heading = heading;
                 if (t >= T_STANCE) player.combatT = MotionActor.COMBAT_HOLD;
                 if (Mathf.Abs(t - T_PULL1) < dt * 0.5f)
