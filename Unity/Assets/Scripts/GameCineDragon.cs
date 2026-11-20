@@ -82,11 +82,11 @@ namespace AsciiHero
                     {                                                                      // it hits the ground: spreads, rolls on
                         var hv = new Vector3(q.v.x, 0, q.v.z); q.v = hv * 0.75f + RndSphere().Flat() * hv.magnitude * 0.35f; q.v.y = Mathf.Abs(q.v.y) * 0.1f + 1.2f;
                         q.p.y = gy + 0.25f;
-                        if (Rnd() < 0.5f) SmokeAt(q.p + Vector3.up * 0.4f, q.v * 0.3f + Vector3.up * 1.8f, 0.75f);
+                        if (Rnd() < 0.18f) SmokeAt(q.p + Vector3.up * 0.4f, q.v * 0.3f + Vector3.up * 1.8f, 0.5f, 2, 1.5f + Rnd() * 1.8f);
                     }
                     q.heat = Mathf.Clamp01(1 - q.age / q.life * 1.15f);
                     q.size = 0.11f + 0.26f * Mathf.Sqrt(q.age / q.life);
-                    if (q.age > q.life * 0.7f && Rnd() < dt * 6) SmokeAt(q.p, q.v * 0.3f + Vector3.up, 0.8f);
+                    if (q.age > q.life * 0.7f && Rnd() < dt * 2) SmokeAt(q.p, q.v * 0.3f + Vector3.up, 0.5f, 2, 1.5f + Rnd() * 1.5f);
                 }
                 else
                 {
@@ -268,15 +268,15 @@ namespace AsciiHero
                     var at = new Vector3(D.x, gy, D.z) - f * (10 + Rnd() * 8) + side * (Rnd() * 2 - 1) * (2 + Rnd() * 3.5f);
                     FireAt(at + Vector3.up * 0.2f, Vector3.up * (1.5f + Rnd() * 2) + RndSphere() * 0.8f, 0.4f + Rnd() * 0.5f);
                     if (Rnd() < 0.35f) FireAt(at + Vector3.up * 0.5f, Vector3.up * (2 + Rnd() * 3) + RndSphere() * 1.5f, 1.5f + Rnd(), 1);
-                    if (Rnd() < 0.4f) SmokeAt(at + Vector3.up * 1f, Vector3.up * 1.6f + RndSphere() * 0.6f, 0.45f);
+                    if (Rnd() < 0.25f) SmokeAt(at + Vector3.up * 1f, Vector3.up * 1.6f + RndSphere() * 0.6f, 0.4f, 2, 1.8f + Rnd() * 1.8f);
                 }
                 glow = Mathf.Max(glow, after * 0.45f);
                 // the wall of smoke the breath leaves between the beast and the camera (it thins out by the pull back)
                 if (t > T_FIRE1 - 0.6f && t < T_FIRE1 + 0.5f)
-                    for (int i = 0; i < Mathf.RoundToInt(70 * dt * 30); i++)
+                    for (int i = 0; i < Mathf.RoundToInt(34 * dt * 30); i++)
                     {
                         var at = new Vector3(D.x, gy, D.z) - f * (8.5f + Rnd() * 8f) + side * (Rnd() * 2 - 1) * 7.5f + Vector3.up * (0.3f + Rnd() * Rnd() * 6.5f);
-                        SmokeAt(at, Vector3.up * (0.4f + Rnd() * 0.8f) + RndSphere() * 0.7f, 0.55f + Rnd() * 0.35f, 2, 1.6f + Rnd() * 2.2f);
+                        SmokeAt(at, Vector3.up * (0.4f + Rnd() * 0.8f) + RndSphere() * 0.7f, 0.4f + Rnd() * 0.25f, 2, 1.3f + Rnd() * 1.6f);
                     }
                 CineFx(dt, ground, C);
                 if (Mathf.Repeat(t, 1f) < dt * 0.999f && t > T_LAND)

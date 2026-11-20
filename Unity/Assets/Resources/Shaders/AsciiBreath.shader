@@ -45,7 +45,8 @@ Shader "AsciiHero/Breath"
                 float2 cc = i.corner + 0.5;
                 float2 lc = _Smoke > 0.5 ? cc : lerp(ink.xy, ink.zw, cc);          // (the smoke covers its whole cell)
                 o.local = lc; o.c = cc; o.op = i.extra.x;
-                pVS.xy += (lc - 0.5) * float2(i.color.a, i.color.a * 1.65);
+                float sz = min(i.color.a, -pVS.z * 0.012);          // (near the camera no larger than a character of the scene)
+                pVS.xy += (lc - 0.5) * float2(sz, sz * 1.65);
                 o.positionCS = vis ? TransformWViewToHClip(pVS) : float4(2, 2, 2, 1);
                 return o;
             }
