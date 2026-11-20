@@ -41,6 +41,8 @@ namespace AsciiHero.Editor
                 PlayerSettings.WebGL.dataCaching = false;
                 PlayerSettings.WebGL.exceptionSupport = WebGLExceptionSupport.ExplicitlyThrownExceptionsOnly;
                 PlayerSettings.runInBackground = true;
+            PlayerSettings.WebGL.initialMemorySize = 512; PlayerSettings.WebGL.maximumMemorySize = 4096;      // (the story world alone is over 2 GB on the wasm heap)
+            PlayerSettings.WebGL.memoryGrowthMode = WebGLMemoryGrowthMode.Geometric;
                 Directory.CreateDirectory(Path.GetFullPath(path));
                 var options = new BuildPlayerOptions { scenes = scenes, locationPathName = path, target = BuildTarget.WebGL, targetGroup = BuildTargetGroup.WebGL, options = BuildOptions.None };
                 BuildReport report = BuildPipeline.BuildPlayer(options);
