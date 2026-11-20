@@ -1,6 +1,14 @@
-// Grass: one character per blade. | upright, / or \ when it leans across the screen, _ when trodden flat.
-// Blades sway in the wind and are pushed aside by the hero (_AsciiHeroA) and by a point trailing behind him
-// (_AsciiHeroB), so the grass parts in front of the feet and closes again a moment later.
+// Grass, rebuilt after the stylised grass of Binary Lunar ("Stylized Grass with Wind Effect Shader Graph"), told in
+// characters: every blade is a strip of two segments drawn with the stroke of '|', bending from the root.
+//   * depth colour: near blades warmer and lighter, far ones cooler (smoothstep over the distance from the camera);
+//   * height blend: a bottom colour at the root, the top colour at the tip;
+//   * terrain colour: the root takes the colour of the ground under it (here the lit scene under the blade);
+//   * shadow: where the ground is in shadow the blade goes towards a shadow colour;
+//   * sway: a noise over the world, carried with the air, bends the upper part of the blade a little;
+//   * wind waves: a second, larger noise scrolling downwind (the lesson's wind texture), with a contrast step; it
+//     bends the upper part along the wind and lights the tips where it passes;
+//   * the hero and a point trailing behind him press the blades aside (as before).
+// Mesh: per blade 6 vertices (3 rows x 2 sides): POSITION = the root, uv0 = (side -0.5/0.5, t 0..1), uv1.x = seed.
 Shader "AsciiHero/Grass"
 {
     Properties
@@ -28,15 +36,26 @@ Shader "AsciiHero/Grass"
             TEXTURE2D(_AsciiLitTex); SAMPLER(sampler_AsciiLitTex);
             TEXTURE2D(_AsciiNDTex); SAMPLER(sampler_AsciiNDTex);
             SAMPLER(ascii_point_clamp_sampler); float _AsciiDepthLit;
-            float4 _GlyphInk[224];   // per atlas glyph: the box its ink occupies inside the cell
+            float4 _GlyphInk[224];
             float _AsciiRows, _AsciiExposure, _AsciiLinear, _AsciiDepthRef, _AsciiTime;
-            float4 _GrassA, _GrassB; float _GrassH;       // per field of blades: its two colours and height (grass, wheat)
-            float4 _AsciiPush[4];      // points of the body that press the grass: xyz, radius (0 = none)
-            float _AsciiGrassThin;     // settings: the share of blades that is not drawn (0 = all)
-            float4 _AsciiWind;         // wind: xy = direction (world xz), z = strength 0..1.5, w = unused
-
-            // the season over the foliage (_AsciiSeason: x autumn, y winter, z spring, w snow lying)
+            float4 _GrassA, _GrassB; float _GrassH;
+            float4 _AsciiPush[4];
+            float _AsciiGrassThin;
+            float4 _AsciiWind;         // xy direction (world xz), z strength 0..1.5, w the distance the air has run
             float4 _AsciiSeason;
+
+            // ---- the lesson's settings (fixed here) ----
+            #define NEAR_FAR      float2(4.0, 20.0)     // depth colour: where the near colour ends and the far begins
+            #define HEIGHT_BLEND  0.85                  // how high the bottom colour reaches up the blade
+            #define TERRAIN_K     0.45                  // how much of the ground's colour the blade takes
+            #define SHADOW_COL    float3(0.42, 0.52, 0.85)
+            #define SWAY_SCALE    0.55                  // the sway noise (per metre)
+            #define SWAY_K        0.10                  // the sway's bend
+            #define WAVE_SCALE    float2(0.075, 0.11)   // the wind waves' noise: long downwind, narrower across
+            #define WAVE_CONTRAST float2(0.38, 0.78)    // smoothstep edges of the wave
+            #define WAVE_K        0.75                  // how far a wave bends the blade over
+            #define WAVE_LIGHT    float3(0.20, 0.22, 0.12)
+
             float3 SeasonGreen(float3 g, float s)
             {
                 float l = dot(g, float3(0.3, 0.5, 0.2));
@@ -49,119 +68,102 @@ Shader "AsciiHero/Grass"
                 return lerp(g, spr, _AsciiSeason.z);
             }
             float WHash(float2 p) { p = frac(p * float2(123.34, 456.21)); p += dot(p, p + 45.32); return frac(p.x * p.y); }
-            float WNoise(float2 p)      // smooth value noise, 0..1
+            float WNoise(float2 p)
             {
                 float2 i = floor(p), f = frac(p); float2 u = f * f * (3.0 - 2.0 * f);
                 return lerp(lerp(WHash(i), WHash(i + float2(1, 0)), u.x), lerp(WHash(i + float2(0, 1)), WHash(i + float2(1, 1)), u.x), u.y);
             }
-            // the wind field (shared by grass, leaves): a coarse gust pattern carried downwind, with finer detail scrolling
-            // faster over it (as in the 'Ghost of Tsushima' grass); _AsciiWind: xy direction, z strength (with lulls, from
-            // the CPU), w the distance the air has travelled
-            float WindGust(float2 p)
-            {
-                float2 wd = _AsciiWind.xy, wp = float2(-wd.y, wd.x); float run = _AsciiWind.w;
-                float2 q = float2(dot(p, wd) - run, dot(p, wp));
-                float g = WNoise(q * float2(0.13, 0.11) + 3.1);                    // big gusts: long downwind, broad across
-                g = smoothstep(0.15, 0.95, g);            // (soft edges: a gust leans the blades over gradually)
-                float d = WNoise(q * float2(0.35, 0.3) + 11.7);       // (rides with the big gusts: no second layer sliding over them at its own speed)   // smaller ripples on top, faster
-                return saturate(g * (0.7 + 0.6 * d));
-            }
 
-            struct Attributes { float4 positionOS : POSITION; float2 corner : TEXCOORD0; float2 seed : TEXCOORD1; };
-            struct Varyings { float4 positionCS : SV_POSITION; float2 local : TEXCOORD0; float3 col : TEXCOORD1; float gi : TEXCOORD2; float3 colB : TEXCOORD3; };
+            struct Attributes { float4 positionOS : POSITION; float2 bt : TEXCOORD0; float2 seed : TEXCOORD1; };
+            struct Varyings { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; float3 col : TEXCOORD1; };
 
             Varyings vert (Attributes i)
             {
                 Varyings o;
                 float3 a = TransformObjectToWorld(i.positionOS.xyz);
-                float s = i.seed.x;
-                float h = (0.165 + 0.225 * s) * _GrassH;          // (one and a half times the old blades)
-                // wind (main bending along the wind, detail flutter per blade, after Crysis and Ghost of Tsushima):
-                //   * the gust pattern travels downwind across the field, so waves of pressed-down grass roll over it, in
-                //     patches and bands rather than a regular sine, with calmer gaps between them;
-                //   * every blade responds with its own stiffness (a little late) and springs back past upright after a
-                //     gust has gone over it, then settles;
-                //   * a small flutter of its own, faster and stronger the harder the wind blows;
-                //   * the strength rises and falls on the CPU with lulls (pauses) between gusts.
-                float2 wd = _AsciiWind.xy; float ws = _AsciiWind.z;
-                float stiff = 0.6 + 0.8 * frac(s * 7.77);
-                float gNow = WindGust(a.xz - wd * (0.18 * stiff)), gPrev = WindGust(a.xz + wd * (2.0 + 0.5 * stiff));   // (what passed a moment ago is downwind now)
-                float gMid = WindGust(a.xz + wd * 1.1); gNow = (gNow + gMid) * 0.5;      // (eased: the gust is felt over a stretch of the field)
-                float wave = gNow * saturate(ws * 1.25);
-                float recoil = max(0.0, gPrev - gNow) * saturate(ws * 1.25);
-                float fl = sin(_AsciiTime * (1.0 + 1.0 * ws) * (0.8 + 0.4 * frac(s * 3.3)) + s * 40.0);
-                // (the lean as deep as it was; the recoil springs back slowly, the flutter stays small)
-                float2 wind = wd * ((0.05 + 0.1 * ws) + 0.85 * wave / stiff - 0.18 * recoil * sin(_AsciiTime * 0.8 + s * 9.0 + 1.5))
-                            + float2(-wd.y, wd.x) * fl * (0.012 + 0.03 * ws * (0.3 + wave)) + wd * fl * 0.015 * ws * wave;
-                // a slow sway of its own even in still air (a noise over the field, so neighbours sway together)
-                // (small: it bends the blade a little but never turns its character, or the whole field flickers | / \ at once)
-                // (carried by the same air as the gusts, at their speed and in their direction: it used to drift on its own,
-                // ten times faster than the waves, a second pattern over the first)
-                float2 qi = float2(dot(a.xz, wd) - _AsciiWind.w, dot(a.xz, float2(-wd.y, wd.x))) * 0.6;
-                float2 idle = float2(WNoise(qi + 21.3) - 0.5, WNoise(qi + 7.3) - 0.5);
-                float2 sway = idle * (0.05 + 0.03 * frac(s * 4.3)) * (1.0 - 0.5 * saturate(ws));
-                float2 lean = wind; float push = 0;
+                float s = i.seed.x, side = i.bt.x, t = i.bt.y;
+                float h = (0.18 + 0.25 * s) * _GrassH;
+
+                // the air: both noises live in the wind's own frame and run downwind with it
+                float2 wd = _AsciiWind.xy, wp = float2(-wd.y, wd.x); float ws = _AsciiWind.z, run = _AsciiWind.w;
+                float2 q = float2(dot(a.xz, wd) - run, dot(a.xz, wp));
+                // wind waves (the wind texture): a contrast step over a large noise
+                float wave = smoothstep(WAVE_CONTRAST.x, WAVE_CONTRAST.y, WNoise(q * WAVE_SCALE + 3.1)) * saturate(ws * 1.2);
+                // sway (the gradient noise): a small bend in any direction, the same for neighbours
+                float2 sw = float2(WNoise(q * SWAY_SCALE + 21.3), WNoise(q * SWAY_SCALE + 7.7)) - 0.5;
+                float stiff = 0.75 + 0.5 * frac(s * 7.77);
+                float2 lean = (wd * (0.06 + 0.1 * ws + WAVE_K * wave) + (sw.x * wd + sw.y * wp) * SWAY_K * 2.0) / stiff;
+                // the hero presses the blades aside
+                float push = 0;
                 for (int k = 0; k < 4; k++)
                 {
                     float4 P = _AsciiPush[k]; if (P.w < 0.01) continue;
-                    float2 d = a.xz - P.xz; float near = saturate(1.0 - (P.y - h) / 0.35);       // only what is down among the blades presses them
-                    float pk = smoothstep(P.w, P.w * 0.2, length(d)) * near;
-                    lean += normalize(d + 1e-4) * pk * 0.95; push = max(push, pk);
+                    float2 d = a.xz - P.xz; float nearK = saturate(1.0 - (P.y - h) / 0.35);
+                    float pk = smoothstep(P.w, P.w * 0.2, length(d)) * nearK;
+                    lean += normalize(d + 1e-4) * pk * 1.2; push = max(push, pk);
                 }
-                float ll = length(lean); if (ll > 0.96) { lean *= 0.96 / ll; ll = 0.96; }
-                float2 leanS = lean + sway; float lls = min(length(leanS), 0.96);
-                float3 tip = a + float3(leanS.x, sqrt(1.0 - lls * lls), leanS.y) * h;
-                float3 pVS = TransformWorldToView((a + tip) * 0.5);
-                float4 bclip = TransformWorldToHClip(a);
-                float4 sp = ComputeScreenPos(bclip);
-                float2 suv = sp.xy / sp.w;
+                float ll = length(lean); if (ll > 1.1) lean *= 1.1 / ll;
+                // the blade bends from the root (the lesson masks the bend by height): the point at t is pushed by t^2 of
+                // the lean and drops so that the blade keeps its length
+                float b = t * t;
+                float3 p = a + float3(lean.x * b * h, h * t * rsqrt(1.0 + dot(lean, lean) * b), lean.y * b * h);
+
+                // seen? (the scene's depth at the root: a blade behind a wall or a body is not drawn)
+                float4 rclip = TransformWorldToHClip(a);
+                float4 sp = ComputeScreenPos(rclip); float2 suv = sp.xy / sp.w;
                 float dz = _AsciiDepthLit > 0.5 ? abs(SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, ascii_point_clamp_sampler, suv, 0).a) : SAMPLE_TEXTURE2D_LOD(_AsciiNDTex, sampler_AsciiNDTex, suv, 0).b;
                 float sceneZ = dz > 1e-4 ? dz * 12.0 : 1e5;
-                float myZ = -pVS.z;
+                float3 rVS = TransformWorldToView(a);
+                float myZ = -rVS.z;
                 bool vis = myZ <= sceneZ + 0.3 && all(suv >= 0.0) && all(suv <= 1.0) && frac(s * 7.31) >= _AsciiGrassThin && frac(s * 5.17) >= _AsciiSeason.w * 0.7;
-                // the blade is always '|' (or '_' trodden flat) and leans by slanting its stroke, smoothly, as far as
-                // the wind bends it: switching | to / at a threshold flipped whole stretches of the field at once
-                float lvS = TransformWorldToViewDir(float3(leanS.x, 0, leanS.y), false).x;
-                float shear = clamp(lvS / max(0.35, sqrt(1.0 - lls * lls)), -1.6, 1.6);
-                o.gi = push > 0.8 ? 4.0 : 0.0;
-                float3 lit = SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, sampler_AsciiLitTex, suv, 0).rgb;
+
+                // the strip: as wide as the stroke of '|' in a character of the blade's height, narrowing to the tip;
+                // across the screen (it always faces the camera, as a character does)
+                float3 pVS = TransformWorldToView(p);
+                float3 nVS = TransformWorldToView(a + float3(lean.x * 2.0 * t * h, h, lean.y * 2.0 * t * h) * 0.1) - TransformWorldToView(a);
+                float2 dir = normalize(nVS.xy + float2(0, 1e-4));
+                float2 perp = float2(dir.y, -dir.x);
+                float4 ink = _GlyphInk[(int)(12.0 * 16.0 + 0.5)];
+                float wRoot = h * 0.44 * max(ink.z - ink.x, 0.12) * 1.15;
+                pVS.xy += perp * side * wRoot * lerp(1.0, 0.35, t);
+                o.uv = float2(lerp(ink.x, ink.z, side + 0.5), lerp(ink.y, ink.w, t));
+
+                // ---- colour ----
+                float3 lit = SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, sampler_AsciiLitTex, suv, 0).rgb;     // the ground under the root
                 lit = _AsciiLinear > 0.5 ? pow(max(lit, 0.0), 1.0 / 2.2) : max(lit, 0.0);
                 float lum = saturate(dot(lit, float3(0.299, 0.587, 0.114)) * 2.6 * _AsciiExposure);
+                float3 baseC = SeasonGreen(lerp(_GrassA.rgb, _GrassB.rgb, frac(s * 13.7)), s);
+                // depth colour (near / far)
+                float nf = smoothstep(NEAR_FAR.x, NEAR_FAR.y, myZ);
+                float3 nearC = baseC * float3(1.15, 1.08, 0.75) + float3(0.04, 0.035, 0.0);
+                float3 farC = baseC * float3(0.80, 0.93, 1.12);
+                float3 topC = lerp(nearC, farC, nf);
+                // terrain colour, then the shadow over it
+                float3 ground = lit / max(lum, 0.08) * 0.5;            // the ground's hue, without its brightness
+                float3 terr = lerp(topC, ground * 0.6 + topC * 0.4, TERRAIN_K);
+                float shadowAtt = saturate(lum * 1.8);
+                terr = lerp(terr * SHADOW_COL, terr, shadowAtt);
+                // height blend: the bottom colour (darker, of the ground) at the root
+                float3 bottomC = lerp(baseC * 0.3, ground * 0.45, 0.6);
+                float3 c = lerp(bottomC, terr, smoothstep(0.0, HEIGHT_BLEND, t));
+                // the light of the scene
+                c *= 0.25 + 0.95 * lum;
+                // the wind waves light the upper part of the blade
+                c += WAVE_LIGHT * wave * smoothstep(0.3, 1.0, t) * (0.35 + lum);
                 float depthK = clamp(1.0 - (myZ - _AsciiDepthRef) * 0.09, 0.5, 1.2);
-                float3 green = SeasonGreen(lerp(_GrassA.rgb, _GrassB.rgb, frac(s * 13.7)), s);
-                // near and far (the stylised grass of Binary Lunar): close blades warmer and yellower, far ones cooler, bluer
-                float nf = smoothstep(4.0, 20.0, myZ);
-                green = lerp(green * float3(1.12, 1.07, 0.78) + float3(0.035, 0.03, 0.0), green * float3(0.82, 0.94, 1.12), nf);
-                float3 top = green * (0.22 + 0.95 * lum) + lit * 0.35;
-                // in shadow the tips go towards a cool shadow colour, not just darker
-                float shd = saturate(1.0 - lum * 1.7);
-                top = lerp(top, top * float3(0.55, 0.66, 1.0) + float3(0.0, 0.01, 0.03), shd * 0.6);
-                // a pressed-down band of the wind shows lighter on the tips (the blades turn their sides to the light)
-                top = top * (1.0 + 0.3 * wave) + float3(0.16, 0.18, 0.1) * wave * (0.4 + lum);
-                // the root: dark and of the ground's own colour, so the grass grows out of the earth instead of lying on it
-                float3 root = lerp(green * 0.35, lit * 1.15, 0.55) * (0.35 + 0.65 * lum);
-                float kk = depthK * (1.0 - 0.35 * push);
-                o.col = top * kk; o.colB = root * kk;
-                // a little more colour (as the saturation of the lesson's post), the grey of the scene stays as it was
-                float lc0 = dot(o.col, float3(0.3, 0.5, 0.2)); o.col = max(0.0, lerp(lc0.xxx, o.col, 1.18));
-                // the quad covers only the part of the cell the stroke is in (an upright '|' is a third of its cell, a
-                // trodden '_' a fifth): the many blades lying over each other fill far fewer pixels
-                float4 ink = _GlyphInk[(int)(12.0 * 16.0 + o.gi + 0.5)];
-                float2 lc = lerp(ink.xy, ink.zw, i.corner + 0.5);
-                o.local = lc;
-                pVS.xy += (lc - 0.5) * float2(h * 0.44, h * 1.1);       // the characters keep their width, the blades are taller
-                if (o.gi < 3.5) pVS.x += (lc.y - 0.5) * h * 1.1 * shear;      // the stroke slants with the blade's lean
+                c *= depthK * (1.0 - 0.3 * push);
+                float l0 = dot(c, float3(0.3, 0.5, 0.2)); c = max(0.0, lerp(l0.xxx, c, 1.18));        // a little more colour
+                o.col = c;
                 o.positionCS = vis ? TransformWViewToHClip(pVS) : float4(2, 2, 2, 1);
                 return o;
             }
             half4 frag (Varyings i) : SV_Target
             {
-                float2 l = clamp(i.local, 0.03, 0.97);
                 float rows = max(_AsciiRows, 1.0);
-                float mk = SAMPLE_TEXTURE2D_BIAS(_AsciiAtlas, sampler_AsciiAtlas, float2((i.gi + l.x) / 16.0, 1.0 - 13.0 / rows + l.y / rows), -0.6).r;   // row 12
+                float2 l = clamp(i.uv, 0.02, 0.98);
+                float mk = SAMPLE_TEXTURE2D_BIAS(_AsciiAtlas, sampler_AsciiAtlas, float2(l.x / 16.0, 1.0 - 13.0 / rows + l.y / rows), -0.6).r;   // row 12, '|'
                 mk = saturate((mk - 0.22) * 1.9);
-                float3 c = lerp(i.colB, i.col, i.gi > 3.5 ? 0.7 : smoothstep(0.05, 0.8, l.y));      // root to tip (a trodden blade lies flat: its own colour)
-                return half4(c * mk, 1);
+                return half4(i.col * mk, 1);
             }
             ENDHLSL
         }

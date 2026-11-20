@@ -282,16 +282,18 @@ namespace AsciiHero
                 List<int> l; if (!tiles.TryGetValue(key, out l)) { l = new List<int>(); tiles[key] = l; }
                 l.Add(i);
             }
-            Vector2[] C = { new Vector2(-0.5f, -0.5f), new Vector2(0.5f, -0.5f), new Vector2(0.5f, 0.5f), new Vector2(-0.5f, 0.5f) };
+            // a blade: a strip of two segments (rows at t = 0, 0.5, 1, a vertex on each side); the shader bends it
+            Vector2[] C = { new Vector2(-0.5f, 0), new Vector2(0.5f, 0), new Vector2(-0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-0.5f, 1), new Vector2(0.5f, 1) };
+            int[] TRI = { 0, 2, 1, 1, 2, 3, 2, 4, 3, 3, 4, 5 };
             foreach (var kv in tiles)
             {
                 var ix = kv.Value; int n = ix.Count;
-                var verts = new List<Vector3>(n * 4); var corners = new List<Vector2>(n * 4); var seeds = new List<Vector2>(n * 4); var tris = new List<int>(n * 6);
+                var verts = new List<Vector3>(n * 6); var corners = new List<Vector2>(n * 6); var seeds = new List<Vector2>(n * 6); var tris = new List<int>(n * 12);
                 foreach (int i in ix)
                 {
                     int o = verts.Count;
-                    for (int k = 0; k < 4; k++) { verts.Add(pts[i]); corners.Add(C[k]); seeds.Add(new Vector2(seedList[i], 0)); }
-                    tris.Add(o); tris.Add(o + 2); tris.Add(o + 1); tris.Add(o); tris.Add(o + 3); tris.Add(o + 2);
+                    for (int k = 0; k < 6; k++) { verts.Add(pts[i]); corners.Add(C[k]); seeds.Add(new Vector2(seedList[i], 0)); }
+                    foreach (int q in TRI) tris.Add(o + q);
                 }
                 var m = new Mesh { name = "grass", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
                 m.SetVertices(verts); m.SetUVs(0, corners); m.SetUVs(1, seeds); m.SetTriangles(tris, 0);
