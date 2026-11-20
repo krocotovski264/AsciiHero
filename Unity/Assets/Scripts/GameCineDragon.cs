@@ -292,6 +292,14 @@ namespace AsciiHero
                 if (t >= T_STANCE) player.combatT = MotionActor.COMBAT_HOLD;
                 if (Mathf.Abs(t - T_PULL1) < dt * 0.5f)
                 {
+                    var sb = new System.Text.StringBuilder("cine: figures near the hero:");
+                    foreach (var sm in Object.FindObjectsByType<SkinnedMeshRenderer>(FindObjectsSortMode.None))
+                    {
+                        var rt = sm.transform.root; if (rt == drg.root.transform || !sm.enabled || !sm.gameObject.activeInHierarchy) continue;
+                        float dd = (sm.bounds.center - H).magnitude; if (dd > 12) continue;
+                        sb.Append(" [").Append(rt.name).Append("/").Append(sm.name).Append(" ").Append(dd.ToString("0.0")).Append(" L").Append(sm.gameObject.layer).Append("]");
+                    }
+                    CineLog(sb.ToString());
                     int on = 0; foreach (var r in hero.go.GetComponentsInChildren<Renderer>(false)) if (r.enabled) on++;
                     CineLog("cine: hero at " + hero.go.transform.position + " active " + hero.go.activeInHierarchy + " renderers on " + on + " pos " + pos + " H " + H);
                 }
