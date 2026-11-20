@@ -160,8 +160,12 @@ namespace AsciiHero
         }
         public void End()
         {
-            for (int i = used; i < n; i++) { int o = i * 4; for (int k = 0; k < 4; k++) c[o + k] = Color.clear; }
+            Vector3 mn = Vector3.one * 1e9f, mx = -mn;
+            for (int i = 0; i < used; i++) { mn = Vector3.Min(mn, v[i * 4]); mx = Vector3.Max(mx, v[i * 4]); }
+            if (used == 0) { mn = mx = Vector3.zero; }
+            for (int i = used; i < n; i++) { int o = i * 4; for (int k = 0; k < 4; k++) { c[o + k] = Color.clear; v[o + k] = mn; } }
             mesh.vertices = v; mesh.colors = c; mesh.uv2 = g; mesh.uv3 = x;
+            var b = new Bounds((mn + mx) * 0.5f, mx - mn + Vector3.one * 4f); mesh.bounds = b;       // (where the characters are: else the mesh is culled far from the origin)
         }
     }
 }

@@ -141,6 +141,11 @@ namespace AsciiHero
         }
 
         // ---------------- the scene ----------------
+        static float SegDist(Vector3 p, Vector3 a, Vector3 b)
+        {
+            p.y = a.y = b.y = 0; var ab = b - a; float u = Mathf.Clamp01(Vector3.Dot(p - a, ab) / Mathf.Max(1e-4f, ab.sqrMagnitude));
+            return (p - (a + ab * u)).magnitude;
+        }
         static float Smooth(float a, float b, float t) { t = Mathf.Clamp01((t - a) / (b - a)); return t * t * (3 - 2 * t); }
         static Vector3 Bez(Vector3 a, Vector3 b, Vector3 c, Vector3 d, float u) { float v = 1 - u; return v * v * v * a + 3 * v * v * u * b + 3 * v * u * u * c + u * u * u * d; }
 
@@ -166,7 +171,10 @@ namespace AsciiHero
                     float half = Mathf.Max(b.extents.x, b.extents.z);
                     bool inArena = along > -14 - half && along < 50 + half && across < (along < 6 ? 7 : 20) + half;
                     bool inSkyShot = (b.center - (H + f * 52 + sideH * 26)).magnitude < 9 + half;        // (the first shot's camera)
-                    if (inArena || inSkyShot) { r.gameObject.SetActive(false); hid++; }
+                    var Dd = H + f * 26;
+                    bool inSide = SegDist(b.center, Dd - f * 9 + sideH * 30, Dd - f * 6) < 7 + half          // (between the side cameras and the beast)
+                               || SegDist(b.center, Dd + sideH * 45 - f * 4, Dd) < 7 + half;
+                    if (inArena || inSkyShot || inSide) { r.gameObject.SetActive(false); hid++; }
                 }
                 CineLog("cine: put away " + hid + " things from the arena");
             }
@@ -217,7 +225,7 @@ namespace AsciiHero
                 // head and jaw: the breath
                 float raise = Smooth(T_FIRE0 - 1.1f, T_FIRE0 - 0.35f, t) * (1 - Smooth(T_FIRE0 - 0.35f, T_FIRE0, t));     // draws back
                 float down = Smooth(T_FIRE0 - 0.35f, T_FIRE0, t) * (1 - Smooth(T_FIRE1, T_FIRE1 + 0.9f, t));                // throws it forward and down
-                float pitchNeck = raise * 16 - down * 17;
+                float pitchNeck = raise * 14 - down * 6;
                 drg.Turn(n4, Quaternion.AngleAxis(pitchNeck * 0.35f, Vector3.right));
                 drg.Turn(n8, Quaternion.AngleAxis(pitchNeck * 0.35f, Vector3.right));
                 drg.Turn(head, Quaternion.AngleAxis(pitchNeck * 0.3f, Vector3.right));
