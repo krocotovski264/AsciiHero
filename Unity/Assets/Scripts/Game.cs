@@ -235,7 +235,7 @@ namespace AsciiHero
             if (!Step("База движений (mocap)", MotionDB.Load)) yield break;
             yield return null;
             if (!Step("Герой и символы", () => { Rebuild(); Debug.Log("Символов на сцене: " + GlyphLayer.count); })) yield break;
-            loadTarget = 1; while (loadShown < 0.999f) yield return null;       // (the bar fills smoothly before the game shows)
+            loadTarget = 1; while (loadShown < 0.999f && !Cine) yield return null;       // (the bar fills smoothly before the game shows)
             AutoPreset();
             ready = true;
             if (Cine) StartCoroutine(CineRun());

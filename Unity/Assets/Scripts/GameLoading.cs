@@ -122,7 +122,7 @@ namespace AsciiHero
                 yield return null;
             }
             int fr = 0; float tw = Time.realtimeSinceStartup;
-            while (loadShown < 0.999f) { fr++; yield return null; }
+            while (loadShown < 0.999f && !Cine) { fr++; yield return null; }
             sw.Append(" полоса догоняла ").Append(fr).Append(" кадров, ").Append(fr > 0 ? ((Time.realtimeSinceStartup - tw) * 1000 / fr).ToString("0") : "0").Append(" мс на кадр; всего ").Append(((Time.realtimeSinceStartup - tAll) * 1000).ToString("0")).Append(" мс");
             Debug.Log(sw.ToString());
             if (ascii != null) ascii.SetEnabled(true);
