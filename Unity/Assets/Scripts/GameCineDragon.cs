@@ -263,6 +263,13 @@ namespace AsciiHero
                     if (Rnd() < 0.4f) SmokeAt(at + Vector3.up * 1f, Vector3.up * 1.6f + RndSphere() * 0.6f, 0.45f);
                 }
                 glow = Mathf.Max(glow, after * 0.45f);
+                // the wall of smoke the breath leaves between the beast and the camera (it thins out by the pull back)
+                if (t > T_FIRE1 - 0.6f && t < T_FIRE1 + 0.5f)
+                    for (int i = 0; i < Mathf.RoundToInt(70 * dt * 30); i++)
+                    {
+                        var at = new Vector3(D.x, gy, D.z) - f * (8.5f + Rnd() * 8f) + side * (Rnd() * 2 - 1) * 7.5f + Vector3.up * (0.3f + Rnd() * Rnd() * 6.5f);
+                        SmokeAt(at, Vector3.up * (0.4f + Rnd() * 0.8f) + RndSphere() * 0.7f, 0.55f + Rnd() * 0.35f, 2, 1.6f + Rnd() * 2.2f);
+                    }
                 CineFx(dt, ground, C);
                 if (Mathf.Repeat(t, 1f) < dt * 0.999f && t > T_LAND)
                 {
