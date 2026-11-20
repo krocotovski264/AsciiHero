@@ -77,10 +77,11 @@ namespace AsciiHero
             var L = sMain;
             StoryGo(L, L.SpawnW, 0);
             yield return null; yield return null;
-            Time.captureFramerate = 30;
+            Time.captureFramerate = Mathf.RoundToInt(CineFps());
             StartCoroutine(CineCapture());
             switch (cineName)
             {
+                case "dragon": yield return CineDragonScene(); break;
                 default: yield return CineTest(); break;
             }
             Time.captureFramerate = 0;

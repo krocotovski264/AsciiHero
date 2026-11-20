@@ -1,9 +1,10 @@
 // Characters thrown by a script (the cinematics' dragon fire, its smoke, the dust): every particle is one quad whose
 // place, colour, size and character the script writes each frame (position; colour rgb + size in a; uv1: character,
-// glyph row). Always facing the camera, hidden behind what stands nearer (the scene's depth), max-blended as the fire.
+// glyph row; uv2.x: how much the smoke hides behind it). Always facing the camera, hidden behind what stands nearer (the
+// scene's depth). The fire is max-blended (light over light); the smoke is laid over (alpha), its cell darkened, so it hides.
 Shader "AsciiHero/Breath"
 {
-    Properties { }
+    Properties { [Enum(UnityEngine.Rendering.BlendOp)] _Op ("Op", Float) = 4 [Enum(UnityEngine.Rendering.BlendMode)] _Src ("Src", Float) = 1 [Enum(UnityEngine.Rendering.BlendMode)] _Dst ("Dst", Float) = 1 _Smoke ("Smoke", Float) = 0 }
     SubShader
     {
         Tags { "RenderType"="Transparent" "Queue"="Transparent" "RenderPipeline"="UniversalPipeline" }
@@ -12,8 +13,8 @@ Shader "AsciiHero/Breath"
             Name "Breath"
             Tags { "LightMode"="UniversalForward" }
             Cull Off ZWrite Off ZTest Always
-            BlendOp Max
-            Blend One One
+            BlendOp [_Op]
+            Blend [_Src] [_Dst]
             HLSLPROGRAM
             #pragma target 3.0
             #pragma vertex vert
@@ -23,10 +24,10 @@ Shader "AsciiHero/Breath"
             TEXTURE2D(_AsciiLitTex); SAMPLER(sampler_AsciiLitTex);
             TEXTURE2D(_AsciiNDTex); SAMPLER(sampler_AsciiNDTex);
             SAMPLER(ascii_point_clamp_sampler); float _AsciiDepthLit;
-            float _AsciiRows; float4 _GlyphInk[224];
+            float _AsciiRows; float4 _GlyphInk[224]; float _Smoke;
 
-            struct Attributes { float4 positionOS : POSITION; float2 corner : TEXCOORD0; float2 glyph : TEXCOORD1; float4 color : COLOR; };
-            struct Varyings { float4 positionCS : SV_POSITION; float2 local : TEXCOORD0; float3 col : TEXCOORD1; float2 g : TEXCOORD2; };
+            struct Attributes { float4 positionOS : POSITION; float2 corner : TEXCOORD0; float2 glyph : TEXCOORD1; float2 extra : TEXCOORD2; float4 color : COLOR; };
+            struct Varyings { float4 positionCS : SV_POSITION; float2 local : TEXCOORD0; float3 col : TEXCOORD1; float2 g : TEXCOORD2; float2 c : TEXCOORD3; float op : TEXCOORD4; };
 
             Varyings vert (Attributes i)
             {
@@ -41,8 +42,9 @@ Shader "AsciiHero/Breath"
                 o.col = i.color.rgb;
                 o.g = i.glyph;
                 float4 ink = _GlyphInk[(int)(i.glyph.y * 16.0 + i.glyph.x + 0.5)];
-                float2 lc = lerp(ink.xy, ink.zw, i.corner + 0.5);
-                o.local = lc;
+                float2 cc = i.corner + 0.5;
+                float2 lc = _Smoke > 0.5 ? cc : lerp(ink.xy, ink.zw, cc);          // (the smoke covers its whole cell)
+                o.local = lc; o.c = cc; o.op = i.extra.x;
                 pVS.xy += (lc - 0.5) * float2(i.color.a, i.color.a * 1.65);
                 o.positionCS = vis ? TransformWViewToHClip(pVS) : float4(2, 2, 2, 1);
                 return o;
@@ -53,6 +55,12 @@ Shader "AsciiHero/Breath"
                 float rows = max(_AsciiRows, 1.0);
                 float mk = SAMPLE_TEXTURE2D_BIAS(_AsciiAtlas, sampler_AsciiAtlas, float2((i.g.x + l.x) / 16.0, 1.0 - (i.g.y + 1.0) / rows + l.y / rows), -0.6).r;
                 mk = saturate((mk - 0.22) * 1.9);
+                if (_Smoke > 0.5)
+                {
+                    float2 e = abs(i.c - 0.5) * 2; float soft = saturate((1 - max(e.x, e.y)) * 4);     // (soft cell edges)
+                    float a = saturate(max(mk, 0.55 * soft) * i.op);
+                    return half4(lerp(i.col * 0.3, i.col, mk), a);
+                }
                 return half4(i.col * mk, 1);
             }
             ENDHLSL

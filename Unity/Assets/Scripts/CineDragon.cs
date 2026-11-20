@@ -68,7 +68,7 @@ namespace AsciiHero
             d.smr.updateWhenOffscreen = true;
             var mat = new Material(baseMat) { name = "Dragon" };
             mat.SetTexture("_MainTex", tex); mat.SetColor("_Color", new Color(1.15f, 1.05f, 1.0f));
-            mat.SetFloat("_AsciiRow", 2); mat.SetFloat("_AsciiActor", 1); mat.SetFloat("_Cull", 0);
+            mat.SetFloat("_AsciiActor", 1); mat.SetFloat("_Cull", 0); mat.SetFloat("_Glossiness", 0.38f); mat.SetFloat("_Metallic", 0.05f);
             mat.SetVector("_GlyphCell", new Vector4(0.085f, 0.14f, 0, 0));          // (a 20 m beast: its characters as large on it as the hero's on him at ~5x the distance)
             d.smr.sharedMaterial = mat;
             d.P = new Vector3[nb]; d.R = new Quaternion[nb]; d.S = new float[nb];
@@ -126,10 +126,10 @@ namespace AsciiHero
     public class CineParticles
     {
         public GameObject go; Mesh mesh; int n;
-        Vector3[] v; Color[] c; Vector2[] g; int used;
-        public CineParticles(int max)
+        Vector3[] v; Color[] c; Vector2[] g, x; int used;
+        public CineParticles(int max, bool smoke = false)
         {
-            n = max; v = new Vector3[n * 4]; c = new Color[n * 4]; g = new Vector2[n * 4];
+            n = max; v = new Vector3[n * 4]; c = new Color[n * 4]; g = new Vector2[n * 4]; x = new Vector2[n * 4];
             var corner = new Vector2[n * 4]; var tri = new int[n * 6];
             Vector2[] C = { new Vector2(-0.5f, -0.5f), new Vector2(0.5f, -0.5f), new Vector2(0.5f, 0.5f), new Vector2(-0.5f, 0.5f) };
             for (int i = 0; i < n; i++)
@@ -138,26 +138,30 @@ namespace AsciiHero
                 int o = i * 4; tri[i * 6] = o; tri[i * 6 + 1] = o + 2; tri[i * 6 + 2] = o + 1; tri[i * 6 + 3] = o; tri[i * 6 + 4] = o + 3; tri[i * 6 + 5] = o + 2;
             }
             mesh = new Mesh { name = "cineparts", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
-            mesh.vertices = v; mesh.uv = corner; mesh.uv2 = g; mesh.colors = c; mesh.triangles = tri;
+            mesh.vertices = v; mesh.uv = corner; mesh.uv2 = g; mesh.uv3 = x; mesh.colors = c; mesh.triangles = tri;
+            mesh.MarkDynamic();
             mesh.bounds = new Bounds(Vector3.zero, Vector3.one * 5000);
             go = new GameObject("CineParticles"); go.layer = GlyphLayer.LAYER;
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
-            var r = go.AddComponent<MeshRenderer>(); r.sharedMaterial = new Material(Shader.Find("AsciiHero/Breath"));
+            var r = go.AddComponent<MeshRenderer>(); var m = new Material(Shader.Find("AsciiHero/Breath"));
+            if (smoke) { m.SetFloat("_Op", 0); m.SetFloat("_Src", 5); m.SetFloat("_Dst", 10); m.SetFloat("_Smoke", 1); m.renderQueue = 3010; }
+            else m.renderQueue = 3005;
+            r.sharedMaterial = m;
             r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; r.receiveShadows = false;
         }
         public void Begin() { used = 0; }
         /// one character: place, colour, size (m), character index and glyph row
-        public void Add(Vector3 p, Color col, float size, int glyph, int row)
+        public void Add(Vector3 p, Color col, float size, int glyph, int row, float opacity = 1)
         {
             if (used >= n) return;
             int o = used * 4; col.a = size;
-            for (int k = 0; k < 4; k++) { v[o + k] = p; c[o + k] = col; g[o + k] = new Vector2(glyph, row); }
+            for (int k = 0; k < 4; k++) { v[o + k] = p; c[o + k] = col; g[o + k] = new Vector2(glyph, row); x[o + k] = new Vector2(opacity, 0); }
             used++;
         }
         public void End()
         {
             for (int i = used; i < n; i++) { int o = i * 4; for (int k = 0; k < 4; k++) c[o + k] = Color.clear; }
-            mesh.vertices = v; mesh.colors = c; mesh.uv2 = g;
+            mesh.vertices = v; mesh.colors = c; mesh.uv2 = g; mesh.uv3 = x;
         }
     }
 }
