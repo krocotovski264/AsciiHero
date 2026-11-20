@@ -47,7 +47,7 @@ Shader "AsciiHero/Grass"
             // ---- the lesson's settings (fixed here) ----
             #define NEAR_FAR      float2(4.0, 20.0)     // depth colour: where the near colour ends and the far begins
             #define HEIGHT_BLEND  0.85                  // how high the bottom colour reaches up the blade
-            #define TERRAIN_K     0.45                  // how much of the ground's colour the blade takes
+            #define TERRAIN_K     0.3                  // how much of the ground's colour the blade takes
             #define SHADOW_COL    float3(0.42, 0.52, 0.85)
             #define SWAY_SCALE    0.55                  // the sway noise (per metre)
             #define SWAY_K        0.10                  // the sway's bend
@@ -124,9 +124,9 @@ Shader "AsciiHero/Grass"
                 float2 dir = normalize(nVS.xy + float2(0, 1e-4));
                 float2 perp = float2(dir.y, -dir.x);
                 float4 ink = _GlyphInk[(int)(12.0 * 16.0 + 0.5)];
-                float wRoot = h * 0.44 * max(ink.z - ink.x, 0.12) * 1.15;
+                float wRoot = h * 0.44 * max(ink.z - ink.x, 0.12) * 1.9;        // (wider: the thin stroke was hardly seen)
                 pVS.xy += perp * side * wRoot * lerp(1.0, 0.35, t);
-                o.uv = float2(lerp(ink.x, ink.z, side + 0.5), lerp(ink.y, ink.w, t));
+                o.uv = float2(side + 0.5, t);
 
                 // ---- colour ----
                 float3 lit = SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, sampler_AsciiLitTex, suv, 0).rgb;     // the ground under the root
@@ -144,10 +144,10 @@ Shader "AsciiHero/Grass"
                 float shadowAtt = saturate(lum * 1.8);
                 terr = lerp(terr * SHADOW_COL, terr, shadowAtt);
                 // height blend: the bottom colour (darker, of the ground) at the root
-                float3 bottomC = lerp(baseC * 0.3, ground * 0.45, 0.6);
+                float3 bottomC = lerp(baseC * 0.55, ground * 0.6, 0.45);
                 float3 c = lerp(bottomC, terr, smoothstep(0.0, HEIGHT_BLEND, t));
                 // the light of the scene
-                c *= 0.25 + 0.95 * lum;
+                c *= (0.5 + 1.1 * lum) * 1.3;           // (brighter than the lesson's: in characters on black the grass was hardly seen)
                 // the wind waves light the upper part of the blade
                 c += WAVE_LIGHT * wave * smoothstep(0.3, 1.0, t) * (0.35 + lum);
                 float depthK = clamp(1.0 - (myZ - _AsciiDepthRef) * 0.09, 0.5, 1.2);
@@ -159,10 +159,8 @@ Shader "AsciiHero/Grass"
             }
             half4 frag (Varyings i) : SV_Target
             {
-                float rows = max(_AsciiRows, 1.0);
-                float2 l = clamp(i.uv, 0.02, 0.98);
-                float mk = SAMPLE_TEXTURE2D_BIAS(_AsciiAtlas, sampler_AsciiAtlas, float2(l.x / 16.0, 1.0 - 13.0 / rows + l.y / rows), -0.6).r;   // row 12, '|'
-                mk = saturate((mk - 0.22) * 1.9);
+                // a solid stroke, soft only at its very edges (no see-through: the atlas' thin '|' let the ground through)
+                float mk = 1.0 - smoothstep(0.38, 0.5, abs(i.uv.x - 0.5));
                 return half4(i.col * mk, 1);
             }
             ENDHLSL

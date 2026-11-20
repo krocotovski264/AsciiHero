@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.1.14 · Unity";
+        public const string VERSION = "beta 0.1.15 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -1872,7 +1872,7 @@ namespace AsciiHero
                 float wT = WeatherWind(windTarget);
                 windStr += (wT - windStr) * (1 - Mathf.Exp(-dt / (wT > windStr ? 0.7f : 1.6f)));        // rises quicker than it dies away
                 windA += dt * (0.03f * Mathf.Sin(tNow * 0.031f) + (windPhase == 2 ? 0.06f * Mathf.Sin(tNow * 0.9f) : 0));
-                windRun += dt * (0.0167f + 0.0467f * windStr);       // (15 times slower than 0.1.11: the waves crawl over the field)       // (the gusts roll over the grass slower: they used to flash past)
+                windRun += dt * (0.0056f + 0.0156f * windStr);       // (45 times slower than 0.1.11)
                 Vector2 wd = new Vector2(Mathf.Cos(windA), Mathf.Sin(windA));
                 Shader.SetGlobalVector("_AsciiWind", new Vector4(wd.x, wd.y, windStr, windRun));
                 windV = new Vector3(wd.x, 0, wd.y) * (windStr * 2.4f);
