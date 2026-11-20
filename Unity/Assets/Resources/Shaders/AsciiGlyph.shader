@@ -85,7 +85,7 @@ Shader "AsciiHero/Glyph"
             float4 _ClothMap2, _ClothMap3; // the cloak (_ClothMap.w = 1, x = the body's axis z): angles round the neck, over the shoulders, behind the arms, the shoulders' v; the elbows' v, 1/exponent of v, columns, rows
             float4 _ClothMap;             // skirt mesh: x = centre z, y = top y, z = bottom y, w = 1 for the cloak
             float _ClothSim;              // per renderer: 1 = this is the simulated skirt
-            float4 _AsciiWind;            // xy = direction (world xz), z = strength
+            float4 _AsciiWind; float4 _AsciiWindOff;   // xy: how far the air has carried the gusts (world xz), zw: the place's reference point            // xy = direction (world xz), z = strength
             float WHash(float2 p) { p = frac(p * float2(123.34, 456.21)); p += dot(p, p + 45.32); return frac(p.x * p.y); }
             float WNoise(float2 p)      // smooth value noise, 0..1
             {
@@ -97,11 +97,12 @@ Shader "AsciiHero/Glyph"
             // the CPU), w the distance the air has travelled
             float WindGust(float2 p)
             {
-                float2 wd = _AsciiWind.xy, wp = float2(-wd.y, wd.x); float run = _AsciiWind.w;
-                float2 q = float2(dot(p, wd) - run, dot(p, wp));
-                float g = WNoise(q * float2(0.17, 0.11) + 3.1);                    // big gusts: long downwind, broad across
+                // carried by the air in the world's own axes, from a point near the place (the old pattern turned with
+                // the wind's direction about the world's origin, 4 km away: it swept over the grass at tens of m/s)
+                float2 r = p - _AsciiWindOff.zw - _AsciiWindOff.xy;
+                float g = WNoise(r * 0.14 + 3.1);                      // big gusts
                 g = smoothstep(0.32, 0.82, g);
-                float d = WNoise(q * float2(0.6, 0.45) - float2(run * 0.7, 0) + 11.7);   // smaller ripples on top, faster
+                float d = WNoise(r * 0.5 + 11.7);                      // smaller ripples on them
                 return saturate(g * (0.7 + 0.6 * d));
             }
             float3 ClothWS(float3 ws, float3 os)

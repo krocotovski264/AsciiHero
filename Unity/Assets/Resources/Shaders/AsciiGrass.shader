@@ -42,6 +42,7 @@ Shader "AsciiHero/Grass"
             float4 _AsciiPush[4];
             float _AsciiGrassThin;
             float4 _AsciiWind;         // xy direction (world xz), z strength 0..1.5, w the distance the air has run
+            float4 _AsciiWindOff;      // xy: the air's travel (world xz), zw: the place's reference point
             float4 _AsciiSeason;
 
             // ---- the lesson's settings (fixed here) ----
@@ -51,7 +52,7 @@ Shader "AsciiHero/Grass"
             #define SHADOW_COL    float3(0.42, 0.52, 0.85)
             #define SWAY_SCALE    0.55                  // the sway noise (per metre)
             #define SWAY_K        0.10                  // the sway's bend
-            #define WAVE_SCALE    float2(0.075, 0.11)   // the wind waves' noise: long downwind, narrower across
+            #define WAVE_SCALE    0.09                  // the wind waves' noise (per metre)
             #define WAVE_CONTRAST float2(0.38, 0.78)    // smoothstep edges of the wave
             #define WAVE_K        0.75                  // how far a wave bends the blade over
             #define WAVE_LIGHT    float3(0.20, 0.22, 0.12)
@@ -86,7 +87,9 @@ Shader "AsciiHero/Grass"
 
                 // the air: both noises live in the wind's own frame and run downwind with it
                 float2 wd = _AsciiWind.xy, wp = float2(-wd.y, wd.x); float ws = _AsciiWind.z, run = _AsciiWind.w;
-                float2 q = float2(dot(a.xz, wd) - run, dot(a.xz, wp));
+                // (in the world's own axes, carried by the air; the old frame turned with the wind about the world's origin
+                // 4 km away, so a slow drift of the direction swept the noise over the field at tens of metres a second)
+                float2 q = a.xz - _AsciiWindOff.zw - _AsciiWindOff.xy;
                 // wind waves (the wind texture): a contrast step over a large noise
                 float wave = smoothstep(WAVE_CONTRAST.x, WAVE_CONTRAST.y, WNoise(q * WAVE_SCALE + 3.1)) * saturate(ws * 1.2);
                 // sway (the gradient noise): a small bend in any direction, the same for neighbours

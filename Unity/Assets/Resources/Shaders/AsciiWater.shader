@@ -43,7 +43,7 @@ Shader "AsciiHero/Water"
             SAMPLER(ascii_point_clamp_sampler); float _AsciiDepthLit;
             float _AsciiRows, _AsciiTime; float4 _GlyphInk[224];
             float4 _WxIce;      // x how far the ice has come in from the shore (0 .. 1 frozen over), y snow lying on it
-            float4 _AsciiWind; float4 _WaterRip[8]; float4 _MoonDir; float4 _AsciiGrade; float _AsciiDayK;
+            float4 _AsciiWind; float4 _AsciiWindOff; float4 _WaterRip[8]; float4 _MoonDir; float4 _AsciiGrade; float _AsciiDayK;
             float4 _WaterBody[16]; float _WaterBodyN; float4 _WaterTrees[8]; float _WaterTreeN;
             float _WaterReflOn, _AsciiReflPass; TEXTURE2D(_WaterReflTex); SAMPLER(sampler_WaterReflTex);
             TEXTURE2D(_AsciiSkyMap); SAMPLER(sampler_AsciiSkyMap);
@@ -61,6 +61,7 @@ Shader "AsciiHero/Water"
             // the water height at p (m, small) and its slope (d/dx, d/dz)
             float3 Waves(float2 p, float t)
             {
+                p -= _AsciiWindOff.zw;          // (from a point near the place: the wave fronts turn with the wind about it, not about the world's origin)
                 float2 wd = _AsciiWind.xy, wp; float str = _AsciiWind.z, run = _AsciiWind.w;
                 if (_WaterMode.x > 0.5)
                 {   // underground: no wind; a stream runs along its flow, still water only trembles

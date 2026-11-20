@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.1.15 · Unity";
+        public const string VERSION = "beta 0.1.16 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -1654,7 +1654,7 @@ namespace AsciiHero
         // ---------- actions: attack, guard, dash ----------
         ICloth cloak; readonly List<Renderer> cloakRs = new List<Renderer>(); MaterialPropertyBlock clothMpb;
         readonly Sky skyS = new Sky(); bool skyOpen; GameObject precipGo;
-        Vector3 windV; float windA = 0.7f, windStr = 0.3f, windTarget = 0.4f, windPhaseT, windRun; int windPhase = 1;
+        Vector3 windV; Vector2 windOff; float windA = 0.7f, windStr = 0.3f, windTarget = 0.4f, windPhaseT, windRun; int windPhase = 1;
         class Piece { public string kind = ""; public List<Renderer> rs = new List<Renderer>(); public float delay, om = 11, zeta = 0.45f, lift = 0.3f, wob, turns = 1, side; public Vector3 axis = Vector3.up; }
         readonly List<Piece> pieces = new List<Piece>(); MaterialPropertyBlock shiftMpb;
         const float DASH_DIST = 2.0f, DASH_T = 0.1f; float dashAnim = 0.4f, dashSettle = 0;
@@ -1872,9 +1872,16 @@ namespace AsciiHero
                 float wT = WeatherWind(windTarget);
                 windStr += (wT - windStr) * (1 - Mathf.Exp(-dt / (wT > windStr ? 0.7f : 1.6f)));        // rises quicker than it dies away
                 windA += dt * (0.03f * Mathf.Sin(tNow * 0.031f) + (windPhase == 2 ? 0.06f * Mathf.Sin(tNow * 0.9f) : 0));
-                windRun += dt * (0.0056f + 0.0156f * windStr);       // (45 times slower than 0.1.11)
+                float windSp = 0.25f + 0.45f * windStr;       // m/s the gusts travel over the grass (0.27 in a lull .. 0.9 in a gust)
+                windRun += dt * windSp;
                 Vector2 wd = new Vector2(Mathf.Cos(windA), Mathf.Sin(windA));
                 Shader.SetGlobalVector("_AsciiWind", new Vector4(wd.x, wd.y, windStr, windRun));
+                // the gusts are carried along the wind as a plain shift in world axes, measured from the place's own origin:
+                // the pattern used to be laid out in a frame turned with the wind about the world's origin (the story's
+                // places are 4 km from it), so the slow wander of the direction swept it over the grass at 80..360 m/s
+                windOff += wd * (dt * windSp); if (windOff.sqrMagnitude > 4e6f) windOff = Vector2.zero;
+                var wref = loc != null ? loc.origin : Vector3.zero;
+                Shader.SetGlobalVector("_AsciiWindOff", new Vector4(windOff.x, windOff.y, wref.x, wref.z));
                 windV = new Vector3(wd.x, 0, wd.y) * (windStr * 2.4f);
             }
             if (cloak != null && !perfNoAnim) { long tC = System.Diagnostics.Stopwatch.GetTimestamp(); cloak.Update(dt, windV); accA += Ms(tC); if (clothMpb == null) clothMpb = new MaterialPropertyBlock(); cloak.Apply(clothMpb, cloakRs); }

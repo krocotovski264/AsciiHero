@@ -36,7 +36,7 @@ Shader "AsciiHero/Leaves"
             float _AsciiLeafClear;     // 0..1: the hero is in the forest - the crowns clear from the whole screen but a 15 % rim       // per field of blades: its two colours and height (grass, wheat)
             float4 _AsciiPush[4];      // points of the body that press the grass: xyz, radius (0 = none)
             float _AsciiGrassThin;     // settings: the share of blades that is not drawn (0 = all)
-            float4 _AsciiWind;         // wind: xy = direction (world xz), z = strength 0..1.5, w = unused
+            float4 _AsciiWind; float4 _AsciiWindOff;   // xy: how far the air has carried the gusts (world xz), zw: the place's reference point         // wind: xy = direction (world xz), z = strength 0..1.5, w = unused
 
             // the season over the foliage (_AsciiSeason: x autumn, y winter, z spring, w snow lying)
             float4 _AsciiSeason;
@@ -62,11 +62,12 @@ Shader "AsciiHero/Leaves"
             // the CPU), w the distance the air has travelled
             float WindGust(float2 p)
             {
-                float2 wd = _AsciiWind.xy, wp = float2(-wd.y, wd.x); float run = _AsciiWind.w;
-                float2 q = float2(dot(p, wd) - run, dot(p, wp));
-                float g = WNoise(q * float2(0.17, 0.11) + 3.1);                    // big gusts: long downwind, broad across
+                // carried by the air in the world's own axes, from a point near the place (the old pattern turned with
+                // the wind's direction about the world's origin, 4 km away: it swept over the grass at tens of m/s)
+                float2 r = p - _AsciiWindOff.zw - _AsciiWindOff.xy;
+                float g = WNoise(r * 0.14 + 3.1);                      // big gusts
                 g = smoothstep(0.32, 0.82, g);
-                float d = WNoise(q * float2(0.6, 0.45) - float2(run * 0.7, 0) + 11.7);   // smaller ripples on top, faster
+                float d = WNoise(r * 0.5 + 11.7);                      // smaller ripples on them
                 return saturate(g * (0.7 + 0.6 * d));
             }
 
