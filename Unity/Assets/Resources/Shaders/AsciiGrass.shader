@@ -63,7 +63,7 @@ Shader "AsciiHero/Grass"
                 float2 q = float2(dot(p, wd) - run, dot(p, wp));
                 float g = WNoise(q * float2(0.13, 0.11) + 3.1);                    // big gusts: long downwind, broad across
                 g = smoothstep(0.15, 0.95, g);            // (soft edges: a gust leans the blades over gradually)
-                float d = WNoise(q * float2(0.35, 0.3) - float2(run * 0.3, 0) + 11.7);   // smaller ripples on top, faster
+                float d = WNoise(q * float2(0.35, 0.3) + 11.7);       // (rides with the big gusts: no second layer sliding over them at its own speed)   // smaller ripples on top, faster
                 return saturate(g * (0.7 + 0.6 * d));
             }
 
@@ -89,13 +89,16 @@ Shader "AsciiHero/Grass"
                 float gMid = WindGust(a.xz + wd * 1.1); gNow = (gNow + gMid) * 0.5;      // (eased: the gust is felt over a stretch of the field)
                 float wave = gNow * saturate(ws * 1.25);
                 float recoil = max(0.0, gPrev - gNow) * saturate(ws * 1.25);
-                float fl = sin(_AsciiTime * (2.0 + 2.0 * ws) * (0.8 + 0.4 * frac(s * 3.3)) + s * 40.0);
+                float fl = sin(_AsciiTime * (1.0 + 1.0 * ws) * (0.8 + 0.4 * frac(s * 3.3)) + s * 40.0);
                 // (the lean as deep as it was; the recoil springs back slowly, the flutter stays small)
-                float2 wind = wd * ((0.05 + 0.1 * ws) + 0.85 * wave / stiff - 0.18 * recoil * sin(_AsciiTime * 1.6 + s * 9.0 + 1.5))
+                float2 wind = wd * ((0.05 + 0.1 * ws) + 0.85 * wave / stiff - 0.18 * recoil * sin(_AsciiTime * 0.8 + s * 9.0 + 1.5))
                             + float2(-wd.y, wd.x) * fl * (0.012 + 0.03 * ws * (0.3 + wave)) + wd * fl * 0.015 * ws * wave;
                 // a slow sway of its own even in still air (a noise over the field, so neighbours sway together)
                 // (small: it bends the blade a little but never turns its character, or the whole field flickers | / \ at once)
-                float2 idle = float2(WNoise(a.xz * 0.6 + _AsciiTime * 0.12) - 0.5, WNoise(a.xz * 0.6 + 7.3 - _AsciiTime * 0.1) - 0.5);
+                // (carried by the same air as the gusts, at their speed and in their direction: it used to drift on its own,
+                // ten times faster than the waves, a second pattern over the first)
+                float2 qi = float2(dot(a.xz, wd) - _AsciiWind.w, dot(a.xz, float2(-wd.y, wd.x))) * 0.6;
+                float2 idle = float2(WNoise(qi + 21.3) - 0.5, WNoise(qi + 7.3) - 0.5);
                 float2 sway = idle * (0.05 + 0.03 * frac(s * 4.3)) * (1.0 - 0.5 * saturate(ws));
                 float2 lean = wind; float push = 0;
                 for (int k = 0; k < 4; k++)
