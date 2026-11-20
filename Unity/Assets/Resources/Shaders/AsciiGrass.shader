@@ -61,7 +61,7 @@ Shader "AsciiHero/Grass"
             {
                 float2 wd = _AsciiWind.xy, wp = float2(-wd.y, wd.x); float run = _AsciiWind.w;
                 float2 q = float2(dot(p, wd) - run, dot(p, wp));
-                float g = WNoise(q * float2(0.09, 0.08) + 3.1);                    // big gusts: long downwind, broad across
+                float g = WNoise(q * float2(0.13, 0.11) + 3.1);                    // big gusts: long downwind, broad across
                 g = smoothstep(0.15, 0.95, g);            // (soft edges: a gust leans the blades over gradually)
                 float d = WNoise(q * float2(0.35, 0.3) - float2(run * 0.3, 0) + 11.7);   // smaller ripples on top, faster
                 return saturate(g * (0.7 + 0.6 * d));
@@ -116,8 +116,11 @@ Shader "AsciiHero/Grass"
                 float sceneZ = dz > 1e-4 ? dz * 12.0 : 1e5;
                 float myZ = -pVS.z;
                 bool vis = myZ <= sceneZ + 0.3 && all(suv >= 0.0) && all(suv <= 1.0) && frac(s * 7.31) >= _AsciiGrassThin && frac(s * 5.17) >= _AsciiSeason.w * 0.7;
-                float lv = TransformWorldToViewDir(float3(lean.x, 0, lean.y), false).x;
-                o.gi = push > 0.8 ? 4.0 : (lv > 0.22 ? 2.0 : (lv < -0.22 ? 3.0 : 0.0));
+                // the blade is always '|' (or '_' trodden flat) and leans by slanting its stroke, smoothly, as far as
+                // the wind bends it: switching | to / at a threshold flipped whole stretches of the field at once
+                float lvS = TransformWorldToViewDir(float3(leanS.x, 0, leanS.y), false).x;
+                float shear = clamp(lvS / max(0.35, sqrt(1.0 - lls * lls)), -1.6, 1.6);
+                o.gi = push > 0.8 ? 4.0 : 0.0;
                 float3 lit = SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, sampler_AsciiLitTex, suv, 0).rgb;
                 lit = _AsciiLinear > 0.5 ? pow(max(lit, 0.0), 1.0 / 2.2) : max(lit, 0.0);
                 float lum = saturate(dot(lit, float3(0.299, 0.587, 0.114)) * 2.6 * _AsciiExposure);
@@ -144,6 +147,7 @@ Shader "AsciiHero/Grass"
                 float2 lc = lerp(ink.xy, ink.zw, i.corner + 0.5);
                 o.local = lc;
                 pVS.xy += (lc - 0.5) * float2(h * 0.44, h * 1.1);       // the characters keep their width, the blades are taller
+                if (o.gi < 3.5) pVS.x += (lc.y - 0.5) * h * 1.1 * shear;      // the stroke slants with the blade's lean
                 o.positionCS = vis ? TransformWViewToHClip(pVS) : float4(2, 2, 2, 1);
                 return o;
             }
