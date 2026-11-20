@@ -82,6 +82,7 @@ namespace AsciiHero
             switch (cineName)
             {
                 case "dragon": yield return CineDragonScene(); break;
+                case "hero": yield return CineHeroScene(); break;
                 default: yield return CineTest(); break;
             }
             Time.captureFramerate = 0;

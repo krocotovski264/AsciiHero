@@ -1,0 +1,73 @@
+// The cinematic "hero" (?cine=hero&view=front|side|back): the game's own hero (plate, cloak, sword) on the open land,
+// with the game's own animations: he stands, the sword low in his hand, the cloak in a wind from in front of him; then
+// he takes the fighting stance (the game's two-handed stance, as when a fight starts). The camera from one side.
+using System.Collections;
+using UnityEngine;
+
+namespace AsciiHero
+{
+    public partial class Game
+    {
+        bool cineWindOn; float cineWindStr, cineWindA;
+        static string CineParam(string key, string def)
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            string u = Application.absoluteURL; int i = u.IndexOf(key + "=");
+            if (i < 0) return def;
+            string s = u.Substring(i + key.Length + 1); int a = s.IndexOfAny(new[] { '&', '#' }); if (a >= 0) s = s.Substring(0, a);
+            return s;
+#else
+            return def;
+#endif
+        }
+
+        IEnumerator CineHeroScene()
+        {
+            var L = sMain;
+            if (!CineArena(L, out var H, out var f)) CineLog("cine: no open place found, using the spawn");
+            float heading = Mathf.Atan2(f.x, f.z);
+            StoryGo(L, H, heading); pos = H;
+            gameClock = Sky.DAY_S * 0.455f; wxMain.auto = false; wxMain.Stop(); wxMain.wet = 0; wxMain.puddle = 0;
+            var side = new Vector3(f.z, 0, -f.x);
+            {   // nothing standing round him
+                int hid = 0;
+                foreach (var r in L.root.GetComponentsInChildren<Renderer>(false))
+                {
+                    var nm = r.gameObject.name; if (nm == "Ground" || nm == "Grass" || nm == "Path" || nm == "Glyphs" || r.gameObject.layer == GlyphLayer.LAYER) continue;
+                    var b = r.bounds; if (b.size.x > 25 || b.size.z > 25) continue;
+                    if ((new Vector3(b.center.x, H.y, b.center.z) - H).magnitude < 14 + Mathf.Max(b.extents.x, b.extents.z)) { r.gameObject.SetActive(false); hid++; }
+                }
+                CineLog("cine: put away " + hid);
+            }
+            // the wind: from in front of him, so the cloak streams back
+            cineWindOn = true; cineWindA = Mathf.Atan2(-f.z, -f.x);
+            string view = CineParam("view", "front");
+            const float T_STANCE = 2.7f, T_END = 6.5f;
+            float fps = CineFps(), dt = 1f / fps, t = -1.5f;          // (1.5 s before the recording: the cloak settles in the wind)
+            player.combatT = 0; player.guardHeld = false;
+            cineCamOn = true;
+            while (t < T_END)
+            {
+                CineClearFolk(H);
+                Shader.SetGlobalFloat("_VisOn", 0);
+                pos = H; player.heading = heading;
+                // gusts
+                cineWindStr = 0.75f + 0.35f * Mathf.PerlinNoise(t * 0.7f, 0.2f) + 0.25f * Mathf.Sin(t * 2.3f);
+                if (t >= T_STANCE) player.combatT = MotionActor.COMBAT_HOLD;
+                // the camera
+                Vector3 c = H + Vector3.up * 1.0f, eye;
+                switch (view)
+                {
+                    case "side": eye = c + side * 4.2f + Vector3.up * 0.15f; break;
+                    case "back": eye = c - f * 4.2f + side * 0.5f + Vector3.up * 0.3f; break;
+                    default: eye = c + f * 4.2f + Vector3.up * 0.15f; break;
+                }
+                cineEye = eye; cineAt = c - Vector3.up * 0.05f; cineFov = 36; cineRoll = 0;
+                cineRec = t >= 0;
+                t += dt;
+                yield return null;
+            }
+            cineRec = false; cineWindOn = false;
+        }
+    }
+}

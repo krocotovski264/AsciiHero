@@ -1874,6 +1874,7 @@ namespace AsciiHero
                 float wT = WeatherWind(windTarget);
                 windStr += (wT - windStr) * (1 - Mathf.Exp(-dt / (wT > windStr ? 0.7f : 1.6f)));        // rises quicker than it dies away
                 windA += dt * (0.03f * Mathf.Sin(tNow * 0.031f) + (windPhase == 2 ? 0.06f * Mathf.Sin(tNow * 0.9f) : 0));
+                if (cineWindOn) { windStr = cineWindStr; windA = cineWindA; }          // (a cinematic sets its own wind)
                 float windSp = 2.5f + 4.5f * windStr;       // m/s the gusts travel over the grass (2.7 in a lull .. 9 in a gust)
                 windRun += dt * windSp;
                 Vector2 wd = new Vector2(Mathf.Cos(windA), Mathf.Sin(windA));
