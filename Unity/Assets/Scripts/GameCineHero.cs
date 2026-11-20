@@ -69,10 +69,10 @@ namespace AsciiHero
                     var sb = new System.Text.StringBuilder("cine: near:");
                     foreach (var r in Object.FindObjectsByType<Renderer>(FindObjectsSortMode.None))
                     {
-                        if (!r.enabled || !r.gameObject.activeInHierarchy || r.transform.IsChildOf(hero.go.transform)) continue;
-                        var b = r.bounds; if ((b.center - H).magnitude > 4 || b.size.magnitude > 60) continue;
+                        if (!r.enabled || !r.gameObject.activeInHierarchy) continue;
+                        var b = r.bounds; if ((b.center - H).magnitude > 4 || b.size.magnitude > 60 || b.size.y < 0.9f) continue;
                         var p = r.transform; string path = p.name; for (int k = 0; k < 3 && p.parent != null; k++) { p = p.parent; path = p.name + "/" + path; }
-                        sb.Append(" [").Append(path).Append(" ").Append(b.size.ToString("0.0")).Append("]");
+                        sb.Append(" [").Append(path).Append(" ").Append(b.size.ToString("0.0")).Append(" @").Append((b.center - H).ToString("0.0")).Append(" L").Append(r.gameObject.layer).Append("]");
                     }
                     CineLog(sb.ToString());
                 }
