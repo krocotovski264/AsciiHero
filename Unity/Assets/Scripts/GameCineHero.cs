@@ -50,6 +50,7 @@ namespace AsciiHero
             {
                 CineClearFolk(H);
                 Shader.SetGlobalFloat("_VisOn", 0);
+                if (CineParam("close", "1") == "1") { ascii.actorBoost = 0; Shader.SetGlobalFloat("_AsciiLod", 1); }     // (a close-up: the characters as the dressing room shows them)
                 pos = H; player.heading = heading;
                 // gusts
                 cineWindStr = 0.75f + 0.35f * Mathf.PerlinNoise(t * 0.7f, 0.2f) + 0.25f * Mathf.Sin(t * 2.3f);
