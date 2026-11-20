@@ -153,6 +153,24 @@ namespace AsciiHero
             CineLog("cine: arena " + H + " f " + f + " biome " + L.BiomeAtW(H) + " / " + L.BiomeAtW(H + f * 20));
             float heading = Mathf.Atan2(f.x, f.z);
             StoryGo(L, H, heading); pos = H;
+            // late afternoon, clear: the low warm sun (the sky eases into it over the frames before the recording)
+            gameClock = Sky.DAY_S * 0.545f; wxMain.auto = false; wxMain.Stop(); wxMain.wet = 0; wxMain.puddle = 0;
+            // nothing standing in the arena: the trees and bushes there are put away (their characters with them)
+            {
+                int hid = 0; var sideH = new Vector3(f.z, 0, -f.x);
+                foreach (var r in L.root.GetComponentsInChildren<Renderer>(false))
+                {
+                    var nm = r.gameObject.name; if (nm == "Ground" || nm == "Grass" || nm == "Path" || nm == "Glyphs" || r.gameObject.layer == GlyphLayer.LAYER) continue;
+                    var b = r.bounds; if (b.size.x > 25 || b.size.z > 25) continue;
+                    var d = b.center - H; float along = Vector3.Dot(d, f), across = Mathf.Abs(Vector3.Dot(d, sideH));
+                    float half = Mathf.Max(b.extents.x, b.extents.z);
+                    bool inArena = along > -14 - half && along < 50 + half && across < (along < 6 ? 7 : 20) + half;
+                    bool inSkyShot = (b.center - (H + f * 52 + sideH * 26)).magnitude < 9 + half;        // (the first shot's camera)
+                    if (inArena || inSkyShot) { r.gameObject.SetActive(false); hid++; }
+                }
+                CineLog("cine: put away " + hid + " things from the arena");
+            }
+            for (int i = 0; i < 150; i++) { pos = H; player.heading = heading; yield return null; }      // (5 s for the light to settle; nothing recorded)
             SetShadowDistance(90);
             var D = H + f * 26f;                                   // where the dragon lands (its pelvis over this point)
             float gy = H.y; var ground = new Vector3(0, gy, 0);
@@ -251,6 +269,11 @@ namespace AsciiHero
                 // ---- the hero: still, then the stance ----
                 pos = H; player.heading = heading;
                 if (t >= T_STANCE) player.combatT = MotionActor.COMBAT_HOLD;
+                if (Mathf.Abs(t - T_PULL1) < dt * 0.5f)
+                {
+                    int on = 0; foreach (var r in hero.go.GetComponentsInChildren<Renderer>(false)) if (r.enabled) on++;
+                    CineLog("cine: hero at " + hero.go.transform.position + " active " + hero.go.activeInHierarchy + " renderers on " + on + " pos " + pos + " H " + H);
+                }
 
                 // ---- the camera ----
                 Vector3 eye, at2; float fov;
