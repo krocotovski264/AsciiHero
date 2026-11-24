@@ -56,9 +56,9 @@ namespace AsciiHero
                 c += new Color(1.0f, 0.6f, 0.3f) * (Mathf.Pow(toSun, 12f) * 0.8f + Mathf.Pow(toSun, 3f) * 0.15f);
                 float b = 0.22f + 0.35f * (1 - u);
                 // clouds: long bands, flattened towards the horizon (as a layer seen far off), drifting
-                float cx = az * 3.2f + t * 0.012f, cy = (el + 0.02f) * 13f / Mathf.Max(0.25f, el * 4f + 0.25f);
+                float cx = az * 7.5f + t * 0.03f, cy = (el + 0.02f) * 26f / Mathf.Max(0.3f, el * 5f + 0.3f);
                 float n = Fbm(cx, cy * 0.55f + 3f);
-                float cloud = Mathf.Clamp01((n - 0.47f) * 3.4f) * Mathf.Clamp01((el - 0.01f) / 0.04f) * Mathf.Clamp01(1.2f - u);
+                float cloud = Mathf.Clamp01((n - 0.5f) * 3.0f) * Mathf.Clamp01((el - 0.01f) / 0.04f) * Mathf.Clamp01(1.2f - u);
                 int row = 11, g;
                 if (cloud > 0.05f)
                 {

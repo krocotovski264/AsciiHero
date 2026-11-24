@@ -59,13 +59,13 @@ namespace AsciiHero
                 Vector3 c = H + Vector3.up * 1.0f, eye;
                 switch (view)
                 {
-                    case "side": eye = c + side * 5.6f + Vector3.up * 0.1f; break;
-                    case "back": eye = c - f * 5.6f + side * 0.6f + Vector3.up * 0.25f; break;
-                    default: eye = c + f * 5.6f + Vector3.up * 0.1f; break;
+                    case "side": eye = c + side * 9.5f + Vector3.up * 1.7f; break;
+                    case "back": eye = c - f * 9.5f + side * 1.0f + Vector3.up * 1.9f; break;
+                    default: eye = c + f * 9.5f + Vector3.up * 1.7f; break;
                 }
-                if (!skyMade) { skyMade = true; CineSkyInit(eye, (c - Vector3.up * 0.08f) - eye, 32); }
+                if (!skyMade) { skyMade = true; CineSkyInit(eye, (c + Vector3.up * 0.6f) - eye, 30); }
                 CineSky(t + 5f, skyS.sunDir.y > 0.02f ? skyS.sunDir.normalized : new Vector3(skyS.sunDir.x, 0.06f, skyS.sunDir.z).normalized);
-                cineEye = eye; cineAt = c - Vector3.up * 0.08f; cineFov = 32; cineRoll = 0;
+                cineEye = eye; cineAt = c + Vector3.up * 0.6f; cineFov = 30;          // (the hero low in the frame, the sky above him) cineRoll = 0;
                 cineRec = t >= 0;
                 if (Mathf.Abs(t) < dt * 0.5f)
                 {
