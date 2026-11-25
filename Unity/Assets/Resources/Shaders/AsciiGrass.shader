@@ -1,5 +1,5 @@
 // Grass, rebuilt after the stylised grass of Binary Lunar ("Stylized Grass with Wind Effect Shader Graph"), told in
-// characters: every blade is a bent character cell with an analytic ASCII glyph.
+// characters: every blade is a rigid font-atlas character cell displaced by wind.
 //   * depth colour: near blades warmer and lighter, far ones cooler (smoothstep over the distance from the camera);
 //   * height blend: a bottom colour at the root, the top colour at the tip;
 //   * terrain colour: the root takes the colour of the ground under it (here the lit scene under the blade);
@@ -120,17 +120,14 @@ Shader "AsciiHero/Grass"
                 float myZ = -rVS.z;
                 bool vis = myZ <= sceneZ + 0.3 && all(suv >= 0.0) && all(suv <= 1.0) && frac(s * 7.31) >= _AsciiGrassThin && frac(s * 5.17) >= _AsciiSeason.w * 0.7;
 
-                // the strip: as wide as the stroke of '|' in a character of the blade's height, narrowing to the tip;
-                // across the screen (it always faces the camera, as a character does)
-                float3 pVS = TransformWorldToView(p);
-                float3 nVS = TransformWorldToView(a + float3(lean.x * 2.0 * t * h, h, lean.y * 2.0 * t * h) * 0.1) - TransformWorldToView(a);
-                float2 dir = normalize(nVS.xy + float2(0, 1e-4));
-                float2 perp = float2(dir.y, -dir.x);
-                // Full character cell, bent with the original blade geometry.
-                float wRoot = h * 0.72;
-                pVS.xy += perp * side * wRoot;
+                // One rigid screen-facing font cell per root. Wind translates the cell,
+                // but never stretches or bends the printed character.
+                float3 center = a + float3(lean.x * h * 0.30, h * 0.42, lean.y * h * 0.30);
+                float3 pVS = TransformWorldToView(center);
+                float glyphH = h * 0.42;
+                pVS.xy += float2(side * glyphH * 0.60, (t - 0.5) * glyphH);
                 o.uv = float2(side + 0.5, t);
-                o.glyph = floor(frac(s * 17.31) * 5.0);
+                o.glyph = abs(lean.x) < 0.22 ? 0.0 : (lean.x > 0.0 ? 2.0 : 3.0);
 
                 // ---- colour ----
                 float3 lit = SAMPLE_TEXTURE2D_LOD(_AsciiLitTex, sampler_AsciiLitTex, suv, 0).rgb;     // the ground under the root
@@ -163,19 +160,11 @@ Shader "AsciiHero/Grass"
             }
             half4 frag (Varyings i) : SV_Target
             {
-                // Analytic ASCII glyphs: | / \\ v ^. No texture lookup or extra mesh.
-                float2 p = i.uv;
-                float x = p.x - 0.5;
-                float y = p.y;
-                float d = abs(x);
-                if (i.glyph > 3.5) d = abs(abs(x) - (0.85 - y) * 0.48);
-                else if (i.glyph > 2.5) d = abs(abs(x) - (y - 0.12) * 0.48);
-                else if (i.glyph > 1.5) d = abs(x + (y - 0.5) * 0.68);
-                else if (i.glyph > 0.5) d = abs(x - (y - 0.5) * 0.68);
-                float aa = clamp(fwidth(d), 0.012, 0.08);
-                float mk = (1.0 - smoothstep(0.075, 0.075 + aa, d))
-                    * smoothstep(0.08, 0.08 + aa, y)
-                    * (1.0 - smoothstep(0.88, 0.88 + aa, y));
+                float2 l = clamp(i.uv, 0.03, 0.97);
+                float rows = max(_AsciiRows, 1.0);
+                float mk = SAMPLE_TEXTURE2D_BIAS(_AsciiAtlas, sampler_AsciiAtlas,
+                    float2((i.glyph + l.x) / 16.0, 1.0 - 13.0 / rows + l.y / rows), -0.6).r;
+                mk = saturate((mk - 0.22) * 1.9);
                 return half4(i.col * mk, 1);
             }
             ENDHLSL
