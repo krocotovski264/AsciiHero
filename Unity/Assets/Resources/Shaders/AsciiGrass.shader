@@ -124,8 +124,11 @@ Shader "AsciiHero/Grass"
                 // but never stretches or bends the printed character.
                 float3 center = a + float3(lean.x * h * 0.30, h * 0.42, lean.y * h * 0.30);
                 float3 pVS = TransformWorldToView(center);
-                float glyphH = h * 0.42;
-                pVS.xy += float2(side * glyphH * 0.60, (t - 0.5) * glyphH);
+                float glyphH = h * 0.42 * 1.8;
+                float angle = (frac(s * 23.71) - 0.5) * 1.35 * (1.0 - saturate(ws)) + clamp(lean.x * 0.45, -0.55, 0.55);
+                float2 cell = float2(side * glyphH * 0.60, t * glyphH);
+                float sn = sin(angle), cs = cos(angle);
+                pVS.xy += float2(cs * cell.x - sn * cell.y, sn * cell.x + cs * cell.y) - float2(0, glyphH * 0.5);
                 o.uv = float2(side + 0.5, t);
                 o.glyph = abs(lean.x) < 0.22 ? 0.0 : (lean.x > 0.0 ? 2.0 : 3.0);
 

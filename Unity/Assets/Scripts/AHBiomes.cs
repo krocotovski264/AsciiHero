@@ -243,7 +243,7 @@ namespace AsciiHero
             bool Ok(float x, float z)
             {
                 if (pools.Count > 0 && WaterK(x, z) < 1.05f) return false;
-                if (PathD(x, z) < pathGap) return false;
+                if (!Forest.RoadGrass(x, z, PathD(x, z), pathGap)) return false;
                 foreach (var c in colliders) { if (c.circle ? (new Vector2(x - c.x, z - c.z)).magnitude < c.r * 0.8f : x > c.minx && x < c.maxx && z > c.minz && z < c.maxz) return false; }
                 return true;
             }

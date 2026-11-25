@@ -218,7 +218,7 @@ namespace AsciiHero
                 for (int i = 0; i < 2 * HX * 2 * HZ * 38; i++)
                 {
                     float x = Rr(-HX - 1.5f, HX), z = Rr(-HZ, HZ);
-                    if (LakeK(x, z) < 1.06f || PathD(x, z) < 0.75f) continue;
+                    if (LakeK(x, z) < 1.06f || !RoadGrass(x, z, PathD(x, z), 0.8f)) continue;
                     bool blocked = false; foreach (var c in colliders) if (c.circle && (new Vector2(x - c.x, z - c.z)).magnitude < c.r * 0.8f) { blocked = true; break; }
                     if (blocked) continue;
                     // the meadow's edge (east): patches of its tall light grass reach in among the trees, three times as dense
@@ -259,16 +259,22 @@ namespace AsciiHero
             bounds = Rect.MinMaxRect(-HX + 0.4f, -HZ - 2.6f, HX + 3.0f, HZ + 2.6f);         // (open south: the swamp)
         }
         /// a flat band on the ground along a polyline (the path)
+        public static bool RoadGrass(float x, float z, float distance, float halfWidth)
+        {
+            float edge = halfWidth * (0.78f + 0.44f * Mathf.PerlinNoise(x * 2.3f, z * 2.3f));
+            float chance = Mathf.InverseLerp(edge - 0.28f, edge + 0.40f, distance);
+            return Mathf.PerlinNoise(x * 37.1f + 17f, z * 37.1f + 29f) < chance;
+        }
         static void Strip(Transform T, Material m, Vector2[] line, float hw, float y, string name)
         {
             var vs = new List<Vector3>(); var ts = new List<int>();
             for (int i = 0; i + 1 < line.Length; i++)
             {
                 Vector2 a = line[i], b = line[i + 1], d = (b - a).normalized, n = new Vector2(-d.y, d.x);
-                int steps = Mathf.CeilToInt((b - a).magnitude / 0.25f);
+                int steps = Mathf.Max(1, Mathf.CeilToInt((b - a).magnitude / 0.12f));
                 for (int s = 0; s <= steps; s++)
                 {
-                    var p = Vector2.Lerp(a, b, s / (float)steps); float w = hw * (0.85f + 0.3f * Mathf.PerlinNoise(p.x * 0.7f, p.y * 0.7f));
+                    var p = Vector2.Lerp(a, b, s / (float)steps); float w = hw * (0.78f + 0.44f * Mathf.PerlinNoise(p.x * 2.3f, p.y * 2.3f));
                     vs.Add(new Vector3(p.x + n.x * w, y, p.y + n.y * w)); vs.Add(new Vector3(p.x - n.x * w, y, p.y - n.y * w));
                     if (s > 0) { int o = vs.Count - 4; ts.Add(o); ts.Add(o + 2); ts.Add(o + 1); ts.Add(o + 1); ts.Add(o + 2); ts.Add(o + 3); }
                 }
