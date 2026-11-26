@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.1.18 · Unity";
+        public const string VERSION = "beta 0.1.23 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -1026,7 +1026,7 @@ namespace AsciiHero
                     var r = kv.Key; var sm = r.sharedMaterial;
                     if (sm == actorMats["SHADOW"] || sm == actorMats["EYE"]) continue;
                     Object key = r is SkinnedMeshRenderer ? (Object)r : r.transform.parent;
-                    string kind = sm == actorMats["CHAIN"] ? "chain" : (cfg.armor == "robe" && (sm == actorMats["ROBE"] || sm == actorMats["ROBED"])) || sm == actorMats["CAPE"] ? "robe" : "";
+                    string kind = sm == actorMats["CHAIN"] ? "chain" : (cfg.armor == "robe" && (sm == actorMats["ROBE"] || sm == actorMats["ROBED"])) || r.transform == hero.skirt || sm == actorMats["CAPE"] ? "robe" : "";
                     Piece pc; if (!byKey.TryGetValue(key, out pc)) { pc = new Piece { kind = kind }; byKey[key] = pc; pieces.Add(pc); }
                     pc.rs.Add(r); if (kv.Value != null) pc.rs.Add(kv.Value);
                 }

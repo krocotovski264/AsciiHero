@@ -10,6 +10,9 @@ Shader "AsciiHero/Lit"
         _RoadGround ("Road ground", Color) = (0,0,0,1)
         _Color ("Color", Color) = (1,1,1,1)
         _MainTex ("Albedo", 2D) = "white" {}
+        _GearMaps ("Mapped armour", Float) = 0
+        _GearMR ("Metallic roughness", 2D) = "white" {}
+        _GearNormal ("Tangent normal", 2D) = "bump" {}
         _Glossiness ("Smoothness", Range(0,1)) = 0.4
         _Metallic ("Metallic", Range(0,1)) = 0
         _EmissionColor ("Emission", Color) = (0,0,0,1)
@@ -35,6 +38,7 @@ Shader "AsciiHero/Lit"
         CBUFFER_START(UnityPerMaterial)
             float4 _Color;
             float4 _MainTex_ST;
+            float _GearMaps;
             float _Glossiness;
             float _Metallic;
             float4 _EmissionColor;
@@ -54,6 +58,8 @@ Shader "AsciiHero/Lit"
             // the story's sight: what is behind a wall from the hero is not drawn (Game: StoryVis, a top-down mask)
             TEXTURE2D(_VisTex); SAMPLER(sampler_VisTex); float4 _VisRect; float _VisOn;
             float VisK(float3 p) { if (_VisOn < 0.5) return 1.0; float2 uv = (p.xz - _VisRect.xy) * _VisRect.zw; if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return 1.0; return SAMPLE_TEXTURE2D_LOD(_VisTex, sampler_VisTex, uv, 0).r; }
+        TEXTURE2D(_GearMR); SAMPLER(sampler_GearMR);
+        TEXTURE2D(_GearNormal); SAMPLER(sampler_GearNormal);
         TEXTURE2D(_MainTex); SAMPLER(sampler_MainTex);
         float _AsciiNDPass;
         float4 _AsciiSeason; float _AsciiWet;      // (the sky: x autumn, y winter, z spring, w snow on the ground; wet ground)
@@ -182,7 +188,7 @@ Shader "AsciiHero/Lit"
             #pragma multi_compile_instancing
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
-            struct Attributes { float4 positionOS : POSITION; float3 normalOS : NORMAL; float2 uv : TEXCOORD0; UNITY_VERTEX_INPUT_INSTANCE_ID };
+            struct Attributes { float4 positionOS : POSITION; float3 normalOS : NORMAL; float2 uv : TEXCOORD0; float4 tangentOS : TANGENT; UNITY_VERTEX_INPUT_INSTANCE_ID };
             struct Varyings
             {
                 float4 positionCS : SV_POSITION;
@@ -190,6 +196,7 @@ Shader "AsciiHero/Lit"
                 float3 normalWS : TEXCOORD1;
                 float2 uv : TEXCOORD2;
                 float viewZ : TEXCOORD3;
+                float4 tangentWS : TEXCOORD4;
             };
 
             Varyings vert (Attributes i)
@@ -200,6 +207,7 @@ Shader "AsciiHero/Lit"
                 VertexNormalInputs n = GetVertexNormalInputs(i.normalOS);
                 o.positionCS = TransformWorldToHClip(pWS);
                 o.positionWS = pWS;
+                o.tangentWS = float4(TransformObjectToWorldDir(i.tangentOS.xyz, false), i.tangentOS.w * GetOddNegativeScale());
                 o.normalWS = ClothNrm(i.positionOS.xyz, n.normalWS);
                 o.uv = TRANSFORM_TEX(i.uv, _MainTex);
                 o.viewZ = -TransformWorldToView(pWS).z;
@@ -212,6 +220,13 @@ Shader "AsciiHero/Lit"
                 float3 nWS = normalize(i.normalWS);
                 if (_Cloth > 0.5 && _Cloth < 1.5 && _ClothSim > 0.5 && _ClothMap.w > 0.5) { if (dot(nWS, GetWorldSpaceNormalizeViewDir(i.positionWS)) < 0) nWS = -nWS; }      // the cloak: lit on the side we see
                 else if (!front) nWS = -nWS;
+                if (_GearMaps > 1.5 && dot(i.tangentWS.xyz, i.tangentWS.xyz) > 0.01)
+                {
+                    half3 t = normalize(i.tangentWS.xyz);
+                    half3 b = cross(nWS, t) * i.tangentWS.w;
+                    half3 n = SAMPLE_TEXTURE2D(_GearNormal, sampler_GearNormal, i.uv).xyz * 2 - 1;
+                    nWS = normalize(t * n.x + b * n.y + nWS * n.z);
+                }
                 if (_AsciiNDPass > 0.5)
                 {
                     float3 nVS = TransformWorldToViewDir(nWS, true);
@@ -255,7 +270,13 @@ Shader "AsciiHero/Lit"
                         albedo.rgb *= lerp(0.36, 0.80 + 0.40 * WHash(floor(brick)) + 0.12 * grain, mortar);
                     }
                 }
-                float gloss = _Glossiness;
+                float gloss = _Glossiness, metal = _Metallic;
+                if (_GearMaps > 0.5)
+                {
+                    half4 mr = SAMPLE_TEXTURE2D(_GearMR, sampler_GearMR, i.uv);
+                    metal *= mr.b;
+                    gloss = 1 - (1 - gloss) * mr.g;
+                }
                 if (_AsciiFlat > 0.5 && nWS.y > 0.5)
                 {   // the ground under the sky: white with snow (frost, then drifts; trodden paths greyer), dark and
                     // glinting when wet, puddles (rings from the rain and from steps), ice
@@ -305,7 +326,7 @@ Shader "AsciiHero/Lit"
 
                 SurfaceData s = (SurfaceData)0;
                 s.albedo = albedo.rgb;
-                s.metallic = _Metallic;
+                s.metallic = metal;
                 s.specular = half3(0, 0, 0);
                 s.smoothness = gloss;
                 s.normalTS = half3(0, 0, 1);

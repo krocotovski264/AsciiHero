@@ -16,12 +16,12 @@ namespace AsciiHero
         public CharConfig Clone() { var c = (CharConfig)MemberwiseClone(); if (body != null) c.body = (float[])body.Clone(); return c; }
     }
 
-    public class Character
+    public partial class Character
     {
         public static readonly string[] BUILDS = { "Худое", "Обычное", "Атлетичное", "Крупное" };
         // (only the knight's plate and the sword are left to choose; the rest of the code still dresses townsfolk in plain clothes)
         public static readonly string[][] ARMORS = {
-            new[] { "plate", "Рыцарские латы", "Полный доспех, шлем с плюмажем" },
+            new[] { "plate", "Рыцарские латы", "Гравированные латы, закрытый шлем и плащ" },
         };
         public static readonly string[][] WEAPONS = {
             new[] { "sword", "Меч", "Одноручный стальной клинок" },
@@ -145,52 +145,10 @@ namespace AsciiHero
                     break;
                 case "plate":
                 {
-                    // Plate is a suit of separate hard pieces, not one padded shell (that looked like a puffed-up down
-                    // jacket): thin plates with small gaps between them where the dark body shows, the edges of the
-                    // lames standing out as bright rims. Under it a gambeson, over the back a cloak; the helmet is a
-                    // modelled bascinet with the visor down (KayKit, CC0).
                     pants("PANTS");
-                    shell(i => (torso(i) && Y(i) > hipY - 0.05f) || (R[i] == Region.UpperArm && T[i] < 0.5f) || R[i] == Region.Neck, 0.008f, "LINEN", 1, 0);     // gambeson
-                    // cuirass: breastplate and backplate, a ridge down the middle of the chest
-                    shell(i => torso(i) && Y(i) > beltY + 0.01f && Y(i) < neckY - 0.03f, 0.02f, "PLATE", 2, 0);
-                    shell(i => torso(i) && Y(i) > beltY + 0.06f && Y(i) < neckY - 0.05f && Mathf.Abs(X(i)) < 0.012f && Z(i) > 0, 0.03f, "STEEL", 1, 0);
-                    shell(i => torso(i) && Mathf.Abs(Y(i) - (neckY - 0.045f)) < 0.012f, 0.026f, "STEEL", 1, 0);               // the rim at the neck
-                    // gorget: two rings round the neck
-                    shell(i => R[i] == Region.Neck && Y(i) < neckY + 0.02f, 0.024f, "PLATE", 1, 0);
-                    shell(i => (R[i] == Region.Neck && Y(i) < neckY - 0.01f) || (torso(i) && Y(i) > neckY - 0.03f), 0.03f, "STEEL", 1, 0);
-                    // faulds: three lames below the waist, each standing out a little further over the one above
-                    for (int k = 0; k < 3; k++)
-                    {
-                        float y1 = beltY - 0.005f - k * 0.045f, y0 = y1 - 0.038f, th = 0.024f + 0.006f * k; int kk = k;
-                        shell(i => (torso(i) || R[i] == Region.Thigh) && Y(i) < y1 && Y(i) > y0, th, "PLATE", 1, 0);
-                        shell(i => (torso(i) || R[i] == Region.Thigh) && Mathf.Abs(Y(i) - (y0 + 0.004f)) < 0.006f, th + 0.006f, "STEEL", 0, 0);
-                    }
-                    // pauldrons: three lames over each shoulder
-                    for (int k = 0; k < 3; k++)
-                    {
-                        float a0 = k * 0.11f, a1 = a0 + 0.1f, th = 0.04f - 0.007f * k;
-                        shell(i => (R[i] == Region.UpperArm && T[i] >= a0 && T[i] < a1) || (k == 0 && torso(i) && Y(i) > neckY - 0.09f && Mathf.Abs(X(i)) > 0.13f), th, "PLATE", 2, 0);
-                        shell(i => R[i] == Region.UpperArm && Mathf.Abs(T[i] - a1 + 0.012f) < 0.012f, th + 0.005f, "STEEL", 0, 0);
-                    }
-                    shell(i => R[i] == Region.UpperArm && T[i] >= 0.36f && T[i] < 0.86f, 0.017f, "PLATE", 1, 0);                                  // rerebrace
-                    shell(i => (R[i] == Region.UpperArm && T[i] >= 0.9f) || (R[i] == Region.ForeArm && T[i] < 0.1f), 0.034f, "STEEL", 2, 0);    // couter (elbow cup)
-                    shell(i => R[i] == Region.ForeArm && T[i] >= 0.14f && T[i] < 0.93f, 0.017f, "PLATE", 1, 0);                                   // vambrace
-                    shell(i => R[i] == Region.ForeArm && T[i] >= 0.93f, 0.026f, "STEEL", 1, 0);                                                     // gauntlet cuff
-                    shell(i => R[i] == Region.Hand, 0.01f, "PLATE", 0, 0);
-                    // legs: cuisses, poleyns (knee cups with a rim), greaves, sabatons in lames
-                    shell(i => R[i] == Region.Thigh && T[i] >= 0.18f && T[i] < 0.84f, 0.018f, "PLATE", 1, 0);
-                    shell(i => (R[i] == Region.Thigh && T[i] >= 0.88f) || (R[i] == Region.Shin && T[i] < 0.12f), 0.034f, "STEEL", 2, 0);
-                    shell(i => R[i] == Region.Shin && T[i] >= 0.16f, 0.018f, "PLATE", 1, 0);
-                    shell(i => R[i] == Region.Foot, 0.016f, "PLATE", 1, 0);
-                    shell(i => R[i] == Region.Foot && T[i] > 0.3f && T[i] < 0.36f, 0.022f, "STEEL", 0, 0);
-                    shell(i => R[i] == Region.Foot && T[i] > 0.55f && T[i] < 0.61f, 0.022f, "STEEL", 0, 0);
-                    belt(beltY, "LEATHER2", 0.03f, 0.014f); Buckle(beltY, 0.034f);
-                    // the hood of the cloak, up over the head (it goes with the head; when the head is lost, the hood hangs
-                    // down the back - HoodDown)
-                    shell(i => (R[i] == Region.Head && !isFace(i) && Y(i) > eyeY - 0.13f) || (R[i] == Region.Neck && Y(i) > neckY + 0.01f), 0.032f, "CAPE", 5, 0.004f);
-                    shell(i => R[i] == Region.Head && !isFace(i) && Y(i) > eyeY - 0.12f && Z(i) > headJ.z + 0.02f && Mathf.Abs(Y(i) - (eyeY + 0.03f)) < 0.05f && Mathf.Abs(X(i)) > 0.05f, 0.036f, "CAPE", 3, 0);     // its rim round the face
+                    shell(i => (torso(i) && Y(i) > hipY - 0.05f) || (R[i] == Region.UpperArm && T[i] < 0.5f) || R[i] == Region.Neck, 0.008f, "LINEN", 1, 0);
+                    DressKnight(hipY, neckY);
                     Cape();
-                    HoodDown();
                     break;
                 }
                 case "robe":
@@ -396,15 +354,11 @@ namespace AsciiHero
                     if (Vector3.Dot(n, new Vector3(p0.x, 0, p0.z - capeCz)) < 0) n = -n;          // outward, away from the body
                     capeNrm[r * CAPE_C + c] = n;
                 }
-            int MC = 44, MR = 46; var vs = new List<Vector3>(); var idx = new List<int>();
-            for (int r = 0; r <= MR; r++) for (int c = 0; c <= MC; c++) vs.Add(CapePt(c / (float)MC, r / (float)MR));
-            for (int r = 0; r < MR; r++) for (int c = 0; c < MC; c++)
-                { int a0 = r * (MC + 1) + c, b0 = a0 + MC + 1; idx.Add(a0); idx.Add(b0); idx.Add(a0 + 1); idx.Add(a0 + 1); idx.Add(b0); idx.Add(b0 + 1); }
-            var m = new Mesh(); m.SetVertices(vs); m.SetTriangles(idx, 0); m.RecalculateNormals(); m.RecalculateBounds();
-            MeshGen.AddGlyphUV(m, true);
-            { var bb = m.bounds; bb.Expand(2.5f); m.bounds = bb; }        // (the simulation swings it well beyond its rest shape)
-            var g = Group("Cape"); skirt = Part(m, "CAPE", g, Vector3.zero).transform;
-            Attach("spine01", g, Vector3.zero, Quaternion.identity);
+            float width = Mathf.Max(chest.x * 2.65f, Mathf.Abs(h.Head("upperarm01.R").x) * 2.45f);
+            float depth = Mathf.Max(0.20f, chest.z - chest.y + 0.11f);
+            var size = new Vector3(width, capeTop - capeBot, depth);
+            var center = new Vector3(0, (capeTop + capeBot) * 0.5f, capeCz - 0.025f);
+            skirt = MountKnight("Cape", "spine01", center, Quaternion.identity, size);
         }
         /// the hood thrown back: a soft fold of cloth lying on the cloak's back below the neck (shown when the head is gone)
         void HoodDown()
