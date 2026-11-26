@@ -240,7 +240,7 @@ namespace AsciiHero
             float f = (chr.capeTop - l.y) / H; if (f < 0.02f || f > 1.05f) return false;
             float v = Mathf.Pow(Mathf.Clamp01(f), 1f / Character.CAPE_EXP);
             int k = Mathf.Clamp(Mathf.RoundToInt(v * (chr.capeRx.Length - 1)), 0, chr.capeRx.Length - 1);
-            float sh = Mathf.Lerp(0.9f, 0.82f, v);
+            float sh = Mathf.Lerp(.98f, .90f, v);
             float rx = chr.capeRx[k] * sh, rz = chr.capeRz[k] * sh;
             float dx = l.x, dz = l.z - chr.capeCz, e = (dx / rx) * (dx / rx) + (dz / rz) * (dz / rz);
             if (e >= 1) return false;
@@ -251,14 +251,19 @@ namespace AsciiHero
             return true;
         }
 
-        /// the cloak stays on the back: no particle comes further forward than a little past where it hangs at rest
-        /// (more slack down the hem, so it still swings out to the sides and flaps)
-        void Behind(int i, int r)
+        // A front hem can swing outward but must not slip through the torso to the back.
+        // Use the same constraint in reverse for the back panel. Side folds remain free.
+        void KeepPanelSide(int i)
         {
-            float v = r / (R - 1f); Vector3 f = model.forward; f.y = 0; if (f.sqrMagnitude < 1e-6f) return; f.Normalize();
-            float ahead = Vector3.Dot(x[i] - rest[i], f), lim = 0.12f + 0.3f * v;
-            if (ahead <= lim) return;
-            var push = -f * (ahead - lim); x[i] += push; ox[i] += push;
+            float depth = restL[i].z - chr.capeCz;
+            if (Mathf.Abs(depth) < .04f) return;
+            var local = cape.InverseTransformPoint(x[i]);
+            float sign = Mathf.Sign(depth);
+            float correction = Mathf.Abs(depth) * .65f - sign * (local.z - chr.capeCz);
+            if (correction <= 0) return;
+            var push = cape.TransformVector(Vector3.forward * (sign * correction));
+            x[i] += push;
+            ox[i] += push;
         }
         public void Update(float dt, Vector3 windW)
         {
@@ -316,11 +321,11 @@ namespace AsciiHero
                         if (l > tether[i]) x[i] = top + d * (tether[i] / l);
                         Collide(i, r);
                         Envelope(i);
-                        Behind(i, r);
+                        KeepPanelSide(i);
                     }
                 }
             }
-            for (int i = C; i < x.Length; i++) { Envelope(i); Behind(i, i / C); }
+            for (int i = C; i < x.Length; i++) { Envelope(i); KeepPanelSide(i); }
             for (int i = 0; i < x.Length; i++)
             {
                 Vector3 d = x[i] - rest[i];

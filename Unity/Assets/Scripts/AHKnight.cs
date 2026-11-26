@@ -133,7 +133,7 @@ namespace AsciiHero
                     for (int j=0; j<Sides; j++) limits[i,j] = Mathf.Max(limits[i,j],Vector2.Dot(axes[j],q));
                 }
             }
-            public Vector3 Fit(Vector3 p, float gap)
+            public Vector3 Fit(Vector3 p, float gap, float radialScale)
             {
                 float row = Mathf.Clamp((p.y-bottom)/step,0,Rows-1);
                 int a = Mathf.FloorToInt(row), b = Mathf.Min(Rows-1,a+1);
@@ -150,8 +150,8 @@ namespace AsciiHero
                     float support=Mathf.Lerp(limits[a,j],limits[b,j],t)-Vector2.Dot(center,axes[j]);
                     required=Mathf.Min(required,(support+gap)/cosine);
                 }
-                if (r>=required) return p;
-                return new Vector3(c.x+dir.x*required,p.y,c.z+dir.y*required);
+                float fitted = Mathf.Max(r * radialScale, required);
+                return new Vector3(c.x + dir.x * fitted, p.y, c.z + dir.y * fitted);
             }
         }
 
@@ -202,7 +202,14 @@ namespace AsciiHero
                 var inv = Quaternion.Inverse(rotation);
                 var sections = new ArmourSections(human, inv, fitRegion.Value, side, (inv*center).y-size.y/2, size.y);
                 var v = mesh.vertices;
-                for (int i=0;i<v.Length;i++) v[i]=rotation*sections.Fit(inv*v[i], name=="Cuirass" ? .024f : .016f);
+                var top = (inv * center).y + size.y * .5f;
+                for (int i = 0; i < v.Length; i++)
+                {
+                    var local = inv * v[i];
+                    float towardKnee = name == "Cuisse" ? Mathf.SmoothStep(0, 1, (top - local.y) / size.y) : 0;
+                    float gap = name == "Cuirass" ? .024f : Mathf.Lerp(.016f, .009f, towardKnee);
+                    v[i] = rotation * sections.Fit(local, gap, 1 - .28f * towardKnee);
+                }
                 mesh.vertices=v; mesh.RecalculateBounds(); mesh.RecalculateNormals(); mesh.RecalculateTangents();
                 MeshGen.AddGlyphUV(mesh,false);
                 if (name=="Cuirass")
@@ -223,6 +230,7 @@ namespace AsciiHero
                         weights[k]=new BoneWeight { boneIndex0=indices[o],boneIndex1=indices[o+1],boneIndex2=indices[o+2],boneIndex3=indices[o+3],
                             weight0=w[o]/255f,weight1=w[o+1]/255f,weight2=w[o+2]/255f,weight3=w[o+3]/255f };
                     }
+                    cuirassSurface = v;
                     mesh.boneWeights=weights; mesh.bindposes=human.bindposes;
                     var renderer=AddSkinned(mesh,"PLATE",name); renderer.sharedMaterial=plate.material;
                     return renderer.transform;
@@ -238,7 +246,10 @@ namespace AsciiHero
                     float angle = Mathf.Atan2(plate.pos[i].x, -plate.pos[i].z);
                     float u = 0.5f + angle / (2 * Mathf.PI);
                     var p = CapePt(u, t);
-                    p.z -= Mathf.Clamp(plate.pos[i].z * size.z * 0.15f, -0.012f, 0.012f);
+                    // Keep the source folds around the fitted envelope, including the two front hems.
+                    var outward = new Vector3(p.x, 0, p.z - capeCz).normalized;
+                    float relief = new Vector2(plate.pos[i].x, plate.pos[i].z).magnitude;
+                    p += outward * Mathf.Clamp((relief - .4f) * size.z * .15f, -.008f, .008f);
                     v[i] = p;
                 }
                 mesh.vertices = v; mesh.RecalculateNormals(); mesh.RecalculateTangents(); MeshGen.AddGlyphUV(mesh, false);

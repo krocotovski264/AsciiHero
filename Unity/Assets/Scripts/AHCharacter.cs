@@ -299,6 +299,7 @@ namespace AsciiHero
             r *= 1 + (0.004f + 0.035f * v) * Mathf.Cos(th * 9 + v * 3);                  // folds
             return new Vector3(sn * r, y, capeCz - cs * r);
         }
+        Vector3[] cuirassSurface; // fitted rest vertices, consumed while dressing the cloak
         void Cape()
         {
             var h = human; var P = h.pos; float neckY = h.Head("neck01").y;
@@ -332,18 +333,28 @@ namespace AsciiHero
                 if (y > neckY - 0.01f) { rx = rz = neckR + 0.025f; }                                     // round the neck
                 else
                 {
-                    rx = e.x + (y > elY - 0.02f ? 0.072f : 0.052f) + 0.12f * Mathf.Max(0, v - 0.35f);   // over the plates and the arms; wider at the hem
-                    rz = Mathf.Max(capeCz - e.y + 0.062f, 0.12f);
+                    rx = e.x + (y > elY - 0.02f ? 0.044f : 0.052f) + 0.12f * Mathf.Max(0, v - 0.35f);   // over the plates and the arms; wider at the hem
+                    rz = Mathf.Max(Mathf.Max(capeCz - e.y, e.z - capeCz) + 0.045f, 0.12f);
                     if (y > shY) { float t = Mathf.InverseLerp(neckY, shY, y); rx = Mathf.Lerp(neckR + 0.025f, rx, Mathf.SmoothStep(0, 1, t)); }     // the slope of the shoulders
                 }
                 // it drapes: below the shoulder blades the back of it never comes back in toward the body
                 if (y < shY - 0.1f) rz = Mathf.Max(rz, prevBack - 0.004f);
+                // Both panels clear the fitted breastplate and backplate, including their diagonal edges.
+                float expand = 1;
+                foreach (var point in cuirassSurface)
+                {
+                    if (Mathf.Abs(point.y - y) > .025f) continue;
+                    float x = point.x / rx, z = (point.z - capeCz) / rz;
+                    expand = Mathf.Max(expand, Mathf.Sqrt(x*x + z*z) + .018f / Mathf.Min(rx, rz));
+                }
+                rx *= expand; rz *= expand;
                 prevBack = rz; capeRx[kk] = rx; capeRz[kk] = rz;
             }
+            cuirassSurface = null;
             float vOf(float y) => Mathf.Pow(Mathf.Clamp01((capeTop - y) / (capeTop - capeBot)), 1f / CAPE_EXP);
             capeVs = vOf(shY - 0.04f); capeVe = vOf(elY);
             capeMap = new Vector4(capeCz, capeTop, capeBot, 1);
-            capeMap2 = new Vector4(Mathf.PI * 0.86f, Mathf.PI * 0.66f, Mathf.PI * 0.56f, capeVs);       // round the neck (a gap at the clasp), over the shoulders, behind the arms
+            capeMap2 = new Vector4(Mathf.PI * .99f, Mathf.PI * .99f, Mathf.PI * .99f, capeVs);       // The imported mesh supplies the front opening and the armholes at every height.
             capeMap3 = new Vector4(capeVe, 1f / CAPE_EXP, CAPE_C, CAPE_R);
             capeRest = new Vector3[CAPE_C * CAPE_R]; capeNrm = new Vector3[CAPE_C * CAPE_R];
             for (int r = 0; r < CAPE_R; r++) for (int c = 0; c < CAPE_C; c++)

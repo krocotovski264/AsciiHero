@@ -23,9 +23,9 @@ namespace AsciiHero.Editor
         }
         public static void Write(string directory)
         {
-            var body=Body.Defaults('m'); body[0]=198; body[Body.Ix("weight")]=150;
-            body[Body.Ix("muscle")]=70; body[Body.Ix("fat")]=4; body[Body.Ix("neckLen")]=.976f;
-            var ch=Character.Build(new CharConfig { height=198, body=body, shadow=true },new Mats(true));
+            var body=Body.Defaults('m'); body[0]=178; body[Body.Ix("weight")]=150;
+            body[Body.Ix("muscle")]=70; body[Body.Ix("fat")]=4; body[Body.Ix("neckLen")]=1.047f;
+            var ch=Character.Build(new CharConfig { height=178, body=body, shadow=true },new Mats(true));
             try
             {
                 var actor=new MotionActor(ch); actor.Animate(.25f,1/30f);
