@@ -98,6 +98,8 @@ namespace AsciiHero.Editor
                 var sum = report.summary;
                 Debug.Log("[CIBuild] " + sum.result + " · " + sum.totalErrors + " errors · " + (sum.totalSize / (1024f * 1024f)).ToString("0.0") + " MB · " + path);
                 if (sum.result != BuildResult.Succeeded) code = 1;
+                else if (exitWhenDone) KnightFitPreview.Write(Path.GetFullPath(Path.Combine(Application.dataPath, "../../release")));
+
             }
             catch (Exception e)
             {

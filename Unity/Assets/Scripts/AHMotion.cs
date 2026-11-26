@@ -309,14 +309,15 @@ namespace AsciiHero
             {
                 // the Animator has already written the clip pose this frame
                 driver.ReadPose(out ro, con); SteadyPelvis(dt);
+                float v = Velocity.magnitude;
+                wWalk = Smooth01(0.04f, 0.5f, v);
+                wRun = Smooth01(1.6f, 2.5f, v);
+                phase = (phase + dt * Mathf.Clamp(v / 1.4f, 0.55f, 1.5f)) % 1f;
                 for (int k = 0; k < nb; k++)
-                    if (map[k] >= 0 && mask[k] > 0) B[map[k]].localRotation = Quaternion.Slerp(B[map[k]].localRotation, baseQ[map[k]], mask[k]);
-                H.root.localPosition = rootPos + ro;
-                Injuries(dt);
-                Orb(t);
-                return;
+                    outQ[k] = map[k] >= 0 ? B[map[k]].localRotation : Quaternion.identity;
+                // Apply the same combat, idle and story layers as the motion-matching path.
             }
-            if (loopMode) LoopPose();
+            else if (loopMode) LoopPose();
             else
             {
                 SamplePose(frame, outQ, ref ro, con);

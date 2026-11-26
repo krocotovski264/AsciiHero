@@ -146,7 +146,7 @@ namespace AsciiHero
                 case "plate":
                 {
                     pants("PANTS");
-                    shell(i => (torso(i) && Y(i) > hipY - 0.05f) || (R[i] == Region.UpperArm && T[i] < 0.5f) || R[i] == Region.Neck, 0.008f, "LINEN", 1, 0);
+                    shell(i => (torso(i) && Y(i) > hipY - 0.05f) || R[i] == Region.UpperArm || R[i] == Region.ForeArm || R[i] == Region.Neck, 0.005f, "LEATHER2", 1, 0);
                     DressKnight(hipY, neckY);
                     Cape();
                     break;
@@ -329,12 +329,12 @@ namespace AsciiHero
                 var e = ext(y, y > elY - 0.02f);
                 if (e.x <= 0) e = new Vector3(capeRx[Mathf.Max(0, kk - 1)], capeCz - prevBack, capeCz + 0.1f);
                 float rx, rz;
-                if (y > neckY - 0.01f) { rx = rz = neckR + 0.055f; }                                     // round the neck
+                if (y > neckY - 0.01f) { rx = rz = neckR + 0.025f; }                                     // round the neck
                 else
                 {
-                    rx = e.x + (y > elY - 0.02f ? 0.105f : 0.085f) + 0.12f * Mathf.Max(0, v - 0.35f);   // over the plates and the arms; wider at the hem
-                    rz = Mathf.Max(capeCz - e.y + 0.105f, 0.12f);
-                    if (y > shY) { float t = Mathf.InverseLerp(neckY, shY, y); rx = Mathf.Lerp(neckR + 0.06f, rx, 1 - t * t); }     // the slope of the shoulders
+                    rx = e.x + (y > elY - 0.02f ? 0.072f : 0.052f) + 0.12f * Mathf.Max(0, v - 0.35f);   // over the plates and the arms; wider at the hem
+                    rz = Mathf.Max(capeCz - e.y + 0.062f, 0.12f);
+                    if (y > shY) { float t = Mathf.InverseLerp(neckY, shY, y); rx = Mathf.Lerp(neckR + 0.025f, rx, Mathf.SmoothStep(0, 1, t)); }     // the slope of the shoulders
                 }
                 // it drapes: below the shoulder blades the back of it never comes back in toward the body
                 if (y < shY - 0.1f) rz = Mathf.Max(rz, prevBack - 0.004f);

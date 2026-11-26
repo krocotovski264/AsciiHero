@@ -83,10 +83,151 @@ namespace AsciiHero
             return mesh;
         }
 
-        Transform MountKnight(string name, string bone, Vector3 center, Quaternion rotation, Vector3 size)
+        // Intersect the morphed body with parallel planes in the bone's frame. Each
+        // convex section is stored as support distances, including the underlayer.
+        class ArmourSections
+        {
+            const int Rows = 25, Sides = 24;
+            readonly Vector2[] axes = new Vector2[Sides];
+            readonly float[,] limits = new float[Rows, Sides];
+            readonly Bounds[] bounds = new Bounds[Rows];
+            readonly bool[] filled = new bool[Rows];
+            readonly float bottom, step;
+
+            public ArmourSections(Human h, Quaternion inv, Region region, float side, float bottom, float height)
+            {
+                this.bottom = bottom; step = height / (Rows - 1);
+                for (int j = 0; j < Sides; j++)
+                {
+                    float a = 2 * Mathf.PI * j / Sides;
+                    axes[j] = new Vector2(Mathf.Cos(a), Mathf.Sin(a));
+                    for (int i = 0; i < Rows; i++) limits[i,j] = float.NegativeInfinity;
+                }
+                var points = new Vector3[h.n]; var mask = new bool[h.n];
+                for (int i = 0; i < h.n; i++)
+                {
+                    var r = h.region[i]; var p = h.pos[i]; points[i] = inv * p;
+                    mask[i] = (side == 0 || side*p.x > 0) && (r == region ||
+                        (region == Region.Torso && (r == Region.Pelvis || r == Region.Neck)));
+                }
+                var tri = h.partTris[0];
+                for (int t = 0; t < tri.Count; t += 3)
+                {
+                    int a = tri[t], b = tri[t+1], c = tri[t+2];
+                    if (!(mask[a] || mask[b] || mask[c])) continue;
+                    Edge(points[a],points[b]); Edge(points[b],points[c]); Edge(points[c],points[a]);
+                }
+            }
+            void Edge(Vector3 a, Vector3 b)
+            {
+                if (a.y > b.y) { var tmp = a; a = b; b = tmp; }
+                if (b.y - a.y < 1e-6f) return;
+                int first = Mathf.Max(0, Mathf.CeilToInt((a.y-bottom)/step));
+                int last = Mathf.Min(Rows-1, Mathf.FloorToInt((b.y-bottom)/step));
+                for (int i = first; i <= last; i++)
+                {
+                    var p = Vector3.Lerp(a,b,(bottom+i*step-a.y)/(b.y-a.y));
+                    if (filled[i]) bounds[i].Encapsulate(p);
+                    else { bounds[i] = new Bounds(p,Vector3.zero); filled[i] = true; }
+                    var q = new Vector2(p.x,p.z);
+                    for (int j=0; j<Sides; j++) limits[i,j] = Mathf.Max(limits[i,j],Vector2.Dot(axes[j],q));
+                }
+            }
+            public Vector3 Fit(Vector3 p, float gap)
+            {
+                float row = Mathf.Clamp((p.y-bottom)/step,0,Rows-1);
+                int a = Mathf.FloorToInt(row), b = Mathf.Min(Rows-1,a+1);
+                if (!filled[a] && !filled[b]) return p;
+                if (!filled[a]) a=b; if (!filled[b]) b=a;
+                float t=row-Mathf.Floor(row);
+                var c=Vector3.Lerp(bounds[a].center,bounds[b].center,t);
+                var center=new Vector2(c.x,c.z); var delta=new Vector2(p.x-c.x,p.z-c.z);
+                float r=delta.magnitude; if (r<.002f) return p;
+                var dir=delta/r; float required=float.PositiveInfinity;
+                for (int j=0;j<Sides;j++)
+                {
+                    float cosine=Vector2.Dot(dir,axes[j]); if (cosine<=.01f) continue;
+                    float support=Mathf.Lerp(limits[a,j],limits[b,j],t)-Vector2.Dot(center,axes[j]);
+                    required=Mathf.Min(required,(support+gap)/cosine);
+                }
+                if (r>=required) return p;
+                return new Vector3(c.x+dir.x*required,p.y,c.z+dir.y*required);
+            }
+        }
+
+        // Long flat facets need intermediate samples to follow the belly and calves.
+        static void RefinePlate(Mesh mesh)
+        {
+            var v=mesh.vertices.ToList(); var n=mesh.normals.ToList(); var uv=mesh.uv.ToList();
+            var tris=mesh.triangles.ToList();
+            for (int pass=0;pass<2;pass++)
+            {
+                var next=new List<int>(); var edges=new Dictionary<long,int>();
+                int Mid(int a,int b)
+                {
+                    long key=((long)Math.Min(a,b)<<32)|(uint)Math.Max(a,b);
+                    if(edges.TryGetValue(key,out int index)) return index;
+                    index=v.Count; edges.Add(key,index); v.Add((v[a]+v[b])*.5f);
+                    n.Add((n[a]+n[b]).normalized); uv.Add((uv[a]+uv[b])*.5f); return index;
+                }
+                void Face(int a,int b,int c) { next.Add(a); next.Add(b); next.Add(c); }
+                for(int i=0;i<tris.Count;i+=3)
+                {
+                    int a=tris[i],b=tris[i+1],c=tris[i+2];
+                    const float maxEdge=.055f*.055f;
+                    int ab=(v[a]-v[b]).sqrMagnitude>maxEdge?Mid(a,b):-1;
+                    int bc=(v[b]-v[c]).sqrMagnitude>maxEdge?Mid(b,c):-1;
+                    int ca=(v[c]-v[a]).sqrMagnitude>maxEdge?Mid(c,a):-1;
+                    if(ab<0 && bc<0 && ca<0) { Face(a,b,c); continue; }
+                    if(ab>=0 && bc>=0 && ca>=0) { Face(a,ab,ca); Face(ab,b,bc); Face(ca,bc,c); Face(ab,bc,ca); continue; }
+                    if(ab<0) { int x=a; a=b; b=c; c=x; x=ab; ab=bc; bc=ca; ca=x; }
+                    if(ab<0) { int x=a; a=b; b=c; c=x; x=ab; ab=bc; bc=ca; ca=x; }
+                    if(bc>=0) { Face(a,ab,c); Face(ab,bc,c); Face(ab,b,bc); }
+                    else if(ca>=0) { Face(ab,b,c); Face(ab,c,ca); Face(a,ab,ca); }
+                    else { Face(a,ab,c); Face(ab,b,c); }
+                }
+                tris=next;
+            }
+            mesh.Clear(); if(v.Count>65535) mesh.indexFormat=UnityEngine.Rendering.IndexFormat.UInt32;
+            mesh.SetVertices(v); mesh.SetNormals(n); mesh.SetUVs(0,uv); mesh.SetTriangles(tris,0);
+        }
+
+        Transform MountKnight(string name, string bone, Vector3 center, Quaternion rotation, Vector3 size, Region? fitRegion = null, float side = 0)
         {
             var plate = ReadKnight(name)[0];
             var mesh = FitPlate(plate, Matrix4x4.TRS(center, rotation, size));
+            if (fitRegion.HasValue)
+            {
+                RefinePlate(mesh);
+                var inv = Quaternion.Inverse(rotation);
+                var sections = new ArmourSections(human, inv, fitRegion.Value, side, (inv*center).y-size.y/2, size.y);
+                var v = mesh.vertices;
+                for (int i=0;i<v.Length;i++) v[i]=rotation*sections.Fit(inv*v[i], name=="Cuirass" ? .024f : .016f);
+                mesh.vertices=v; mesh.RecalculateBounds(); mesh.RecalculateNormals(); mesh.RecalculateTangents();
+                MeshGen.AddGlyphUV(mesh,false);
+                if (name=="Cuirass")
+                {
+                    // Transfer the body's weights so the abdominal lames follow the hips and the chest follows the spine.
+                    var bodyIndices = Enumerable.Range(0,human.n).Where(k=>HumanDB.vpart[k]==0 &&
+                        (human.region[k]==Region.Torso || human.region[k]==Region.Pelvis || human.region[k]==Region.Neck)).ToArray();
+                    var weights=new BoneWeight[v.Length];
+                    for(int k=0;k<v.Length;k++)
+                    {
+                        int near=bodyIndices[0]; float best=float.PositiveInfinity;
+                        foreach(int j in bodyIndices)
+                        {
+                            float d=(v[k]-human.pos[j]).sqrMagnitude;
+                            if(d<best) { best=d; near=j; }
+                        }
+                        int o=4*near; var indices=HumanDB.skinIndex; var w=HumanDB.skinWeight;
+                        weights[k]=new BoneWeight { boneIndex0=indices[o],boneIndex1=indices[o+1],boneIndex2=indices[o+2],boneIndex3=indices[o+3],
+                            weight0=w[o]/255f,weight1=w[o+1]/255f,weight2=w[o+2]/255f,weight3=w[o+3]/255f };
+                    }
+                    mesh.boneWeights=weights; mesh.bindposes=human.bindposes;
+                    var renderer=AddSkinned(mesh,"PLATE",name); renderer.sharedMaterial=plate.material;
+                    return renderer.transform;
+                }
+            }
             if (name == "Cape")
             {
                 var v = mesh.vertices;
@@ -94,7 +235,8 @@ namespace AsciiHero
                 {
                     float f = Mathf.Clamp01(0.5f - plate.pos[i].y);
                     float t = Mathf.Pow(f, 1f / CAPE_EXP);
-                    float u = Mathf.Clamp01(plate.pos[i].x + 0.5f);
+                    float angle = Mathf.Atan2(plate.pos[i].x, -plate.pos[i].z);
+                    float u = 0.5f + angle / (2 * Mathf.PI);
                     var p = CapePt(u, t);
                     p.z -= Mathf.Clamp(plate.pos[i].z * size.z * 0.15f, -0.012f, 0.012f);
                     v[i] = p;
@@ -127,9 +269,9 @@ namespace AsciiHero
             var head = KnightBounds(Region.Head, Quaternion.identity);
             MountKnight("Helmet", "head", head.center, Quaternion.identity, Vector3.Scale(head.size, new Vector3(1.18f, 1.12f, 1.18f)));
             var chest = KnightBounds(Region.Torso, Quaternion.identity);
-            float low = hip - 0.035f, high = neck - 0.025f;
+            float low = hip - 0.055f, high = neck + 0.035f;
             MountKnight("Cuirass", "spine01", new Vector3(chest.center.x, (low + high) / 2, chest.center.z), Quaternion.identity,
-                new Vector3(chest.size.x + 0.035f, high - low, chest.size.z + 0.045f));
+                new Vector3(chest.size.x + 0.035f, high - low, chest.size.z + 0.045f), Region.Torso);
             foreach (string side in new[] { "R", "L" })
             {
                 string suffix = "." + side; float sign = Mathf.Sign(h.Head("upperarm01" + suffix).x);
@@ -138,14 +280,15 @@ namespace AsciiHero
                     var a = h.Head(top + suffix); var b = h.Head(bottom + suffix);
                     var up = (a - b).normalized;
                     var forward = Vector3.ProjectOnPlane(Vector3.forward, up).normalized;
+                    if (name=="Shoulder") forward=Vector3.ProjectOnPlane(sign*Vector3.right+Vector3.forward*.18f,up).normalized;
                     var rot = Quaternion.LookRotation(forward, up);
                     var bounds = KnightBounds(region, rot, sign);
                     var axisCenter = Quaternion.Inverse(rot) * Vector3.LerpUnclamped(a, b, (from + to) * .5f);
                     var center = rot * new Vector3(bounds.center.x, axisCenter.y, bounds.center.z);
                     var fit = new Vector3(sign * bounds.size.x * padding, Vector3.Distance(a,b) * (to-from), bounds.size.z * padding);
-                    MountKnight(name, top + suffix, center, rot, fit);
+                    MountKnight(name, top + suffix, center, rot, fit, region, sign);
                 }
-                Sleeve("Shoulder", "upperarm01", "lowerarm01", Region.UpperArm, -.10f, .60f, 1.16f);
+                Sleeve("Shoulder", "upperarm01", "lowerarm01", Region.UpperArm, -.19f, .71f, 1.16f);
                 Sleeve("Bracer", "lowerarm01", "wrist", Region.ForeArm, .04f, .94f, 1.15f);
                 Sleeve("Cuisse", "upperleg01", "lowerleg01", Region.Thigh, .10f, .88f, 1.12f);
                 Sleeve("Greave", "lowerleg01", "foot", Region.Shin, .13f, .94f, 1.12f);
@@ -202,7 +345,8 @@ namespace AsciiHero
                     }
                     verts.AddRange(v); normals.AddRange(mesh.normals); uvs.AddRange(mesh.uv);
                     foreach (int ix in mesh.triangles) triangles.Add(offset + ix);
-                    UnityEngine.Object.Destroy(mesh);
+                    if (Application.isPlaying) UnityEngine.Object.Destroy(mesh);
+                    else UnityEngine.Object.DestroyImmediate(mesh);
                 }
                 var combined = new Mesh { name = "Gauntlet " + side };
                 combined.SetVertices(verts); combined.SetNormals(normals); combined.SetUVs(0, uvs);
