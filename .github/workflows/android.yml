@@ -5,14 +5,12 @@ name: Android APK
 
 on:
   push:
-    branches: [main, unity-port]
-    paths: ['Unity/**', '.github/workflows/android.yml']
-  pull_request:
+    branches: [main, unity-port, refactor/architecture]
     paths: ['Unity/**', '.github/workflows/android.yml']
   workflow_dispatch:
 
 concurrency:
-  group: android-${{ github.ref }}
+  group: android-latest-apk
   cancel-in-progress: true
 
 jobs:
@@ -52,6 +50,23 @@ jobs:
         with:
           lfs: true
 
+      - name: Set build version and verify source
+        id: version
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          VERSION="0.1.$((GITHUB_RUN_NUMBER - 137))"
+          export VERSION
+          python3 - <<'PY'
+          import os, pathlib, re
+          p = pathlib.Path("Unity/Assets/Scripts/Game.cs")
+          s, n = re.subn(r'(public const string VERSION = "beta )\d+\.\d+\.\d+( · Unity";)', lambda m: m[1]+os.environ["VERSION"]+m[2], p.read_text())
+          assert n == 1
+          p.write_text(s)
+          PY
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building $VERSION from $GITHUB_SHA"
+
       - uses: actions/cache@v4
         with:
           path: Unity/Library
@@ -73,27 +88,51 @@ jobs:
           buildMethod: AsciiHero.Editor.CIBuild.BuildAndroid
           androidExportType: androidPackage
           androidVersionCode: ${{ github.run_number }}
-          versioning: None
+          versioning: Custom
+          version: ${{ steps.version.outputs.version }}
+
+      - name: Prepare versioned APK
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          APK=$(find build/Android -name '*.apk' -print -quit)
+          test -n "$APK"
+          mkdir -p release
+          cp "$APK" "release/AsciiHero-$VERSION.apk"
+          sha256sum "release/AsciiHero-$VERSION.apk"
+          printf 'version=%s\ncommit=%s\n' "$VERSION" "$GITHUB_SHA" > release/build-info.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: AsciiHero-apk
-          path: build/Android
+          name: AsciiHero-${{ steps.version.outputs.version }}
+          path: release/
           retention-days: 14
 
-      # The APK itself, no zip: Releases -> "Последняя сборка APK" -> AsciiHero.apk
+      # Publish only trusted branch builds, never arbitrary pull requests.
       - name: Publish APK to Releases
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/unity-port' || github.ref == 'refs/heads/refactor/architecture')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          APK=$(find build/Android -name '*.apk' | head -n 1)
-          cp "$APK" AsciiHero.apk
-          gh release delete latest-apk --cleanup-tag --yes || true
-          gh release create latest-apk AsciiHero.apk \
-            --target "$GITHUB_SHA" --prerelease \
-            --title "Последняя сборка APK" \
-            --notes "Сборка №${GITHUB_RUN_NUMBER} из ветки ${GITHUB_REF_NAME}, коммит ${GITHUB_SHA::7}. Файл заменяется при каждой новой сборке."
+          set -euo pipefail
+          TAG=latest-apk
+          TITLE="Последняя сборка APK"
+          VERSION="${{ steps.version.outputs.version }}"
+          APK="release/AsciiHero-$VERSION.apk"
+          NOTES="Версия $VERSION, сборка №${GITHUB_RUN_NUMBER}, ветка ${GITHUB_REF_NAME}, коммит ${GITHUB_SHA}."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" release/build-info.txt --clobber
+            gh release edit "$TAG" --title "$TITLE" --notes "$NOTES" --prerelease
+            gh release view "$TAG" --json assets --jq '.assets[].name' | while IFS= read -r asset; do
+              case "$asset" in
+                "AsciiHero-$VERSION.apk") ;;
+                AsciiHero*.apk) gh release delete-asset "$TAG" "$asset" --yes ;;
+              esac
+            done
+          else
+            gh release create "$TAG" "$APK" release/build-info.txt --target "$GITHUB_SHA" --prerelease --title "$TITLE" --notes "$NOTES"
+          fi
 
       # the Unity image and build output fill the runner's disk; without this the cache save at the end fails
       - name: Free space before saving the cache

@@ -97,13 +97,8 @@ Shader "AsciiHero/Glyph"
             // the CPU), w the distance the air has travelled
             float WindGust(float2 p)
             {
-                // carried by the air in the world's own axes, from a point near the place (the old pattern turned with
-                // the wind's direction about the world's origin, 4 km away: it swept over the grass at tens of m/s)
                 float2 r = p - _AsciiWindOff.zw - _AsciiWindOff.xy;
-                float g = WNoise(r * 0.14 + 3.1);                      // big gusts
-                g = smoothstep(0.32, 0.82, g);
-                float d = WNoise(r * 0.5 + 11.7);                      // smaller ripples on them
-                return saturate(g * (0.7 + 0.6 * d));
+                return smoothstep(0.38, 0.78, WNoise(r * 0.09 + 3.1));
             }
             float3 ClothWS(float3 ws, float3 os)
             {

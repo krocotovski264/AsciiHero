@@ -64,7 +64,7 @@ namespace AsciiHero
                         gm.RecalculateNormals(); gm.RecalculateBounds(); MeshGen.AddGlyphUV(gm, false);
                         MeshGen.Obj(gm, mats["GROUND"], T, Vector3.zero, Quaternion.identity, false, "Ground");
                     }
-                Forest.PathStrip(T, mats["ROAD"], ROAD, 1.35f, 0.006f, "Road");
+                Forest.PathStrip(T, mats["ROAD"], ROAD, 1.35f, 0.006f, "Road", mats["GROUND"]);
                 // the ruts: two darker lines in the road
                 foreach (float off in new[] { -0.55f, 0.55f })
                 {
@@ -161,7 +161,7 @@ namespace AsciiHero
                 for (int i = 0; i < 2 * HX * 2 * HZ * 120; i++)
                 {
                     float x = Rr(-HX, HX + 3.5f), z = Rr(-HZ - 3f, HZ);
-                    if (RoadD(x, z) < 1.1f || WHEAT.Contains(new Vector2(x, z)) || x > INN.x - 3.2f && Mathf.Abs(z) < 3.6f) continue;
+                    if (!Forest.RoadGrass(x, z, RoadD(x, z), 1.35f) || WHEAT.Contains(new Vector2(x, z)) || x > INN.x - 3.2f && Mathf.Abs(z) < 3.6f) continue;
                     bool blocked = false; foreach (var c in colliders) if (c.circle && (new Vector2(x - c.x, z - c.z)).magnitude < c.r * 0.8f) { blocked = true; break; }
                     if (blocked) continue;
                     // the forest's edge: patches of its shorter, darker, sparser grass come out into the meadow

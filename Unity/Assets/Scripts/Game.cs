@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.1.17 · Unity";
+        public const string VERSION = "beta 0.1.18 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -47,13 +47,14 @@ namespace AsciiHero
         float roofFade, roofFadeSet = -1; List<Renderer> roofRs; MaterialPropertyBlock roofMpb; float doorCd, leafClear; Light moonLight; Character bartenderChar; MotionActor bartender;
         // integrity instead of a health bar: five limbs (head, armL, armR, legL, legR), each worth 20 %
         readonly Vector4[] pushPts = new Vector4[4]; static readonly Vector4 FAR = new Vector4(9999, 0, 9999, 0);
-        int hp = 100; readonly bool[] limbs = { true, true, true, true, true }; float respawnT; Vector3 heroTrail;
-        // each piece of the armour has its own strength: the first time it is beaten to nothing it falls off and lies
-        // there (picked up again, it is whole); the second time it is gone for good
-        readonly int[] limbHp = { 100, 100, 100, 100, 100 }; readonly bool[] limbBroken = new bool[5];
-        static readonly float[] LIMB_HIT = { 0.15f, 0.25f, 0.25f, 0.175f, 0.175f };     // where blows land: the arms most
-        void HpFromLimbs() { int s = 0; for (int l = 0; l < 5; l++) s += limbs[l] ? limbHp[l] : 0; hp = Mathf.CeilToInt(s / 5f); if (LimbCount() == 0) hp = 0; else hp = Mathf.Max(1, hp); }
-        int LimbCount() { int n = 0; foreach (var b in limbs) if (b) n++; return n; }
+        readonly BodyIntegrity integrity = new BodyIntegrity();
+        int hp => integrity.Health;
+        bool[] limbs => integrity.Present;
+        int[] limbHp => integrity.Strength;
+        bool[] limbBroken => integrity.Broken;
+        float respawnT; Vector3 heroTrail;
+        void HpFromLimbs() => integrity.Recalculate();
+        int LimbCount() => integrity.Count();
         GameObject editorRoot, worldLightsRoot; Light key, rim, fill, heroLight;
         GameObject floor;
         bool rebuildPending; GUIStyle sLimb, sIcon;
@@ -325,18 +326,15 @@ namespace AsciiHero
             if (player != null) player.PokeIdle();
             if (sfx != null) { sfx.Play("hit_armor", 0.7f); sfx.Play("clash", 0.35f); }
             // the blow falls on one piece (of those still on), it takes four times the old share of the whole
-            float tot = 0; for (int l = 0; l < 5; l++) if (limbs[l]) tot += LIMB_HIT[l];
-            if (tot <= 0) return;
-            float r = Random.value * tot; int hit = 0;
-            for (int l = 0; l < 5; l++) { if (!limbs[l]) continue; hit = l; r -= LIMB_HIT[l]; if (r <= 0) break; }
-            limbHp[hit] = Mathf.Max(0, limbHp[hit] - pct * 4);
+            int hit = integrity.SelectHit();
+            if (hit < 0) return;
+            bool second = limbBroken[hit];
             string lost = "";
-            if (limbHp[hit] <= 0)
+            if (integrity.ApplyDamage(hit, pct))
             {
-                limbs[hit] = false; lost = Character.LIMB_NAME[hit];
-                bool second = limbBroken[hit];
-                SpawnDebris(hit, !second);                  // the first time it lies there to be picked up; the second it burns away
-                limbBroken[hit] = true;
+                lost = Character.LIMB_NAME[hit];
+                SpawnDebris(hit, !second);
+                integrity.MarkBroken(hit);
                 StoryLimbLost(hit, second);
             }
             player.SetLimbs(limbs);
@@ -614,7 +612,7 @@ namespace AsciiHero
         }
         void RestoreBody()
         {
-            hp = 100; for (int l = 0; l < 5; l++) { limbs[l] = true; limbHp[l] = 100; limbBroken[l] = false; }
+            integrity.Reset();
             foreach (var kv in keptDrop) foreach (var d in kv.Value) if (d.go != null) { debris.Remove(d); Destroy(d.go); }
             keptDrop.Clear();
             if (player != null) player.SetLimbs(limbs);
@@ -631,7 +629,7 @@ namespace AsciiHero
                 foreach (var d in kv.Value) if (d.go != null && d.rest && (new Vector2(d.go.transform.position.x - pos.x, d.go.transform.position.z - pos.z)).magnitude < 0.9f) near = true;
                 if (!near) continue;
                 foreach (var d in kv.Value) if (d.go != null) { debris.Remove(d); Destroy(d.go); }
-                keptDrop.Remove(l); limbs[l] = true; limbHp[l] = 100; player.SetLimbs(limbs); HpFromLimbs();
+                keptDrop.Remove(l); integrity.RestorePiece(l, false); player.SetLimbs(limbs); HpFromLimbs();
                 ShowToast("Подобрано: " + Character.LIMB_NAME[l] + " (цела, но уже разбивалась)\nЦелостность " + hp + "%"); Sound("cloth", 0.5f, pos);
                 break;
             }
@@ -640,7 +638,7 @@ namespace AsciiHero
                 if ((new Vector2(pos.x - p.pos.x - loc.origin.x, pos.z - p.pos.z - loc.origin.z)).magnitude > 0.95f) continue;
                 string got = "";
                 for (int l = 0; l < 5; l++)
-                    if (!limbs[l] && p.Take(l)) { limbs[l] = true; limbHp[l] = 100; limbBroken[l] = false; got += (got.Length > 0 ? ", " : "") + Character.LIMB_NAME[l]; }      // (a new piece: whole, never broken)
+                    if (!limbs[l] && p.Take(l)) { integrity.RestorePiece(l, true); got += (got.Length > 0 ? ", " : "") + Character.LIMB_NAME[l]; }      // (a new piece: whole, never broken)
                 if (got.Length > 0) { player.SetLimbs(limbs); HpFromLimbs(); ShowToast("Подобрано: " + got + "\nЦелостность " + hp + "%"); }
             }
         }
@@ -3195,9 +3193,7 @@ namespace AsciiHero
             if (cfg.body == null) ResetBody();
             cfg.body[Body.Ix("height")] = cfg.height;
             SaveCfg();
-            for (int l = 0; l < 5; l++) limbs[l] = d.limbs == null || l >= d.limbs.Length || d.limbs[l];
-            hp = Mathf.Clamp(d.hp, 0, 100); if (hp <= 0) { hp = 100; for (int l = 0; l < 5; l++) limbs[l] = true; }
-            for (int l = 0; l < 5; l++) { limbHp[l] = d.limbHp != null && l < d.limbHp.Length ? Mathf.Clamp(d.limbHp[l], 0, 100) : (limbs[l] ? 100 : 0); limbBroken[l] = d.limbBroken != null && l < d.limbBroken.Length && d.limbBroken[l]; if (limbs[l] && limbHp[l] <= 0) limbHp[l] = 100; }
+            integrity.Load(d.hp, d.limbs, d.limbHp, d.limbBroken);
             keptDrop.Clear();
             inventory.Clear(); if (d.items != null) inventory.AddRange(d.items);
             invOpen = false; menuFromWorld = false; inMenu = false; respawnT = 0; dashT = 99; presetIx = -1;

@@ -62,13 +62,8 @@ Shader "AsciiHero/Leaves"
             // the CPU), w the distance the air has travelled
             float WindGust(float2 p)
             {
-                // carried by the air in the world's own axes, from a point near the place (the old pattern turned with
-                // the wind's direction about the world's origin, 4 km away: it swept over the grass at tens of m/s)
                 float2 r = p - _AsciiWindOff.zw - _AsciiWindOff.xy;
-                float g = WNoise(r * 0.14 + 3.1);                      // big gusts
-                g = smoothstep(0.32, 0.82, g);
-                float d = WNoise(r * 0.5 + 11.7);                      // smaller ripples on them
-                return saturate(g * (0.7 + 0.6 * d));
+                return smoothstep(0.38, 0.78, WNoise(r * 0.09 + 3.1));
             }
 
             struct Attributes { float4 positionOS : POSITION; float2 corner : TEXCOORD0; float2 seed : TEXCOORD1; float2 nrm : TEXCOORD2; float3 dir : TEXCOORD3; };
@@ -81,9 +76,9 @@ Shader "AsciiHero/Leaves"
                 float s = i.seed.x, hk = i.seed.y, ny = i.nrm.x; bool wood = i.nrm.y > 0.5;     // wood: a bush's stem and branches          // seed, height in the crown 0..1, normal's up part
                 // sway: the whole crown leans with the gusts (more at the top), each cluster flutters on its own
                 float2 wd = _AsciiWind.xy; float ws = _AsciiWind.z;
-                float g = WindGust(a.xz) * saturate(ws * 1.25);
-                float fl = sin(_AsciiTime * (2.4 + 3.0 * ws) * (0.8 + 0.5 * frac(s * 3.3)) + s * 40.0);
-                float2 sway = wd * (0.02 + 0.07 * g) * (0.3 + hk) + float2(-wd.y, wd.x) * fl * (0.012 + 0.03 * ws);
+                float g = WindGust(a.xz) * saturate(ws * 1.2);
+                float fl = sin(_AsciiTime * (1.2 + 0.5 * frac(s * 3.3)) + s * 40.0);
+                float2 sway = wd * (0.012 * saturate(ws) + 0.035 * g) * (0.3 + hk) + float2(-wd.y, wd.x) * fl * (0.008 * saturate(ws));
                 float push = 0;
                 for (int k = 0; k < 4; k++)
                 {

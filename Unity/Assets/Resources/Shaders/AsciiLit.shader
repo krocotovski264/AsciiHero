@@ -6,6 +6,8 @@ Shader "AsciiHero/Lit"
 {
     Properties
     {
+        _RoadBlend ("Road blend", Float) = 0
+        _RoadGround ("Road ground", Color) = (0,0,0,1)
         _Color ("Color", Color) = (1,1,1,1)
         _MainTex ("Albedo", 2D) = "white" {}
         _Glossiness ("Smoothness", Range(0,1)) = 0.4
@@ -39,6 +41,7 @@ Shader "AsciiHero/Lit"
             float _AsciiId;
             float _Cull;
             float _AsciiRow;
+            float _RoadBlend; float4 _RoadGround;
             float _AsciiActor;
             float _GlyphSmoke;
             float4 _GlyphCell;
@@ -103,14 +106,9 @@ Shader "AsciiHero/Lit"
         // the CPU), w the distance the air has travelled
         float WindGust(float2 p)
         {
-                // carried by the air in the world's own axes, from a point near the place (the old pattern turned with
-                // the wind's direction about the world's origin, 4 km away: it swept over the grass at tens of m/s)
                 float2 r = p - _AsciiWindOff.zw - _AsciiWindOff.xy;
-                float g = WNoise(r * 0.14 + 3.1);                      // big gusts
-                g = smoothstep(0.32, 0.82, g);
-                float d = WNoise(r * 0.5 + 11.7);                      // smaller ripples on them
-                return saturate(g * (0.7 + 0.6 * d));
-        }
+                return smoothstep(0.38, 0.78, WNoise(r * 0.09 + 3.1));
+            }
         float3 ClothWS(float3 ws, float3 os)
         {
             if (_Cloth > 1.5)
@@ -221,6 +219,42 @@ Shader "AsciiHero/Lit"
                     return half4(nVS.xy * 0.5 + 0.5, i.viewZ / 12.0, _AsciiId);
                 }
                 half4 albedo = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv) * _Color;
+                if (_RoadBlend > 0.5) albedo.rgb = lerp(_RoadGround.rgb, albedo.rgb, smoothstep(0.0, 1.0, i.uv.x));
+                // World-space surface texture: independent of mesh UVs and tile seams.
+                float matId = floor(_AsciiId * 255.0 + 0.5) - 1.0;
+                if (_AsciiActor < 0.5 && nWS.y > 0.5)
+                {
+                    float2 p = i.positionWS.xz;
+                    float grain = WNoise(p * 19.0);
+                    float broad = WNoise(p * 2.7);
+                    if (matId == 30.0 || matId == 36.0 || matId == 50.0 || matId == 59.0)
+                    {
+                        float grit = smoothstep(0.72, 0.92, grain);
+                        float clods = WNoise(p * 5.8);
+                        float3 soil = lerp(float3(0.075,0.042,0.022), float3(0.29,0.19,0.105), broad);
+                        soil *= 0.65 + 0.65 * clods + 0.35 * grain;
+                        soil = lerp(soil, float3(0.32,0.29,0.24), grit * 0.55);
+                        if (matId == 30.0 || matId == 50.0) {
+                            float road = matId == 50.0 ? (_RoadBlend > 0.5 ? smoothstep(0.0,1.0,i.uv.x) : 1.0) : 0.0;
+                            float3 meadow = lerp(soil, float3(0.075,0.14,0.045), smoothstep(0.35,0.8,clods)*0.55);
+                            albedo.rgb = lerp(meadow, soil * float3(1.25,1.12,0.92), road);
+                        } else albedo.rgb *= 0.72 + 0.38 * broad + 0.25 * grain + 0.20 * grit;
+                    }
+                    else if (matId == 16.0 || matId == 32.0 || matId == 34.0 || matId == 35.0)
+                    {
+                        float vein = smoothstep(0.04, 0.15, abs(WNoise(p * 4.0 + broad) - 0.5));
+                        albedo.rgb *= (0.62 + 0.48 * broad + 0.20 * grain) * lerp(0.56, 1.0, vein);
+                    }
+                    else if (matId == 60.0)
+                    {
+                        float2 brick = p / float2(0.42, 0.22);
+                        brick.x += 0.5 * fmod(floor(brick.y) + 10000.0, 2.0);
+                        float2 f = frac(brick);
+                        float seam = min(min(f.x, 1.0-f.x), min(f.y, 1.0-f.y));
+                        float mortar = smoothstep(0.035, 0.10, seam);
+                        albedo.rgb *= lerp(0.36, 0.80 + 0.40 * WHash(floor(brick)) + 0.12 * grain, mortar);
+                    }
+                }
                 float gloss = _Glossiness;
                 if (_AsciiFlat > 0.5 && nWS.y > 0.5)
                 {   // the ground under the sky: white with snow (frost, then drifts; trodden paths greyer), dark and
