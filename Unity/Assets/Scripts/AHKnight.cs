@@ -87,6 +87,20 @@ namespace AsciiHero
         {
             var plate = ReadKnight(name)[0];
             var mesh = FitPlate(plate, Matrix4x4.TRS(center, rotation, size));
+            if (name == "Cape")
+            {
+                var v = mesh.vertices;
+                for (int i = 0; i < v.Length; i++)
+                {
+                    float f = Mathf.Clamp01(0.5f - plate.pos[i].y);
+                    float t = Mathf.Pow(f, 1f / CAPE_EXP);
+                    float u = Mathf.Clamp01(plate.pos[i].x + 0.5f);
+                    var p = CapePt(u, t);
+                    p.z -= Mathf.Clamp(plate.pos[i].z * size.z * 0.15f, -0.012f, 0.012f);
+                    v[i] = p;
+                }
+                mesh.vertices = v; mesh.RecalculateNormals(); mesh.RecalculateTangents(); MeshGen.AddGlyphUV(mesh, false);
+            }
             if (name == "Cape") { var bounds = mesh.bounds; bounds.Expand(2.5f); mesh.bounds = bounds; }
             var group = Group(name);
             var go = MeshGen.Obj(mesh, plate.material, group, Vector3.zero, Quaternion.identity);
@@ -111,11 +125,11 @@ namespace AsciiHero
         {
             var h = human;
             var head = KnightBounds(Region.Head, Quaternion.identity);
-            MountKnight("Helmet", "head", head.center, Quaternion.identity, Vector3.Scale(head.size, new Vector3(1.29f, 1.17f, 1.24f)));
+            MountKnight("Helmet", "head", head.center, Quaternion.identity, Vector3.Scale(head.size, new Vector3(1.18f, 1.12f, 1.18f)));
             var chest = KnightBounds(Region.Torso, Quaternion.identity);
-            float low = hip - 0.065f, high = neck + 0.023f;
-            MountKnight("Cuirass", "spine01", new Vector3(0, (low + high) / 2, chest.center.z), Quaternion.identity,
-                new Vector3(chest.size.x * 1.13f, high - low, chest.size.z * 1.18f));
+            float low = hip - 0.035f, high = neck - 0.025f;
+            MountKnight("Cuirass", "spine01", new Vector3(chest.center.x, (low + high) / 2, chest.center.z), Quaternion.identity,
+                new Vector3(chest.size.x + 0.035f, high - low, chest.size.z + 0.045f));
             foreach (string side in new[] { "R", "L" })
             {
                 string suffix = "." + side; float sign = Mathf.Sign(h.Head("upperarm01" + suffix).x);
@@ -126,14 +140,15 @@ namespace AsciiHero
                     var forward = Vector3.ProjectOnPlane(Vector3.forward, up).normalized;
                     var rot = Quaternion.LookRotation(forward, up);
                     var bounds = KnightBounds(region, rot, sign);
-                    var center = Vector3.LerpUnclamped(a, b, (from + to) * .5f);
+                    var axisCenter = Quaternion.Inverse(rot) * Vector3.LerpUnclamped(a, b, (from + to) * .5f);
+                    var center = rot * new Vector3(bounds.center.x, axisCenter.y, bounds.center.z);
                     var fit = new Vector3(sign * bounds.size.x * padding, Vector3.Distance(a,b) * (to-from), bounds.size.z * padding);
                     MountKnight(name, top + suffix, center, rot, fit);
                 }
-                Sleeve("Shoulder", "upperarm01", "lowerarm01", Region.UpperArm, -.15f, .83f, 1.24f);
-                Sleeve("Bracer", "lowerarm01", "wrist", Region.ForeArm, -.06f, .91f, 1.22f);
-                Sleeve("Cuisse", "upperleg01", "lowerleg01", Region.Thigh, .13f, .90f, 1.14f);
-                Sleeve("Greave", "lowerleg01", "foot", Region.Shin, .11f, .96f, 1.15f);
+                Sleeve("Shoulder", "upperarm01", "lowerarm01", Region.UpperArm, -.10f, .60f, 1.16f);
+                Sleeve("Bracer", "lowerarm01", "wrist", Region.ForeArm, .04f, .94f, 1.15f);
+                Sleeve("Cuisse", "upperleg01", "lowerleg01", Region.Thigh, .10f, .88f, 1.12f);
+                Sleeve("Greave", "lowerleg01", "foot", Region.Shin, .13f, .94f, 1.12f);
                 var knee = h.Head("lowerleg01" + suffix);
                 var calf = KnightBounds(Region.Shin, Quaternion.identity, sign);
                 MountKnight("Poleyn", "lowerleg01" + suffix, knee + Vector3.forward * .024f, Quaternion.identity,
