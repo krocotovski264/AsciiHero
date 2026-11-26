@@ -230,7 +230,15 @@ Shader "AsciiHero/Lit"
                     if (matId == 30.0 || matId == 36.0 || matId == 50.0 || matId == 59.0)
                     {
                         float grit = smoothstep(0.72, 0.92, grain);
-                        albedo.rgb *= 0.72 + 0.38 * broad + 0.25 * grain + 0.20 * grit;
+                        float clods = WNoise(p * 5.8);
+                        float3 soil = lerp(float3(0.075,0.042,0.022), float3(0.29,0.19,0.105), broad);
+                        soil *= 0.65 + 0.65 * clods + 0.35 * grain;
+                        soil = lerp(soil, float3(0.32,0.29,0.24), grit * 0.55);
+                        if (matId == 30.0 || matId == 50.0) {
+                            float road = matId == 50.0 ? (_RoadBlend > 0.5 ? smoothstep(0.0,1.0,i.uv.x) : 1.0) : 0.0;
+                            float3 meadow = lerp(soil, float3(0.075,0.14,0.045), smoothstep(0.35,0.8,clods)*0.55);
+                            albedo.rgb = lerp(meadow, soil * float3(1.25,1.12,0.92), road);
+                        } else albedo.rgb *= 0.72 + 0.38 * broad + 0.25 * grain + 0.20 * grit;
                     }
                     else if (matId == 16.0 || matId == 32.0 || matId == 34.0 || matId == 35.0)
                     {

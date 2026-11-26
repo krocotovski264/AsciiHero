@@ -261,14 +261,14 @@ namespace AsciiHero
         /// a flat band on the ground along a polyline (the path)
         public static bool RoadGrass(float x, float z, float distance, float halfWidth)
         {
-            float fade = Mathf.Min(1.0f, halfWidth * 0.9f);
+            float fade = Mathf.Min(1.2f, halfWidth * 1.1f);
             float chance = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(halfWidth - fade * 0.65f, halfWidth + fade, distance));
             return Mathf.PerlinNoise(x * 37.1f + 17f, z * 37.1f + 29f) < chance;
         }
         static void Strip(Transform T, Material m, Vector2[] line, float hw, float y, string name, Material ground = null)
         {
             var vs = new List<Vector3>(); var ts = new List<int>(); var uv = new List<Vector2>();
-            float fade = ground != null ? Mathf.Min(1f, hw * 0.9f) : 0f;
+            float fade = ground != null ? Mathf.Min(1.2f, hw * 1.1f) : 0f;
             int lanes = ground != null ? 5 : 2;
             if (ground != null) { m = new Material(m); m.SetFloat("_RoadBlend", 1f); m.SetColor("_RoadGround", ground.GetColor("_Color")); }
             for (int i = 0; i + 1 < line.Length; i++)
@@ -278,9 +278,12 @@ namespace AsciiHero
                 for (int s = 0; s <= steps; s++)
                 {
                     var p = Vector2.Lerp(a, b, s / (float)steps);
+                    Vector2 side = n;
+                    if (s == 0 && i > 0) { var prev = (a-line[i-1]).normalized; side = (n + new Vector2(-prev.y,prev.x)).normalized; }
+                    if (s == steps && i+2 < line.Length) { var next = (line[i+2]-b).normalized; side = (n + new Vector2(-next.y,next.x)).normalized; }
                     for (int k = 0; k < lanes; k++) {
                         float offset = lanes == 2 ? (k == 0 ? hw : -hw) : (k == 0 ? hw + fade : k == 1 ? hw - fade * 0.65f : k == 2 ? 0f : k == 3 ? -hw + fade * 0.65f : -hw - fade);
-                        vs.Add(new Vector3(p.x + n.x * offset, y, p.y + n.y * offset));
+                        vs.Add(new Vector3(p.x + side.x * offset, y, p.y + side.y * offset));
                         uv.Add(new Vector2(lanes == 5 && (k == 0 || k == 4) ? 0f : 1f, 0f));
                     }
                     if (s > 0) for (int k = 0; k < lanes - 1; k++) { int o = vs.Count - 2 * lanes + k; ts.Add(o); ts.Add(o + lanes); ts.Add(o + 1); ts.Add(o + 1); ts.Add(o + lanes); ts.Add(o + lanes + 1); }

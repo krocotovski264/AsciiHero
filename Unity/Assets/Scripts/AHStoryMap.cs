@@ -198,7 +198,17 @@ namespace AsciiHero
         {
             if (!gridCollide || walk == null) return p;
             // p is location-local (X, Z); the grid is in map metres: x = -X, y = Z
-            for (int it = 0; it < 2; it++)
+            float along = 0f;
+            for (int i = 1; i + 1 < thin.Count; i++)
+            {
+                along += Vector2.Distance(thin[i-1], thin[i]);
+                var dir = (thin[i+1] - thin[i-1]).normalized;
+                float taper = Mathf.Clamp01(Mathf.Min(Vector2.Distance(thin[i],a),Vector2.Distance(thin[i],b))/5f);
+                float bend = (Mathf.Sin(along * 0.38f) * 0.85f + Mathf.Sin(along * 0.17f) * 0.45f) * taper;
+                var q = thin[i] + new Vector2(-dir.y,dir.x)*bend;
+                if (Walk(q) && Walk(Vector2.Lerp(thin[i-1],q,0.5f)) && Walk(Vector2.Lerp(q,thin[i+1],0.5f))) thin[i]=q;
+            }
+            for (int it = 0; it < 3; it++)
             {
                 float mx = -p.x, my = p.y;
                 int i0 = Mathf.FloorToInt((mx - r - gx0) / CELL), i1 = Mathf.FloorToInt((mx + r - gx0) / CELL);
@@ -833,6 +843,17 @@ namespace AsciiHero
         // tall grass waving in the wind, a forest round the meadow (oaks, birches, pines, bushes), lone trees, flowers,
         // haystacks, a cart, fireflies
         readonly List<Vector2[]> roads = new List<Vector2[]>();
+        readonly List<float> roadWidths = new List<float>();
+        bool RoadsideGrass(Vector2 m)
+        {
+            for (int j = 0; j < roads.Count; j++)
+            {
+                var r = roads[j]; float best = 99f;
+                for (int i = 0; i + 1 < r.Length; i++) { var ab = r[i+1]-r[i]; float t = Mathf.Clamp01(Vector2.Dot(m-r[i],ab)/Mathf.Max(1e-5f,ab.sqrMagnitude)); best = Mathf.Min(best,(m-r[i]-ab*t).magnitude); }
+                if (!Forest.RoadGrass(m.x,m.y,best,roadWidths[j])) return false;
+            }
+            return true;
+        }
         float RoadD(Vector2 m)
         {
             float best = 99;
@@ -869,6 +890,7 @@ namespace AsciiHero
                 for (int i = 0; i + 1 < thin.Count; i++) { sm.Add(Vector2.Lerp(thin[i], thin[i + 1], 0.25f)); sm.Add(Vector2.Lerp(thin[i], thin[i + 1], 0.75f)); }
                 sm.Add(thin[thin.Count - 1]); thin = sm;
             }
+            for (int i = 0; i < thin.Count; i++) if (!Walk(thin[i])) return res;
             return thin;
         }
         static Vector2[] Local(List<Vector2> m) { var r = new Vector2[m.Count]; for (int i = 0; i < m.Count; i++) r[i] = new Vector2(-m[i].x, m[i].y); return r; }
@@ -890,8 +912,8 @@ namespace AsciiHero
             {
                 foreach (var w in ways)
                 {
-                    var line = PathPoints(hub, w); if (line.Count < 2) continue; roads.Add(line.ToArray());
-                    Forest.PathStrip(T, mats["ROAD"], Local(line), 1.35f, 0.006f, "Road");
+                    var line = PathPoints(hub, w); if (line.Count < 2) continue; roads.Add(line.ToArray()); roadWidths.Add(1.35f);
+                    Forest.PathStrip(T, mats["ROAD"], Local(line), 1.35f, 0.006f, "Road", mats["GROUND"]);
                     foreach (float off in new[] { -0.55f, 0.55f })
                     {
                         var rl = new List<Vector2>();
@@ -904,8 +926,8 @@ namespace AsciiHero
                     var c = ex.r.center; Vector2 best = c; float bd = 1e9f;
                     for (int k = 0; k < 200; k++) { var q = c + new Vector2(Rr(-8, 8), Rr(-8, 8)); if (!Walk(q) || BiomeAt(q) != "meadow") continue; float d = (q - c).magnitude; if (d < bd) { bd = d; best = q; } }
                     if (bd > 9) continue;
-                    var line = PathPoints(hub, best); if (line.Count < 2) continue; roads.Add(line.ToArray());
-                    Forest.PathStrip(T, mats["ROAD"], Local(line), 0.55f, 0.007f, "Path");
+                    var line = PathPoints(hub, best); if (line.Count < 2) continue; roads.Add(line.ToArray()); roadWidths.Add(0.55f);
+                    Forest.PathStrip(T, mats["ROAD"], Local(line), 0.55f, 0.007f, "Path", mats["GROUND"]);
                 }
             }
             bool Open(Vector2 m, float r) { return Walk(m) && BiomeAt(m) == "meadow" && RoadD(m) > 1.6f + r && Free(m, r); }
@@ -958,7 +980,7 @@ namespace AsciiHero
             for (int k = 0; k < ng; k++)
             {
                 var m = new Vector2(Rr(gx0, gx0 + gw * CELL), Rr(gy0, gy0 + gh * CELL));
-                if (!Walk(m) || BiomeAt(m) != "meadow" || RoadD(m) < 1.1f) continue;
+                if (!Walk(m) || BiomeAt(m) != "meadow" || !RoadsideGrass(m)) continue;
                 bool blocked = false; foreach (var c in colliders) if (c.circle && (new Vector2(-m.x - c.x, m.y - c.z)).magnitude < c.r * 0.8f) { blocked = true; break; } if (blocked) continue;
                 long key = Key(Mathf.FloorToInt(m.x / 10), Mathf.FloorToInt(m.y / 10));
                 KeyValuePair<List<Vector3>, List<float>> l; if (!blocksG.TryGetValue(key, out l)) { l = new KeyValuePair<List<Vector3>, List<float>>(new List<Vector3>(), new List<float>()); blocksG[key] = l; }
