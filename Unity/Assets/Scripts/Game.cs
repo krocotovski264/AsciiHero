@@ -1156,6 +1156,7 @@ namespace AsciiHero
             }
             Application.targetFrameRate = FPS[setFps];
             Shader.SetGlobalFloat("_AsciiGrassThin", 1 - GRASS[setGrass] / 100f);
+            if (ascii != null && !setDev) ascii.plain = false;
             if (ascii != null) { ascii.bloom = setBloom ? 0.32f : 0f; ascii.fullLit = false; ascii.litDiv = setQuality == 0 ? 3 : 2; ascii.outline = setOutline; }
             shadowScale = setQuality == 0 ? 0f : setQuality == 1 ? 0.85f : 1f; SetShadowDistance(shadowBase);
             AudioListener.volume = setSound / 100f;      // (no music yet)
@@ -2420,7 +2421,12 @@ namespace AsciiHero
             if (Button(new Rect(vr.xMax - 196 * k, T, 62 * k, 24 * k), "МЕНЮ")) { inMenu = true; menuPage = 0; }
             if (Button(new Rect(vr.xMax - 128 * k, T, 58 * k, 24 * k), "АВТО", autoRotate)) autoRotate = !autoRotate;
             if (Button(new Rect(vr.xMax - 66 * k, T, 58 * k, 24 * k), "СБРОС")) cam = CAM0;
-            if (Button(new Rect(vr.xMax - 128 * k, T + 28 * k, 120 * k, 24 * k), ascii.surfaceGlyphs ? "Aa: НА МОДЕЛЯХ" : "Aa: СЕТКОЙ", ascii.surfaceGlyphs)) ToggleGlyphMode();
+            if (Button(new Rect(vr.xMax - 128 * k, T + 28 * k, 120 * k, 24 * k), ascii.plain ? "Aa: БЕЗ ASCII" : ascii.surfaceGlyphs ? "Aa: НА МОДЕЛЯХ" : "Aa: СЕТКОЙ", ascii.surfaceGlyphs && !ascii.plain))
+            {
+                if (ascii.plain) { ascii.plain = false; if (!ascii.surfaceGlyphs) ToggleGlyphMode(); else ShowToast("Символы на моделях"); }
+                else if (setDev && !ascii.surfaceGlyphs) { ascii.plain = true; ShowToast("Обычный 3D-рендеринг"); }
+                else ToggleGlyphMode();
+            }
 
             // panel
             float px = vr.xMax, pw = W - px, right = safe.xMax;
