@@ -54,6 +54,8 @@ jobs:
         id: version
         run: |
           set -euo pipefail
+          # Keep release owned by the runner when Unity writes its fit preview from Docker.
+          mkdir -p release
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           VERSION="0.1.$((GITHUB_RUN_NUMBER - 137))"
           export VERSION
