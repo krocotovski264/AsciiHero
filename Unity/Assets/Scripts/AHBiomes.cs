@@ -315,7 +315,7 @@ namespace AsciiHero
         {
             title = "Болото";
             ambSky = Mats.Hex(0x6a7a70) * 0.32f; ambEq = Mats.Hex(0x34402c) * 0.32f; ambGround = Mats.Hex(0x10140a) * 0.35f; moonK = 0.7f; heroLightK = 1.4f; exposure = 1.35f;
-            Paths(M.Tint("MUD", 0x2a2416), 0.7f);
+            Paths(M.Tint("MUD", 0x2a2416), 0.7f, M.Tint("GROUND", 0x1c2212));
             for (int i = 0; i < 6; i++) { var p = Spot(1.6f, 1.6f); if (!float.IsNaN(p.x)) AddPool(p, Rr(1.2f, 2.6f), Rr(0.9f, 1.8f), 1); }
             Ground(M.Tint("GROUND", 0x1c2212));
             Water(new Color(0.05f, 0.07f, 0.035f), new Color(0.24f, 0.28f, 0.13f), M.Tint("WATER", 0x161a0c, 0x040602));
@@ -363,7 +363,7 @@ namespace AsciiHero
         {
             title = "Ядовитое болото";
             ambSky = Mats.Hex(0x5a6a50) * 0.28f; ambEq = Mats.Hex(0x30382a) * 0.3f; ambGround = Mats.Hex(0x0c0e08) * 0.3f; moonK = 0.6f; heroLightK = 1.35f; exposure = 1.4f;
-            Paths(M.Tint("MUD", 0x1a1612), 0.6f);
+            Paths(M.Tint("MUD", 0x1a1612), 0.6f, M.Tint("GROUND", 0x141210));
             for (int i = 0; i < 5; i++) { var p = Spot(1.4f, 1.5f); if (!float.IsNaN(p.x)) AddPool(p, Rr(1.0f, 2.2f), Rr(0.8f, 1.6f), 3); }
             Ground(M.Tint("GROUND", 0x141210));
             // cracks in the black earth: thin dark strips
@@ -414,7 +414,7 @@ namespace AsciiHero
         {
             title = "Светлый город";
             ambSky = Mats.Hex(0x9aaad8) * 0.55f; ambEq = Mats.Hex(0x5a5a58) * 0.5f; ambGround = Mats.Hex(0x2a2620) * 0.5f; moonK = 1f; heroLightK = 1.4f; exposure = 1.3f;
-            Paths(M.Tint("COBBLE", 0xb0a898), 1.5f);
+            Paths(M.Tint("COBBLE", 0xb0a898), 1.5f, M.Tint("COBBLE", 0x8c867a));
             AddPool(new Vector2(0, 0), 1.25f, 1.25f, 2);          // the fountain's basin
             spawn = new Vector3(0, 0, 2.6f);
             Ground(M.Tint("COBBLE", 0x8c867a));
@@ -485,7 +485,7 @@ namespace AsciiHero
         {
             title = "Трущобы";
             ambSky = Mats.Hex(0x5a5e6a) * 0.3f; ambEq = Mats.Hex(0x2e2c2a) * 0.3f; ambGround = Mats.Hex(0x0e0c0a) * 0.3f; moonK = 0.65f; heroLightK = 1.45f; exposure = 1.4f;
-            Paths(M.Tint("COBBLE", 0x2c2a28), 1.3f);
+            Paths(M.Tint("COBBLE", 0x2c2a28), 1.3f, M.Tint("COBBLE", 0x3c3834));
             for (int i = 0; i < 6; i++) { var p = Spot(0.8f, 0.0f); if (!float.IsNaN(p.x)) AddPool(p, Rr(0.6f, 1.2f), Rr(0.4f, 0.8f), 2); }
             Ground(M.Tint("COBBLE", 0x3c3834));
             Water(new Color(0.03f, 0.03f, 0.04f), new Color(0.3f, 0.24f, 0.36f), M.Tint("WATER", 0x0a0a0c, 0x020204));      // (oily: a dull violet sheen)
@@ -611,7 +611,7 @@ namespace AsciiHero
         {
             title = "Кристальные копи";
             ambSky = Mats.Hex(0x302848) * 0.25f; ambEq = Mats.Hex(0x201a30) * 0.25f; ambGround = Mats.Hex(0x0a0810) * 0.3f; moonK = 0f; heroLightK = 1.1f; exposure = 1.45f;
-            Paths(M.Tint("CAVEFLOOR", 0x2c2a34), 0.9f);
+            Paths(M.Tint("CAVEFLOOR", 0x2c2a34), 0.9f, M.Tint("CAVEFLOOR", 0x24222a));
             { var p = Spot(2.4f, 2.0f); if (!float.IsNaN(p.x)) AddPool(p, 2.6f, 1.8f, 4); }      // the mirror lake
             Ground(M.Tint("CAVEFLOOR", 0x24222a));
             Water(new Color(0.015f, 0.012f, 0.04f), new Color(0.3f, 0.22f, 0.5f), M.Tint("WATER", 0x08060e, 0x02010a), true);
