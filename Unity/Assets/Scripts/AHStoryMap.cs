@@ -198,17 +198,7 @@ namespace AsciiHero
         {
             if (!gridCollide || walk == null) return p;
             // p is location-local (X, Z); the grid is in map metres: x = -X, y = Z
-            float along = 0f;
-            for (int i = 1; i + 1 < thin.Count; i++)
-            {
-                along += Vector2.Distance(thin[i-1], thin[i]);
-                var dir = (thin[i+1] - thin[i-1]).normalized;
-                float taper = Mathf.Clamp01(Mathf.Min(Vector2.Distance(thin[i],a),Vector2.Distance(thin[i],b))/5f);
-                float bend = (Mathf.Sin(along * 0.38f) * 0.85f + Mathf.Sin(along * 0.17f) * 0.45f) * taper;
-                var q = thin[i] + new Vector2(-dir.y,dir.x)*bend;
-                if (Walk(q) && Walk(Vector2.Lerp(thin[i-1],q,0.5f)) && Walk(Vector2.Lerp(q,thin[i+1],0.5f))) thin[i]=q;
-            }
-            for (int it = 0; it < 3; it++)
+            for (int it = 0; it < 2; it++)
             {
                 float mx = -p.x, my = p.y;
                 int i0 = Mathf.FloorToInt((mx - r - gx0) / CELL), i1 = Mathf.FloorToInt((mx + r - gx0) / CELL);
@@ -884,7 +874,17 @@ namespace AsciiHero
             res.Reverse(); res[0] = a; res[res.Count - 1] = b;
             // fewer points, then rounded corners (Chaikin), then a little wander
             var thin = new List<Vector2>(); for (int i = 0; i < res.Count; i += 3) thin.Add(res[i]); if (thin[thin.Count - 1] != b) thin.Add(b);
-            for (int it = 0; it < 2; it++)
+            float along = 0f;
+            for (int i = 1; i + 1 < thin.Count; i++)
+            {
+                along += Vector2.Distance(thin[i-1], thin[i]);
+                var dir = (thin[i+1] - thin[i-1]).normalized;
+                float taper = Mathf.Clamp01(Mathf.Min(Vector2.Distance(thin[i],a),Vector2.Distance(thin[i],b))/5f);
+                float bend = (Mathf.Sin(along * 0.38f) * 0.85f + Mathf.Sin(along * 0.17f) * 0.45f) * taper;
+                var q = thin[i] + new Vector2(-dir.y,dir.x)*bend;
+                if (Walk(q) && Walk(Vector2.Lerp(thin[i-1],q,0.5f)) && Walk(Vector2.Lerp(q,thin[i+1],0.5f))) thin[i]=q;
+            }
+            for (int it = 0; it < 3; it++)
             {
                 var sm = new List<Vector2> { thin[0] };
                 for (int i = 0; i + 1 < thin.Count; i++) { sm.Add(Vector2.Lerp(thin[i], thin[i + 1], 0.25f)); sm.Add(Vector2.Lerp(thin[i], thin[i + 1], 0.75f)); }
