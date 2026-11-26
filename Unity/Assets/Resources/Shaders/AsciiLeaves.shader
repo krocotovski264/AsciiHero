@@ -76,9 +76,9 @@ Shader "AsciiHero/Leaves"
                 float s = i.seed.x, hk = i.seed.y, ny = i.nrm.x; bool wood = i.nrm.y > 0.5;     // wood: a bush's stem and branches          // seed, height in the crown 0..1, normal's up part
                 // sway: the whole crown leans with the gusts (more at the top), each cluster flutters on its own
                 float2 wd = _AsciiWind.xy; float ws = _AsciiWind.z;
-                float g = WindGust(a.xz) * saturate(ws * 1.25);
-                float fl = sin(_AsciiTime * (2.4 + 3.0 * ws) * (0.8 + 0.5 * frac(s * 3.3)) + s * 40.0);
-                float2 sway = wd * (0.02 + 0.07 * g) * (0.3 + hk) + float2(-wd.y, wd.x) * fl * (0.012 + 0.03 * ws);
+                float g = WindGust(a.xz) * saturate(ws * 1.2);
+                float fl = sin(_AsciiTime * (1.2 + 0.5 * frac(s * 3.3)) + s * 40.0);
+                float2 sway = wd * (0.012 * saturate(ws) + 0.035 * g) * (0.3 + hk) + float2(-wd.y, wd.x) * fl * (0.008 * saturate(ws));
                 float push = 0;
                 for (int k = 0; k < 4; k++)
                 {

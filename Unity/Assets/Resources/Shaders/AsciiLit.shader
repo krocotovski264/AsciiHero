@@ -6,6 +6,8 @@ Shader "AsciiHero/Lit"
 {
     Properties
     {
+        _RoadBlend ("Road blend", Float) = 0
+        _RoadGround ("Road ground", Color) = (0,0,0,1)
         _Color ("Color", Color) = (1,1,1,1)
         _MainTex ("Albedo", 2D) = "white" {}
         _Glossiness ("Smoothness", Range(0,1)) = 0.4
@@ -39,6 +41,7 @@ Shader "AsciiHero/Lit"
             float _AsciiId;
             float _Cull;
             float _AsciiRow;
+            float _RoadBlend; float4 _RoadGround;
             float _AsciiActor;
             float _GlyphSmoke;
             float4 _GlyphCell;
@@ -216,6 +219,7 @@ Shader "AsciiHero/Lit"
                     return half4(nVS.xy * 0.5 + 0.5, i.viewZ / 12.0, _AsciiId);
                 }
                 half4 albedo = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv) * _Color;
+                if (_RoadBlend > 0.5) albedo.rgb = lerp(_RoadGround.rgb, albedo.rgb, smoothstep(0.0, 1.0, i.uv.x));
                 // World-space surface texture: independent of mesh UVs and tile seams.
                 float matId = floor(_AsciiId * 255.0 + 0.5) - 1.0;
                 if (_AsciiActor < 0.5 && nWS.y > 0.5)

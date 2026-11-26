@@ -209,10 +209,10 @@ namespace AsciiHero
             }
         }
         /// a path from the middle to the middle of each open side, with a bend
-        void Paths(Material m, float hw)
+        void Paths(Material m, float hw, Material ground)
         {
             var mid = new Vector2(Rr(-1.5f, 1.5f), Rr(-1.5f, 1.5f));
-            void To(Vector2 end) { var bend = Vector2.Lerp(mid, end, 0.5f) + new Vector2(Rr(-1.6f, 1.6f), Rr(-1.6f, 1.6f)); var line = new[] { mid, bend, end }; paths.Add(line); Forest.PathStrip(T, m, line, hw, 0.006f, "Path"); }
+            void To(Vector2 end) { var bend = Vector2.Lerp(mid, end, 0.5f) + new Vector2(Rr(-1.6f, 1.6f), Rr(-1.6f, 1.6f)); var line = new[] { mid, bend, end }; paths.Add(line); Forest.PathStrip(T, m, line, hw, 0.006f, "Path", ground); }
             if (openN) To(new Vector2(Rr(-2, 2), -HZ - 0.5f));
             if (openS) To(new Vector2(Rr(-2, 2), HZ + 0.5f));
             if (openW) To(new Vector2(-HX - 0.5f, Rr(-2, 2)));
@@ -551,7 +551,7 @@ namespace AsciiHero
         {
             title = "Пустоши";
             ambSky = Mats.Hex(0x7a8ac8) * 0.5f; ambEq = Mats.Hex(0x5a4e40) * 0.45f; ambGround = Mats.Hex(0x2a2014) * 0.45f; moonK = 1.3f; heroLightK = 1.35f; exposure = 1.25f;
-            Paths(M.Tint("SAND", 0x7a6444), 0.9f);
+            Paths(M.Tint("SAND", 0x7a6444), 0.9f, M["SAND"]);
             Ground(M["SAND"]);
             // cracks of the dry earth
             for (int i = 0; i < 26; i++)
@@ -668,7 +668,7 @@ namespace AsciiHero
         {
             title = "Осенний лес";
             ambSky = Mats.Hex(0x8a7a90) * 0.4f; ambEq = Mats.Hex(0x4a3628) * 0.4f; ambGround = Mats.Hex(0x1e1208) * 0.4f; moonK = 0.85f; heroLightK = 1.45f; exposure = 1.3f;
-            Paths(M.Tint("ROAD", 0x3a2a1a), 0.75f);
+            Paths(M.Tint("ROAD", 0x3a2a1a), 0.75f, M.Tint("GROUND", 0x3a2814));
             Ground(M.Tint("GROUND", 0x3a2814));
             string[] TR = { "aoak1", "aoak3", "abirch", "apine", "awillow" };
             Edges((p, s) => Tree(TR[R.Next(TR.Length)], p, Rr(0.9f, 1.2f), 0.4f), 1.7f);
@@ -707,7 +707,7 @@ namespace AsciiHero
         {
             title = "Заснеженное высокогорье";
             ambSky = Mats.Hex(0x9ab0e0) * 0.5f; ambEq = Mats.Hex(0x6a7488) * 0.45f; ambGround = Mats.Hex(0x3a4250) * 0.4f; moonK = 1.2f; heroLightK = 1.3f; exposure = 1.15f;
-            Paths(M.Tint("SNOW", 0xa8b2bc), 0.7f);
+            Paths(M.Tint("SNOW", 0xa8b2bc), 0.7f, M["SNOW"]);
             Ground(M["SNOW"]);
             // icy cliffs on the closed sides, with icicles
             var ice = M["ICE"]; var cliff = M.Tint("WETROCK", 0x5a6270);

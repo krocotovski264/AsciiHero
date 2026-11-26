@@ -81,7 +81,7 @@ namespace AsciiHero
                         gm.RecalculateNormals(); gm.RecalculateBounds(); MeshGen.AddGlyphUV(gm, false);
                         MeshGen.Obj(gm, mats["GROUND"], T, Vector3.zero, Quaternion.identity, false, "Ground");
                     }
-                Strip(T, mats["ROAD"], PATH, 0.8f, 0.006f, "Path");
+                Strip(T, mats["ROAD"], PATH, 0.8f, 0.006f, "Path", mats["GROUND"]);
             }
             // ---- the lake: dark surface + its characters (and the mirror) ----
             {
@@ -261,31 +261,38 @@ namespace AsciiHero
         /// a flat band on the ground along a polyline (the path)
         public static bool RoadGrass(float x, float z, float distance, float halfWidth)
         {
-            float edge = halfWidth * (0.78f + 0.44f * Mathf.PerlinNoise(x * 2.3f, z * 2.3f));
-            float chance = Mathf.InverseLerp(edge - 0.28f, edge + 0.40f, distance);
+            float fade = Mathf.Min(1.0f, halfWidth * 0.9f);
+            float chance = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(halfWidth - fade * 0.65f, halfWidth + fade, distance));
             return Mathf.PerlinNoise(x * 37.1f + 17f, z * 37.1f + 29f) < chance;
         }
-        static void Strip(Transform T, Material m, Vector2[] line, float hw, float y, string name)
+        static void Strip(Transform T, Material m, Vector2[] line, float hw, float y, string name, Material ground = null)
         {
-            var vs = new List<Vector3>(); var ts = new List<int>();
+            var vs = new List<Vector3>(); var ts = new List<int>(); var uv = new List<Vector2>();
+            float fade = ground != null ? Mathf.Min(1f, hw * 0.9f) : 0f;
+            int lanes = ground != null ? 5 : 2;
+            if (ground != null) { m = new Material(m); m.SetFloat("_RoadBlend", 1f); m.SetColor("_RoadGround", ground.GetColor("_Color")); }
             for (int i = 0; i + 1 < line.Length; i++)
             {
                 Vector2 a = line[i], b = line[i + 1], d = (b - a).normalized, n = new Vector2(-d.y, d.x);
                 int steps = Mathf.Max(1, Mathf.CeilToInt((b - a).magnitude / 0.12f));
                 for (int s = 0; s <= steps; s++)
                 {
-                    var p = Vector2.Lerp(a, b, s / (float)steps); float w = hw * (0.78f + 0.44f * Mathf.PerlinNoise(p.x * 2.3f, p.y * 2.3f));
-                    vs.Add(new Vector3(p.x + n.x * w, y, p.y + n.y * w)); vs.Add(new Vector3(p.x - n.x * w, y, p.y - n.y * w));
-                    if (s > 0) { int o = vs.Count - 4; ts.Add(o); ts.Add(o + 2); ts.Add(o + 1); ts.Add(o + 1); ts.Add(o + 2); ts.Add(o + 3); }
+                    var p = Vector2.Lerp(a, b, s / (float)steps);
+                    for (int k = 0; k < lanes; k++) {
+                        float offset = lanes == 2 ? (k == 0 ? hw : -hw) : (k == 0 ? hw + fade : k == 1 ? hw - fade * 0.65f : k == 2 ? 0f : k == 3 ? -hw + fade * 0.65f : -hw - fade);
+                        vs.Add(new Vector3(p.x + n.x * offset, y, p.y + n.y * offset));
+                        uv.Add(new Vector2(lanes == 5 && (k == 0 || k == 4) ? 0f : 1f, 0f));
+                    }
+                    if (s > 0) for (int k = 0; k < lanes - 1; k++) { int o = vs.Count - 2 * lanes + k; ts.Add(o); ts.Add(o + lanes); ts.Add(o + 1); ts.Add(o + 1); ts.Add(o + lanes); ts.Add(o + lanes + 1); }
                 }
             }
-            var mesh = new Mesh { name = name }; mesh.SetVertices(vs); mesh.uv = new Vector2[vs.Count]; mesh.SetTriangles(ts, 0);
+            var mesh = new Mesh { name = name }; mesh.SetVertices(vs); mesh.SetUVs(0, uv); mesh.SetTriangles(ts, 0);
             mesh.RecalculateNormals();
             var nn = mesh.normals; for (int i = 0; i < nn.Length; i++) if (nn[i].y < 0) { var tt = mesh.triangles; for (int k = 0; k < tt.Length; k += 3) { int x = tt[k + 1]; tt[k + 1] = tt[k + 2]; tt[k + 2] = x; } mesh.triangles = tt; mesh.RecalculateNormals(); break; }
             mesh.RecalculateBounds(); MeshGen.AddGlyphUV(mesh, false);
             MeshGen.Obj(mesh, m, T, Vector3.zero, Quaternion.identity, false, name);
         }
-        public static void PathStrip(Transform T, Material m, Vector2[] line, float hw, float y, string name) { Strip(T, m, line, hw, y, name); }
+        public static void PathStrip(Transform T, Material m, Vector2[] line, float hw, float y, string name, Material ground = null) { Strip(T, m, line, hw, y, name, ground); }
         /// a low layer of mist: a flat additive disc in the lit colour (AsciiHero/Beam, seen from above)
         public static void Mist(Transform T, Vector3 c, float rx, float rz, Color col)
         {

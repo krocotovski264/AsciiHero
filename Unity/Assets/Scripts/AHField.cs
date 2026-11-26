@@ -64,7 +64,7 @@ namespace AsciiHero
                         gm.RecalculateNormals(); gm.RecalculateBounds(); MeshGen.AddGlyphUV(gm, false);
                         MeshGen.Obj(gm, mats["GROUND"], T, Vector3.zero, Quaternion.identity, false, "Ground");
                     }
-                Forest.PathStrip(T, mats["ROAD"], ROAD, 1.35f, 0.006f, "Road");
+                Forest.PathStrip(T, mats["ROAD"], ROAD, 1.35f, 0.006f, "Road", mats["GROUND"]);
                 // the ruts: two darker lines in the road
                 foreach (float off in new[] { -0.55f, 0.55f })
                 {
