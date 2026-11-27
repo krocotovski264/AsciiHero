@@ -26,6 +26,16 @@ namespace AsciiHero
         public List<Renderer> BuildFlightArmour()
         {
             var parts = ReadKnight("Flight");
+            return BindKnightParts(parts, true);
+        }
+
+        void DressWornKnight()
+        {
+            BindKnightParts(ReadKnight("Worn"), false);
+        }
+
+        List<Renderer> BindKnightParts(Plate[] parts, bool flight)
+        {
             var transforms = new Matrix4x4[flightRig.Length];
             var indices = new int[flightRig.Length];
             for (int i = 0; i < flightRig.Length; i++)
@@ -43,7 +53,7 @@ namespace AsciiHero
             var result = new List<Renderer>(parts.Length - 1);
             foreach (var part in parts)
             {
-                if (part.finger == 2) continue; // the source mantle stays attached throughout the dash
+                if (flight && part.finger == 2) continue; // the source mantle stays attached throughout the dash
                 var v = new Vector3[part.pos.Length];
                 var n = new Vector3[v.Length];
                 var bw = new BoneWeight[v.Length];
@@ -66,7 +76,17 @@ namespace AsciiHero
                 var mesh = new Mesh { vertices = v, normals = n, uv = part.uv, triangles = part.triangles,
                     bindposes = human.bindposes, boneWeights = bw };
                 mesh.RecalculateTangents(); MeshGen.AddGlyphUV(mesh, false);
-                var r = AddSkinned(mesh, "PLATE", "FlightPart" + part.finger);
+                if (!flight)
+                {
+                    // Fit the mantle against the new torso without counting outstretched arms.
+                    var limbs = LimbOfBone();
+                    var torso = new List<Vector3>();
+                    for (int i = 0; i < v.Length; i++)
+                        if (limbs[bw[i].boneIndex0] == 0) torso.Add(v[i]);
+                    cuirassSurface = torso.ToArray();
+                    SamplePlateFront(v, bw, "spine01", mesh.bounds);
+                }
+                var r = AddSkinned(mesh, "PLATE", flight ? "FlightPart" + part.finger : "Knight");
                 r.sharedMaterial = part.material;
                 result.Add(r);
             }

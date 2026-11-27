@@ -92,8 +92,11 @@ namespace AsciiHero
             Func<int, bool> isFace = i => R[i] == Region.Head && Z(i) > headJ.z + 0.035f && Y(i) < eyeY + 0.035f && Mathf.Abs(X(i)) < 0.075f;
             Func<int, bool> scalpCut = i => Y(i) > eyeY + 0.045f - Mathf.Max(0, -(Z(i) - headJ.z)) * 1.1f;
 
-            AddSkinned(h.PartMesh(0), cfg.shadow ? "SHADOW" : "SKIN", "Body");
-            AddSkinned(h.PartMesh(1), "EYE", "Eyes");
+            if (cfg.armor != "plate")
+            {
+                AddSkinned(h.PartMesh(0), cfg.shadow ? "SHADOW" : "SKIN", "Body");
+                AddSkinned(h.PartMesh(1), "EYE", "Eyes");
+            }
 
             Action<Func<int, bool>, float, string, int, float> shell = (pred, t, mat, smooth, reinf) =>
                 AddSkinned(h.Shell(pred, t, new Human.ShellOpts { smooth = smooth, reinflate = reinf }), mat, mat);
@@ -145,9 +148,7 @@ namespace AsciiHero
                     break;
                 case "plate":
                 {
-                    pants("PANTS");
-                    shell(i => (torso(i) && Y(i) > hipY - 0.05f) || R[i] == Region.UpperArm || R[i] == Region.ForeArm || R[i] == Region.Neck, 0.005f, "LEATHER2", 1, 0);
-                    DressKnight(hipY, neckY);
+                    DressWornKnight();
                     Cape();
                     break;
                 }
@@ -167,6 +168,8 @@ namespace AsciiHero
             if (W != "none") AddWeapon(W);
             if (W == "shield") AddShield();
         }
+
+        public Renderer BuildDashShadow() => AddSkinned(human.PartMesh(0), "SHADOW", "DashShadow");
 
         SkinnedMeshRenderer AddSkinned(Mesh m, string mat, string name)
         {

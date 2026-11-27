@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.1.32 · Unity";
+        public const string VERSION = "beta 0.1.33 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -1029,6 +1029,7 @@ namespace AsciiHero
                 }
             }
             var flying = hc.armor == "plate" ? hero.BuildFlightArmour() : new List<Renderer>();
+            var shadow = hc.armor == "plate" ? hero.BuildDashShadow() : null;
             hero.glyphs = GlyphLayer.Build(hero.go, Character.LimbOfBone());
             wornKnight.Clear(); flyingKnight.Clear();
             void AddPair(Renderer r, List<Renderer> list)
@@ -1038,6 +1039,7 @@ namespace AsciiHero
             }
             foreach (var r in worn) AddPair(r, wornKnight);
             foreach (var r in flying) AddPair(r, flyingKnight);
+            if (shadow != null) AddPair(shadow, flyingKnight);
             showingFlight = null;
             ShowFlightArmour(world && dashShifted && dashT < dashSettle);
             // armour pieces (every shell, the weapon, the shield...) can be offset on their own: the dash sends the shadow ahead and the armour after it

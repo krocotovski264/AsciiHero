@@ -36,27 +36,36 @@ namespace AsciiHero
             var file = Resources.Load<TextAsset>("Knight/" + name);
             using (var r = new BinaryReader(new MemoryStream(file.bytes)))
             {
-                var materials = new Material[r.ReadInt32()];
-                for (int i = 0; i < materials.Length; i++)
+                Material[] materials;
+                if (name == "Worn")
                 {
-                    var m = new Material(mats[name == "Cape" ? "CAPE" : "PLATE"]) { name = name };
-                    m.color = new Color(r.ReadSingle(), r.ReadSingle(), r.ReadSingle(), r.ReadSingle());
-                    m.SetFloat("_Metallic", r.ReadSingle()); m.SetFloat("_Glossiness", 1 - r.ReadSingle());
-                    var color = ReadGearMap(r, false); var mr = ReadGearMap(r, true); var normal = ReadGearMap(r, true);
-                    if (color != null) m.mainTexture = color;
-                    if (mr != null) m.SetTexture("_GearMR", mr);
-                    if (normal != null) m.SetTexture("_GearNormal", normal);
-                    m.SetFloat("_GearMaps", normal != null ? 2 : mr != null ? 1 : 0);
-                    materials[i] = m;
+                    // Both exports use the same knight texture atlas and joint table.
+                    materials = new[] { ReadKnight("Flight")[0].material };
                 }
-                if (name == "Flight") ReadFlightRig(r);
+                else
+                {
+                    materials = new Material[r.ReadInt32()];
+                    for (int i = 0; i < materials.Length; i++)
+                    {
+                        var m = new Material(mats[name == "Cape" ? "CAPE" : "PLATE"]) { name = name };
+                        m.color = new Color(r.ReadSingle(), r.ReadSingle(), r.ReadSingle(), r.ReadSingle());
+                        m.SetFloat("_Metallic", r.ReadSingle()); m.SetFloat("_Glossiness", 1 - r.ReadSingle());
+                        var color = ReadGearMap(r, false); var mr = ReadGearMap(r, true); var normal = ReadGearMap(r, true);
+                        if (color != null) m.mainTexture = color;
+                        if (mr != null) m.SetTexture("_GearMR", mr);
+                        if (normal != null) m.SetTexture("_GearNormal", normal);
+                        m.SetFloat("_GearMaps", normal != null ? 2 : mr != null ? 1 : 0);
+                        materials[i] = m;
+                    }
+                    if (name == "Flight") ReadFlightRig(r);
+                }
                 var parts = new Plate[r.ReadInt32()];
                 for (int i = 0; i < parts.Length; i++)
                 {
                     var p = new Plate { material = materials[r.ReadInt32()], finger = r.ReadInt32() };
                     int count = r.ReadInt32(), indices = r.ReadInt32();
                     p.pos = new Vector3[count]; p.normal = new Vector3[count]; p.uv = new Vector2[count];
-                    if (name == "Flight") p.rigWeights = new BoneWeight[count];
+                    if (name == "Flight" || name == "Worn") p.rigWeights = new BoneWeight[count];
                     for (int k = 0; k < count; k++)
                     {
                         p.pos[k] = ReadPoint(r); p.normal[k] = ReadPoint(r);
