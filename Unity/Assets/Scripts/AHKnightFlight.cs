@@ -14,6 +14,8 @@ namespace AsciiHero
         static FlightBone[] flightRig;
         static Material mantleMaterial;
         public readonly BoneWeight[] mantlePins = new BoneWeight[2*CAPE_C];
+        public Transform mantleFrame;
+        public Transform[] mantleNodes;
         public float mantleEnvelopeTop, mantleEnvelopeBottom;
         public readonly float[] knightAnkleClearance = new float[2];
 
@@ -117,11 +119,14 @@ namespace AsciiHero
             if (mantleMaterial == null)
             {
                 mantleMaterial = new Material(part.material) { name = "Mantle" };
-                mantleMaterial.SetFloat("_Cloth", 1);
+                mantleMaterial.SetFloat("_Cloth", -1); // two-sided fabric deformed by skinning
                 mantleMaterial.SetFloat("_Cull", (float)UnityEngine.Rendering.CullMode.Off);
             }
             var mesh = FitPlate(part, Matrix4x4.identity);
             var v = mesh.vertices;
+            var release = new float[v.Length];
+            var weights = new BoneWeight[v.Length];
+            var boundNormals = new Vector3[v.Length];
             float scale = human.height / 1.84f;
             float donorShoulder = flightRig[part.rigWeights[0].boneIndex0].start.y;
             for (int j = 0; j < flightRig.Length; j++)
@@ -144,20 +149,74 @@ namespace AsciiHero
                            + bind[w.boneIndex2].MultiplyPoint3x4(p)*w.weight2
                            + bind[w.boneIndex3].MultiplyPoint3x4(p)*w.weight3;
                 float free = Mathf.SmoothStep(0, 1, Mathf.InverseLerp(donorShoulder+.015f, donorShoulder-.17f, p.y));
+                free *= part.mantleRelease[i] / 255f;
+                release[i] = free;
+                var n = part.normal[i];
+                boundNormals[i] = (bind[w.boneIndex0].MultiplyVector(n).normalized*w.weight0
+                                 + bind[w.boneIndex1].MultiplyVector(n).normalized*w.weight1
+                                 + bind[w.boneIndex2].MultiplyVector(n).normalized*w.weight2
+                                 + bind[w.boneIndex3].MultiplyVector(n).normalized*w.weight3).normalized;
+                w.boneIndex0 = indices[w.boneIndex0]; w.boneIndex1 = indices[w.boneIndex1];
+                w.boneIndex2 = indices[w.boneIndex2]; w.boneIndex3 = indices[w.boneIndex3];
+                weights[i] = w;
                 float y = shoulder.y + (p.y-donorShoulder)*scale;
                 int row = Mathf.RoundToInt(Mathf.InverseLerp(capeBot,capeTop,y)*(rear.Length-1));
                 float z = capeCz + p.z*scale;
                 if (!float.IsInfinity(rear[row])) z = Mathf.Min(z, rear[row]-.018f + Mathf.Min(0,p.z+.12f)*.20f);
                 v[i] = Vector3.Lerp(collar, new Vector3(p.x*scale,y,z), free);
             }
-            mesh.vertices = v; mesh.RecalculateBounds(); mesh.RecalculateNormals(); mesh.RecalculateTangents();
+            mesh.vertices = v; mesh.RecalculateBounds(); mesh.RecalculateNormals();
+            var normals = mesh.normals;
+            for (int i = 0; i < normals.Length; i++)
+                normals[i] = Vector3.Lerp(boundNormals[i], normals[i], release[i]).normalized;
+            mesh.normals = normals;
+            mesh.RecalculateTangents();
             FitMantleGrid(v, mesh.bounds, part.rigWeights, indices);
             MeshGen.AddGlyphUV(mesh, false);
             var expanded = mesh.bounds; expanded.Expand(2.5f); mesh.bounds = expanded;
-            var group = Group("Mantle");
-            var obj = MeshGen.Obj(mesh, mantleMaterial, group, Vector3.zero, Quaternion.identity);
-            Attach("spine01", group, Vector3.zero, Quaternion.identity);
-            return obj.transform;
+            mantleFrame = Group("MantleFrame");
+            Attach("spine01", mantleFrame, Vector3.zero, Quaternion.identity);
+            mantleNodes = new Transform[CAPE_C * CAPE_R];
+            int first = human.bones.Length;
+            var bones = new List<Transform>(human.bones);
+            var poses = new List<Matrix4x4>(human.bindposes);
+            var frameBind = mantleFrame.worldToLocalMatrix * model.localToWorldMatrix;
+            // Sample alternate solver nodes, including both hems, to keep the mobile bone palette compact.
+            int columns = CAPE_C/2+1, rows = CAPE_R/2+1;
+            for (int row = 0; row < rows; row++)
+                for (int col = 0; col < columns; col++)
+                {
+                    int j = Mathf.Min(2*row,CAPE_R-1)*CAPE_C + Mathf.Min(2*col,CAPE_C-1);
+                    mantleNodes[j] = Group("Cloth" + j);
+                    mantleNodes[j].SetParent(mantleFrame, false);
+                    bones.Add(mantleNodes[j]);
+                    poses.Add(frameBind);
+                }
+            var influences = new Dictionary<int,float>(8);
+            for (int i = 0; i < v.Length; i++)
+            {
+                if (release[i] == 0) continue; // identical bind and weights on either side of the seam
+                float theta = Mathf.Atan2(v[i].x, capeCz-v[i].z);
+                float col = Mathf.InverseLerp(-capeMap2.x, capeMap2.x, theta)*(CAPE_C-1);
+                float row = Mathf.Pow(Mathf.InverseLerp(capeTop, capeBot, v[i].y), 1f/CAPE_EXP)*(CAPE_R-1);
+                int c = Mathf.Min(Mathf.FloorToInt(col/2), columns-2);
+                int r = Mathf.Min(Mathf.FloorToInt(row/2), rows-2);
+                float u = Mathf.InverseLerp(2*c, Mathf.Min(2*c+2,CAPE_C-1), col);
+                float t = Mathf.InverseLerp(2*r, Mathf.Min(2*r+2,CAPE_R-1), row);
+                int j = first + r*columns+c;
+                var grid = new BoneWeight { boneIndex0=j, boneIndex1=j+1, boneIndex2=j+columns, boneIndex3=j+columns+1,
+                    weight0=(1-u)*(1-t), weight1=u*(1-t), weight2=(1-u)*t, weight3=u*t };
+                influences.Clear();
+                if (release[i] < 1) GlyphLayer.Add(influences, weights[i], 1-release[i]);
+                GlyphLayer.Add(influences, grid, release[i]);
+                weights[i] = GlyphLayer.Top4(influences);
+            }
+            mesh.bindposes = poses.ToArray();
+            mesh.boneWeights = weights;
+            var renderer = AddSkinned(mesh, "PLATE", "Mantle");
+            renderer.bones = bones.ToArray();
+            renderer.sharedMaterial = mantleMaterial;
+            return renderer.transform;
         }
 
         // Fit the solver in the same angular/height coordinates sampled by both cloth shaders.

@@ -218,7 +218,7 @@ Shader "AsciiHero/Lit"
             {
                 SeeClip(i.positionWS, i.positionCS.xy);
                 float3 nWS = normalize(i.normalWS);
-                if (_Cloth > 0.5 && _Cloth < 1.5 && _ClothSim > 0.5 && _ClothMap.w > 0.5) { if (dot(nWS, GetWorldSpaceNormalizeViewDir(i.positionWS)) < 0) nWS = -nWS; }      // the cloak: lit on the side we see
+                if (_Cloth < -0.5 || (_Cloth > 0.5 && _Cloth < 1.5 && _ClothSim > 0.5 && _ClothMap.w > 0.5)) { if (dot(nWS, GetWorldSpaceNormalizeViewDir(i.positionWS)) < 0) nWS = -nWS; }      // the cloak: lit on the side we see
                 else if (!front) nWS = -nWS;
                 if (_GearMaps > 1.5 && dot(i.tangentWS.xyz, i.tangentWS.xyz) > 0.01)
                 {

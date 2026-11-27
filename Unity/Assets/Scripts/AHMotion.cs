@@ -1417,6 +1417,7 @@ namespace AsciiHero
             var hips = H.root;
             var neck = H.Bone("neck01");
             var spine = H.Bone("spine05");
+            hips.localRotation = Quaternion.Slerp(hips.localRotation, Quaternion.identity, weight);
             var axis = neck.position - hips.position;
             var upright = Quaternion.FromToRotation(axis, ch.model.up);
             spine.rotation = Quaternion.Slerp(Quaternion.identity, upright, .8f*weight) * spine.rotation;
@@ -1491,6 +1492,19 @@ namespace AsciiHero
                 if (F.rel > 0.5f && over > 0) drop = Mathf.Max(drop, over);
                 legs[si] = new LegInfo { hip = hip, knee = knee, foot = foot, toe = toe, target = target, l1 = l1, l2 = l2 };
             }
+            if (neutral > 0 && legs[0].hip != null && legs[1].hip != null)
+            {
+                // Set hip height from both planted soles, leaving a small bend in each knee.
+                float lift = float.PositiveInfinity;
+                foreach (var leg in legs)
+                {
+                    Vector3 delta = leg.target - leg.hip.position;
+                    float reach = .985f * (leg.l1 + leg.l2);
+                    float height = Mathf.Sqrt(Mathf.Max(0, reach*reach - delta.x*delta.x - delta.z*delta.z));
+                    lift = Mathf.Min(lift, delta.y + height);
+                }
+                H.root.position += Vector3.up * (lift * neutral);
+            }
             if (drop > 0) { var lp = H.root.localPosition; lp.y -= Mathf.Min(drop, 0.05f) / scaleY; H.root.localPosition = lp; }
             for (int si = 0; si < 2; si++)
             {
@@ -1503,7 +1517,7 @@ namespace AsciiHero
                     L.foot.rotation = footQ;
                 }
                 Vector3 hp = L.hip.position, kp = L.knee.position, ap = L.foot.position;
-                if ((ap - L.target).sqrMagnitude < 1e-7f) continue;
+                if (neutral <= 0 && (ap - L.target).sqrMagnitude < 1e-7f) continue;
                 Vector3 toT = L.target - hp; float d = Mathf.Clamp(toT.magnitude, Mathf.Abs(L.l1 - L.l2) + 0.01f, (L.l1 + L.l2) * 0.995f); toT.Normalize();
                 Vector3 kd = kp - hp;
                 Vector3 perpK = kd - toT * Vector3.Dot(kd, toT);
@@ -1516,6 +1530,12 @@ namespace AsciiHero
                 {
                     Vector3 o = ch.go.transform.rotation * new Vector3(sgK, 0, 0.25f); o -= toT * Vector3.Dot(o, toT);
                     if (o.sqrMagnitude > 1e-8f) perp += o.normalized * (Mathf.Max(perp.magnitude, 0.03f) * 1.6f * stanceFeet);
+                }
+                if (neutral > 0)
+                {
+                    float side = Mathf.Sign(H.Head("foot." + SIDES[si]).x);
+                    var pole = Vector3.ProjectOnPlane(model.forward + .12f*side*model.right, toT);
+                    perp = Vector3.Lerp(perp.normalized, pole.normalized, neutral);
                 }
                 if (perp.sqrMagnitude < 1e-10f) continue; perp.Normalize();
                 float a = Mathf.Acos(Mathf.Clamp((L.l1 * L.l1 + d * d - L.l2 * L.l2) / (2 * L.l1 * d), -1, 1));

@@ -408,12 +408,12 @@ namespace AsciiHero
             return m;
         }
         static float Halton(int i, int b) { float f = 1, r = 0; i += 1; while (i > 0) { f /= b; r += f * (i % b); i /= b; } return r; }
-        static void Add(Dictionary<int, float> acc, BoneWeight w, float k)
+        internal static void Add(Dictionary<int, float> acc, BoneWeight w, float k)
         {
             void A(int i, float x) { if (x <= 0) return; float c; acc.TryGetValue(i, out c); acc[i] = c + x * k; }
             A(w.boneIndex0, w.weight0); A(w.boneIndex1, w.weight1); A(w.boneIndex2, w.weight2); A(w.boneIndex3, w.weight3);
         }
-        static BoneWeight Top4(Dictionary<int, float> acc)
+        internal static BoneWeight Top4(Dictionary<int, float> acc)
         {
             var l = new List<KeyValuePair<int, float>>(acc); l.Sort((x, y) => y.Value.CompareTo(x.Value));
             float s = 0; for (int i = 0; i < Mathf.Min(4, l.Count); i++) s += l[i].Value; if (s <= 0) s = 1;

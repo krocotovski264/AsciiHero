@@ -171,10 +171,9 @@ namespace AsciiHero
         readonly Transform cape, model; readonly Human H;
         readonly Vector3[] restL, nrmL, rest = new Vector3[C * R], rn = new Vector3[C * R], x = new Vector3[C * R], ox = new Vector3[C * R];
         readonly float[] tether = new float[C * R];
-        readonly Vector4[] disp = new Vector4[GRID], nrm = new Vector4[GRID];
         struct Link { public int a, b; public float len, ks, kc; }
         readonly System.Collections.Generic.List<Link> links = new System.Collections.Generic.List<Link>();
-        readonly Vector4 map, map2, map3; readonly Character chr;
+        readonly Character chr;
         float acc; bool ready; Vector3 lastAnchor;
         const float STEP = 1f / 90f;
 
@@ -215,8 +214,8 @@ namespace AsciiHero
 
         public CapeSim(Character ch)
         {
-            cape = ch.skirt; model = ch.model; H = ch.human; restL = ch.capeRest; nrmL = ch.capeNrm;
-            map = ch.capeMap; map2 = ch.capeMap2; map3 = ch.capeMap3; chr = ch;
+            cape = ch.mantleFrame; model = ch.model; H = ch.human; restL = ch.capeRest; nrmL = ch.capeNrm;
+            chr = ch;
             toCape = new Matrix4x4[H.bones.Length];
             var used = new System.Collections.Generic.HashSet<int>();
             foreach (var sample in ch.capeObstacles)
@@ -403,8 +402,7 @@ namespace AsciiHero
             {
                 Vector3 d = x[i] - rest[i];
                 if (!(d.sqrMagnitude < 4f)) { d = Vector3.zero; x[i] = ox[i] = rest[i]; }      // (never flies off, never NaN)
-                disp[i] = d;
-                Vector3 n = NormalAt(i / C, i % C); nrm[i] = n;
+                if (chr.mantleNodes[i] != null) chr.mantleNodes[i].position = cape.position + d;
             }
         }
         Vector3 NormalAt(int r, int c)
@@ -417,15 +415,7 @@ namespace AsciiHero
         }
         public void Apply(MaterialPropertyBlock mpb, System.Collections.Generic.IEnumerable<Renderer> rs)
         {
-            Shader.SetGlobalVectorArray("_ClothGrid", disp);
-            Shader.SetGlobalVectorArray("_ClothNrm", nrm);
-            Shader.SetGlobalVector("_ClothMap", map);
-            Shader.SetGlobalVector("_ClothMap2", map2); Shader.SetGlobalVector("_ClothMap3", map3);
-            foreach (var r in rs)
-            {
-                if (r == null) continue;
-                r.GetPropertyBlock(mpb); mpb.SetFloat("_ClothSim", 1); r.SetPropertyBlock(mpb);
-            }
+            // Surface and glyph renderers share the simulated bones.
         }
     }
 }

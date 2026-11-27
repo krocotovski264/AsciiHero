@@ -18,6 +18,7 @@ namespace AsciiHero
             public int[] triangles;
             public int finger;
             public BoneWeight[] rigWeights;
+            public byte[] mantleRelease;
         }
         static readonly Dictionary<string, Plate[]> knightParts = new Dictionary<string, Plate[]>();
 
@@ -78,6 +79,8 @@ namespace AsciiHero
                     }
                     p.triangles = new int[indices];
                     for (int k = 0; k < indices; k++) p.triangles[k] = r.ReadUInt16();
+                    // Distance from the shared armour seam, baked in donor space.
+                    if (name == "WornMantle") p.mantleRelease = r.ReadBytes(count);
                     parts[i] = p;
                 }
                 return knightParts[name] = parts;
