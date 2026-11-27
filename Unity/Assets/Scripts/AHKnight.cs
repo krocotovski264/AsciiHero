@@ -192,6 +192,27 @@ namespace AsciiHero
             mesh.SetVertices(v); mesh.SetNormals(n); mesh.SetUVs(0,uv); mesh.SetTriangles(tris,0);
         }
 
+        public struct CapeObstacle
+        {
+            public Vector3 point;
+            public BoneWeight weight;
+        }
+        public readonly List<CapeObstacle> capeObstacles = new List<CapeObstacle>();
+
+        void SamplePlateFront(Vector3[] vertices, BoneWeight[] weights, string bone, Bounds bounds)
+        {
+            const int bands = 16;
+            var front = Enumerable.Repeat(-1, bands).ToArray();
+            for (int i = 0; i < vertices.Length; i++)
+            {
+                int band = Mathf.RoundToInt(Mathf.InverseLerp(bounds.min.y, bounds.max.y, vertices[i].y) * (bands - 1));
+                if (front[band] < 0 || vertices[i].z > vertices[front[band]].z) front[band] = i;
+            }
+            var rigid = new BoneWeight { boneIndex0 = HumanDB.BI[bone], weight0 = 1 };
+            foreach (int i in front)
+                if (i >= 0) capeObstacles.Add(new CapeObstacle { point = vertices[i], weight = weights == null ? rigid : weights[i] });
+        }
+
         Transform MountKnight(string name, string bone, Vector3 center, Quaternion rotation, Vector3 size, Region? fitRegion = null, float side = 0)
         {
             var plate = ReadKnight(name)[0];
@@ -212,6 +233,7 @@ namespace AsciiHero
                 }
                 mesh.vertices=v; mesh.RecalculateBounds(); mesh.RecalculateNormals(); mesh.RecalculateTangents();
                 MeshGen.AddGlyphUV(mesh,false);
+                if (name == "Cuisse") SamplePlateFront(v, null, bone, mesh.bounds);
                 if (name=="Cuirass")
                 {
                     // Transfer the body's weights so the abdominal lames follow the hips and the chest follows the spine.
@@ -230,6 +252,7 @@ namespace AsciiHero
                         weights[k]=new BoneWeight { boneIndex0=indices[o],boneIndex1=indices[o+1],boneIndex2=indices[o+2],boneIndex3=indices[o+3],
                             weight0=w[o]/255f,weight1=w[o+1]/255f,weight2=w[o+2]/255f,weight3=w[o+3]/255f };
                     }
+                    SamplePlateFront(v, weights, bone, mesh.bounds);
                     cuirassSurface = v;
                     mesh.boneWeights=weights; mesh.bindposes=human.bindposes;
                     var renderer=AddSkinned(mesh,"PLATE",name); renderer.sharedMaterial=plate.material;
@@ -238,17 +261,27 @@ namespace AsciiHero
             }
             if (name == "Cape")
             {
+                RefinePlate(mesh);
+                var inverseFit = Matrix4x4.TRS(center, rotation, size).inverse;
+                var shoulder = human.Head("upperarm01.L");
+                float upperLip = Mathf.Min(capeTop - .01f, shoulder.y + .045f);
+                float underarm = shoulder.y - .48f * Vector3.Distance(shoulder, human.Head("lowerarm01.L"));
                 var v = mesh.vertices;
                 for (int i = 0; i < v.Length; i++)
                 {
-                    float f = Mathf.Clamp01(0.5f - plate.pos[i].y);
-                    float t = Mathf.Pow(f, 1f / CAPE_EXP);
-                    float angle = Mathf.Atan2(plate.pos[i].x, -plate.pos[i].z);
+                    var source = inverseFit.MultiplyPoint3x4(v[i]);
+                    float f = Mathf.Clamp01(.5f - source.y);
+                    // The original mesh's side opening lies between 4% and 14% of its length.
+                    float y = f < .04f ? Mathf.Lerp(capeTop, upperLip, f / .04f) :
+                        f < .14f ? Mathf.Lerp(upperLip, underarm, (f - .04f) / .10f) :
+                        Mathf.Lerp(underarm, capeBot, (f - .14f) / .86f);
+                    float t = Mathf.Pow(Mathf.InverseLerp(capeTop, capeBot, y), 1f / CAPE_EXP);
+                    float angle = Mathf.Atan2(source.x, -source.z);
                     float u = 0.5f + angle / (2 * Mathf.PI);
                     var p = CapePt(u, t);
                     // Keep the source folds around the fitted envelope, including the two front hems.
                     var outward = new Vector3(p.x, 0, p.z - capeCz).normalized;
-                    float relief = new Vector2(plate.pos[i].x, plate.pos[i].z).magnitude;
+                    float relief = new Vector2(source.x, source.z).magnitude;
                     p += outward * Mathf.Clamp((relief - .4f) * size.z * .15f, -.008f, .008f);
                     v[i] = p;
                 }

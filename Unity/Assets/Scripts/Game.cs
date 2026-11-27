@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.1.30 · Unity";
+        public const string VERSION = "beta 0.1.31 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -1886,7 +1886,6 @@ namespace AsciiHero
                 Shader.SetGlobalVector("_AsciiWindOff", new Vector4(windOff.x, windOff.y, wref.x, wref.z));
                 windV = new Vector3(wd.x, 0, wd.y) * (windStr * 2.4f);
             }
-            if (cloak != null && !perfNoAnim) { long tC = System.Diagnostics.Stopwatch.GetTimestamp(); cloak.Update(dt, windV); accA += Ms(tC); if (clothMpb == null) clothMpb = new MaterialPropertyBlock(); cloak.Apply(clothMpb, cloakRs); }
             // grass is pressed down by the body itself - the feet, the pelvis over it, a weapon swept low - not by a collision circle
             {
                 var hb = hero.human; Transform fL = hb.Bone("foot.L"), fR = hb.Bone("foot.R"), rt = hb.Bone("root");
@@ -2113,6 +2112,14 @@ namespace AsciiHero
                 fill.transform.rotation = Quaternion.LookRotation(-rot(-2.5f, 0.8f, 2.0f));
             }
             if (player != null && player.driver != null) player.Animate(tNow, Mathf.Min(0.1f, Time.deltaTime));
+            if (cloak != null && !perfNoAnim && (world || !inMenu))
+            {
+                long start = System.Diagnostics.Stopwatch.GetTimestamp();
+                cloak.Update(Mathf.Min(.1f, Time.deltaTime), world ? windV : new Vector3(.35f, 0, .15f));
+                if (clothMpb == null) clothMpb = new MaterialPropertyBlock();
+                cloak.Apply(clothMpb, cloakRs);
+                accA += Ms(start);
+            }
             if (world && invOpen) MirrorPose();
             SmokeLayerPrepare();
             HideHeroBehindPocket(world && invOpen && pocketT > 0.3f && pocketClose < 0.3f);

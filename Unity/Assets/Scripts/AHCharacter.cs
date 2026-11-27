@@ -327,13 +327,16 @@ namespace AsciiHero
             for (int kk = 0; kk <= NB; kk++)
             {
                 float v = kk / (float)NB, y = capeTop - (capeTop - capeBot) * Mathf.Pow(v, CAPE_EXP);
-                var e = ext(y, y > elY - 0.02f);
+                var e = ext(y, false);
                 if (e.x <= 0) e = new Vector3(capeRx[Mathf.Max(0, kk - 1)], capeCz - prevBack, capeCz + 0.1f);
                 float rx, rz;
                 if (y > neckY - 0.01f) { rx = rz = neckR + 0.025f; }                                     // round the neck
                 else
                 {
                     rx = e.x + (y > elY - 0.02f ? 0.044f : 0.052f) + 0.12f * Mathf.Max(0, v - 0.35f);   // over the plates and the arms; wider at the hem
+                    // The side seam passes under the arm. Only the shoulder bridge spans the joint.
+                    float bridge = Mathf.SmoothStep(0, 1, Mathf.InverseLerp(shY - .09f, shY, y));
+                    rx = Mathf.Lerp(rx, Mathf.Max(rx, Mathf.Abs(h.Head("upperarm01.L").x) + .035f), bridge);
                     rz = Mathf.Max(Mathf.Max(capeCz - e.y, e.z - capeCz) + 0.045f, 0.12f);
                     if (y > shY) { float t = Mathf.InverseLerp(neckY, shY, y); rx = Mathf.Lerp(neckR + 0.025f, rx, Mathf.SmoothStep(0, 1, t)); }     // the slope of the shoulders
                 }

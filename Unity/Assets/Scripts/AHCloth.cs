@@ -178,10 +178,73 @@ namespace AsciiHero
         float acc; bool ready; Vector3 lastAnchor;
         const float STEP = 1f / 90f;
 
+        const int DepthBands = 32;
+        readonly float[] plateFront = new float[DepthBands];
+        readonly Matrix4x4[] toCape;
+        readonly int[] obstacleBones;
+
+        // Guide just the lateral rim with the upper arm. Keep the free panels on the spine frame.
+        readonly int[] rimBone = new int[GRID];
+        readonly float[] rimWeight = new float[GRID];
+        readonly Vector3[] rimGoal = new Vector3[GRID];
+        void GuideArmhole(int i)
+        {
+            if (rimWeight[i] <= 0) return;
+            Vector3 d = rimGoal[i] - x[i];
+            Vector3 correction = (d - Vector3.ClampMagnitude(d, .022f)) * rimWeight[i];
+            x[i] += correction;
+            ox[i] += correction;
+        }
+
+        void UpdatePlateFront()
+        {
+            var inverse = cape.worldToLocalMatrix;
+            foreach (int bone in obstacleBones)
+                toCape[bone] = inverse * H.bones[bone].localToWorldMatrix * H.bindposes[bone];
+            for (int i = 0; i < DepthBands; i++) plateFront[i] = chr.capeCz;
+            foreach (var sample in chr.capeObstacles)
+            {
+                var w = sample.weight;
+                var q = toCape[w.boneIndex0].MultiplyPoint3x4(sample.point) * w.weight0;
+                if (w.weight1 > 0) q += toCape[w.boneIndex1].MultiplyPoint3x4(sample.point) * w.weight1;
+                if (w.weight2 > 0) q += toCape[w.boneIndex2].MultiplyPoint3x4(sample.point) * w.weight2;
+                if (w.weight3 > 0) q += toCape[w.boneIndex3].MultiplyPoint3x4(sample.point) * w.weight3;
+                int row = Mathf.RoundToInt(Mathf.InverseLerp(chr.capeBot, chr.capeTop, q.y) * (DepthBands - 1));
+                for (int k = Mathf.Max(0, row - 1); k <= Mathf.Min(DepthBands - 1, row + 1); k++)
+                    plateFront[k] = Mathf.Max(plateFront[k], q.z + .035f);
+            }
+        }
+
         public CapeSim(Character ch)
         {
             cape = ch.skirt; model = ch.model; H = ch.human; restL = ch.capeRest; nrmL = ch.capeNrm;
             map = ch.capeMap; map2 = ch.capeMap2; map3 = ch.capeMap3; chr = ch;
+            toCape = new Matrix4x4[H.bones.Length];
+            var used = new System.Collections.Generic.HashSet<int>();
+            foreach (var sample in ch.capeObstacles)
+            {
+                var w = sample.weight;
+                used.Add(w.boneIndex0);
+                if (w.weight1 > 0) used.Add(w.boneIndex1);
+                if (w.weight2 > 0) used.Add(w.boneIndex2);
+                if (w.weight3 > 0) used.Add(w.boneIndex3);
+            }
+            int left = HumanDB.BI["upperarm01.L"], right = HumanDB.BI["upperarm01.R"];
+            used.Add(left);
+            used.Add(right);
+            var shoulder = H.Head("upperarm01.L");
+            float armLength = Vector3.Distance(shoulder, H.Head("lowerarm01.L"));
+            for (int i = C; i < restL.Length; i++)
+            {
+                var p = restL[i];
+                float below = (shoulder.y - p.y) / armLength;
+                float side = Mathf.Abs(p.x) / Mathf.Max(.001f, new Vector2(p.x, p.z - chr.capeCz).magnitude);
+                rimWeight[i] = Mathf.InverseLerp(.72f, .95f, side) *
+                    Mathf.InverseLerp(-.28f, -.08f, below) * Mathf.InverseLerp(.65f, .40f, below);
+                rimBone[i] = p.x * shoulder.x > 0 ? left : right;
+            }
+            obstacleBones = new int[used.Count];
+            used.CopyTo(obstacleBones);
             float sc = cape.lossyScale.y;
             System.Action<int, int, float, float> add = (a, b, ks, kc) => links.Add(new Link { a = a, b = b, len = (restL[a] - restL[b]).magnitude * sc, ks = ks, kc = kc });
             for (int r = 0; r < R; r++)
@@ -260,6 +323,14 @@ namespace AsciiHero
             var local = cape.InverseTransformPoint(x[i]);
             float sign = Mathf.Sign(depth);
             float correction = Mathf.Abs(depth) * .65f - sign * (local.z - chr.capeCz);
+            int column = i % C;
+            if (depth > 0 && (column <= 1 || column >= C - 2))
+            {
+                float row = Mathf.InverseLerp(chr.capeBot, chr.capeTop, local.y) * (DepthBands - 1);
+                int lower = Mathf.FloorToInt(row);
+                float front = Mathf.Lerp(plateFront[lower], plateFront[Mathf.Min(lower + 1, DepthBands - 1)], row - lower);
+                correction = Mathf.Max(correction, front - local.z);
+            }
             if (correction <= 0) return;
             var push = cape.TransformVector(Vector3.forward * (sign * correction));
             x[i] += push;
@@ -283,6 +354,10 @@ namespace AsciiHero
             Vector3 mv = (anchor - lastAnchor) * Mathf.Lerp(0.6f, 1f, Mathf.InverseLerp(4f, 9f, jump)); lastAnchor = anchor;
             for (int i = C; i < x.Length; i++) { x[i] += mv; ox[i] += mv; }
             Capsules();
+            UpdatePlateFront();
+            for (int i = C; i < x.Length; i++)
+                if (rimWeight[i] > 0)
+                    rimGoal[i] = cape.TransformPoint(toCape[rimBone[i]].MultiplyPoint3x4(restL[i]));
             acc = Mathf.Min(acc + dt, STEP * 4);
             float t = Time.time;
             while (acc >= STEP)
@@ -319,6 +394,7 @@ namespace AsciiHero
                         // long-range attachment to its column's top
                         Vector3 top = x[c], d = x[i] - top; float l = d.magnitude;
                         if (l > tether[i]) x[i] = top + d * (tether[i] / l);
+                        GuideArmhole(i);
                         Collide(i, r);
                         Envelope(i);
                         KeepPanelSide(i);
