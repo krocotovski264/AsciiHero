@@ -183,24 +183,22 @@ namespace AsciiHero
         readonly Matrix4x4[] toCape;
         readonly int[] obstacleBones;
 
-        // Guide just the lateral rim with the upper arm. Keep the free panels on the spine frame.
-        readonly int[] rimBone = new int[GRID];
-        readonly float[] rimWeight = new float[GRID];
-        readonly Vector3[] rimGoal = new Vector3[GRID];
-        void GuideArmhole(int i)
-        {
-            if (rimWeight[i] <= 0) return;
-            Vector3 d = rimGoal[i] - x[i];
-            Vector3 correction = (d - Vector3.ClampMagnitude(d, .022f)) * rimWeight[i];
-            x[i] += correction;
-            ox[i] += correction;
-        }
+        readonly Vector3[] pins = new Vector3[2*C];
 
         void UpdatePlateFront()
         {
             var inverse = cape.worldToLocalMatrix;
             foreach (int bone in obstacleBones)
                 toCape[bone] = inverse * H.bones[bone].localToWorldMatrix * H.bindposes[bone];
+            for (int i = 0; i < pins.Length; i++)
+            {
+                var w = chr.mantlePins[i]; var p = restL[i];
+                var q = toCape[w.boneIndex0].MultiplyPoint3x4(p)*w.weight0;
+                if (w.weight1 > 0) q += toCape[w.boneIndex1].MultiplyPoint3x4(p)*w.weight1;
+                if (w.weight2 > 0) q += toCape[w.boneIndex2].MultiplyPoint3x4(p)*w.weight2;
+                if (w.weight3 > 0) q += toCape[w.boneIndex3].MultiplyPoint3x4(p)*w.weight3;
+                pins[i] = cape.TransformPoint(q);
+            }
             for (int i = 0; i < DepthBands; i++) plateFront[i] = chr.capeCz;
             foreach (var sample in chr.capeObstacles)
             {
@@ -229,19 +227,12 @@ namespace AsciiHero
                 if (w.weight2 > 0) used.Add(w.boneIndex2);
                 if (w.weight3 > 0) used.Add(w.boneIndex3);
             }
-            int left = HumanDB.BI["upperarm01.L"], right = HumanDB.BI["upperarm01.R"];
-            used.Add(left);
-            used.Add(right);
-            var shoulder = H.Head("upperarm01.L");
-            float armLength = Vector3.Distance(shoulder, H.Head("lowerarm01.L"));
-            for (int i = C; i < restL.Length; i++)
+            foreach (var w in ch.mantlePins)
             {
-                var p = restL[i];
-                float below = (shoulder.y - p.y) / armLength;
-                float side = Mathf.Abs(p.x) / Mathf.Max(.001f, new Vector2(p.x, p.z - chr.capeCz).magnitude);
-                rimWeight[i] = Mathf.InverseLerp(.72f, .95f, side) *
-                    Mathf.InverseLerp(-.28f, -.08f, below) * Mathf.InverseLerp(.65f, .40f, below);
-                rimBone[i] = p.x * shoulder.x > 0 ? left : right;
+                used.Add(w.boneIndex0);
+                if (w.weight1 > 0) used.Add(w.boneIndex1);
+                if (w.weight2 > 0) used.Add(w.boneIndex2);
+                if (w.weight3 > 0) used.Add(w.boneIndex3);
             }
             obstacleBones = new int[used.Count];
             used.CopyTo(obstacleBones);
@@ -289,7 +280,7 @@ namespace AsciiHero
             }
             // (no backstop: the body's capsules alone keep it out, so wind from behind lays it on the back and it flows
             // round the body)  max distance from the rest place:
-            float v = r / (R - 1f), md = 0.05f + 1.15f * v;
+            float v = r / (R - 1f), md = .015f + .48f * v*v;
             Vector3 dr = x[i] - rest[i]; if (dr.sqrMagnitude > md * md) x[i] = rest[i] + dr.normalized * md;
             float g = model.position.y + 0.02f; if (x[i].y < g) x[i].y = g;
         }
@@ -299,8 +290,8 @@ namespace AsciiHero
         bool Envelope(int i)
         {
             Vector3 l = cape.InverseTransformPoint(x[i]);
-            float H = chr.capeTop - chr.capeBot; if (H <= 0) return false;
-            float f = (chr.capeTop - l.y) / H; if (f < 0.02f || f > 1.05f) return false;
+            float H = chr.mantleEnvelopeTop - chr.mantleEnvelopeBottom; if (H <= 0) return false;
+            float f = (chr.mantleEnvelopeTop - l.y) / H; if (f < 0.02f || f > 1.05f) return false;
             float v = Mathf.Pow(Mathf.Clamp01(f), 1f / Character.CAPE_EXP);
             int k = Mathf.Clamp(Mathf.RoundToInt(v * (chr.capeRx.Length - 1)), 0, chr.capeRx.Length - 1);
             float sh = Mathf.Lerp(.98f, .90f, v);
@@ -352,12 +343,10 @@ namespace AsciiHero
             // hanging in front of him when he dashes backwards or aside)
             float jump = dt > 1e-5f ? (anchor - lastAnchor).magnitude / dt : 0;
             Vector3 mv = (anchor - lastAnchor) * Mathf.Lerp(0.6f, 1f, Mathf.InverseLerp(4f, 9f, jump)); lastAnchor = anchor;
-            for (int i = C; i < x.Length; i++) { x[i] += mv; ox[i] += mv; }
+            for (int i = 2*C; i < x.Length; i++) { x[i] += mv; ox[i] += mv; }
             Capsules();
             UpdatePlateFront();
-            for (int i = C; i < x.Length; i++)
-                if (rimWeight[i] > 0)
-                    rimGoal[i] = cape.TransformPoint(toCape[rimBone[i]].MultiplyPoint3x4(restL[i]));
+
             acc = Mathf.Min(acc + dt, STEP * 4);
             float t = Time.time;
             while (acc >= STEP)
@@ -366,7 +355,7 @@ namespace AsciiHero
                 for (int i = 0; i < x.Length; i++)
                 {
                     int r = i / C, c = i % C; float v = r / (R - 1f);
-                    if (r == 0) { ox[i] = x[i]; x[i] = rest[i]; continue; }                // pinned to the shoulders
+                    if (r < 2) { ox[i] = x[i] = pins[i]; continue; }                // pinned to the shoulders
                     Vector3 vel = (x[i] - ox[i]) / STEP;
                     // wind: the air pushes on the cloth along its normal, by how fast it meets it; it gusts and flutters
                     Vector3 n = NormalAt(r, c);
@@ -383,25 +372,33 @@ namespace AsciiHero
                     foreach (var L in links)
                     {
                         Vector3 d = x[L.b] - x[L.a]; float l = d.magnitude; if (l < 1e-6f) continue;
-                        float wa = L.a < C ? 0 : 1, wb = L.b < C ? 0 : 1; if (wa + wb == 0) continue;
+                        float wa = L.a < 2*C ? 0 : 1, wb = L.b < 2*C ? 0 : 1; if (wa + wb == 0) continue;
                         float k = l > L.len ? L.ks : L.kc;
                         Vector3 corr = d * ((l - L.len) / l * k / (wa + wb));
                         x[L.a] += corr * wa; x[L.b] -= corr * wb;
                     }
-                    for (int i = C; i < x.Length; i++)
+                    for (int i = 2*C; i < x.Length; i++)
                     {
                         int r = i / C, c = i % C;
                         // long-range attachment to its column's top
                         Vector3 top = x[c], d = x[i] - top; float l = d.magnitude;
                         if (l > tether[i]) x[i] = top + d * (tether[i] / l);
-                        GuideArmhole(i);
+
                         Collide(i, r);
                         Envelope(i);
                         KeepPanelSide(i);
                     }
                 }
             }
-            for (int i = C; i < x.Length; i++) { Envelope(i); KeepPanelSide(i); }
+            for (int i = 0; i < 2*C; i++) x[i] = ox[i] = pins[i];
+            for (int i = 2*C; i < x.Length; i++)
+            {
+                Envelope(i); KeepPanelSide(i);
+                // Leave room for a trailing hem, but prevent the lower sheet from folding up onto the collar.
+                float v = (i / C) / (R - 1f);
+                float excess = x[i].y-rest[i].y-(.02f+.22f*v*v)*model.lossyScale.y;
+                if (excess > 0) { x[i].y -= excess; ox[i].y -= excess; }
+            }
             for (int i = 0; i < x.Length; i++)
             {
                 Vector3 d = x[i] - rest[i];

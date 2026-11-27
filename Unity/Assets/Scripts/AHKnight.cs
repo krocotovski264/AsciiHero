@@ -37,7 +37,7 @@ namespace AsciiHero
             using (var r = new BinaryReader(new MemoryStream(file.bytes)))
             {
                 Material[] materials;
-                if (name == "Worn")
+                if (name == "Worn" || name == "WornMantle")
                 {
                     // Both exports use the same knight texture atlas and joint table.
                     materials = new[] { ReadKnight("Flight")[0].material };
@@ -65,7 +65,7 @@ namespace AsciiHero
                     var p = new Plate { material = materials[r.ReadInt32()], finger = r.ReadInt32() };
                     int count = r.ReadInt32(), indices = r.ReadInt32();
                     p.pos = new Vector3[count]; p.normal = new Vector3[count]; p.uv = new Vector2[count];
-                    if (name == "Flight" || name == "Worn") p.rigWeights = new BoneWeight[count];
+                    if (name == "Flight" || name == "Worn" || name == "WornMantle") p.rigWeights = new BoneWeight[count];
                     for (int k = 0; k < count; k++)
                     {
                         p.pos[k] = ReadPoint(r); p.normal[k] = ReadPoint(r);

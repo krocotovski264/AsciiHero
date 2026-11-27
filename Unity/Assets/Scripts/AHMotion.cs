@@ -1404,12 +1404,36 @@ namespace AsciiHero
         struct LegInfo { public Transform hip, knee, foot, toe; public Vector3 target; public float l1, l2; }
         readonly LegInfo[] legs = new LegInfo[2];
         static readonly string[] SIDES = { "L", "R" };
+        float NeutralKnightWeight()
+        {
+            if (ch.cfg.armor != "plate" || Legs != 2 || leapT >= 0 || guardHeld || Attacking) return 0;
+            return (1-Mathf.SmoothStep(0,1,Mathf.InverseLerp(.02f,.35f,vel))) *
+                (1-Mathf.Clamp01(Mathf.Max(stance, ovW, cutW, footLift, sitW)));
+        }
+
+        void BalanceKnight(float weight)
+        {
+            if (weight <= 0) return;
+            var hips = H.root;
+            var neck = H.Bone("neck01");
+            var spine = H.Bone("spine05");
+            var axis = neck.position - hips.position;
+            var upright = Quaternion.FromToRotation(axis, ch.model.up);
+            spine.rotation = Quaternion.Slerp(Quaternion.identity, upright, .8f*weight) * spine.rotation;
+            var head = H.Bone("head");
+            var forward = Vector3.ProjectOnPlane(head.forward, ch.model.up);
+            if (forward.sqrMagnitude > .001f)
+                head.rotation = Quaternion.Slerp(head.rotation, Quaternion.LookRotation(forward,ch.model.up), .85f*weight);
+        }
+
         void FootIK(float dt)
         {
             var model = ch.model;
             float scaleY = model.lossyScale.y, groundAnkle = model.position.y + restAnkle * scaleY;
             // Foot locking is off: the body follows the controller, and a foot pinned to the ground while the body moved on
             // was what made the knees buckle. Feet are only kept from sinking below the ground.
+            float neutral = NeutralKnightWeight();
+            BalanceKnight(neutral);
             bool moving = false;
             float drop = 0;
             bool hopping = limbs[3] != limbs[4];
@@ -1439,6 +1463,14 @@ namespace AsciiHero
                     if (stanceFeet > 0.01f) { float sgn = si == 0 ? -1f : 1f; al.x += (sgn * (lim + 0.21f) - al.x) * stanceFeet; al.z += -sgn * 0.1f * stanceFeet; movedT = true; }
                     if (movedT) { Vector3 w = g.rotation * al + g.position; target.x = w.x; target.z = w.z; }
                 }
+                if (neutral > 0)
+                {
+                    var local = model.InverseTransformPoint(target);
+                    float shoulder = H.Head("upperarm01." + s).x;
+                    local.x = Mathf.Lerp(local.x, shoulder * .86f, neutral);
+                    local.z = Mathf.Lerp(local.z, H.Head("foot." + s).z + (si == 0 ? .045f : -.045f), neutral);
+                    target = model.TransformPoint(local);
+                }
                 if (hopping)
                 {
                     // hopping: the foot stays under the body, swings forward in the air and back on the ground
@@ -1452,6 +1484,8 @@ namespace AsciiHero
                     target.x += o.x * footLift; target.z += o.z * footLift; target.y += 0.32f * footLift * scaleY;
                 }
                 target.y = Mathf.Max(target.y, groundAnkle);
+                if (neutral > 0 && ch.knightAnkleClearance[si] > 0)
+                    target.y = Mathf.Lerp(target.y, model.position.y + ch.knightAnkleClearance[si]*scaleY, neutral);
                 if (sitW > 0.001f) target = Vector3.Lerp(target, ap, sitW);       // sitting: the legs keep the pose they were given
                 float l1 = Vector3.Distance(kp, hp), l2 = Vector3.Distance(ap, kp), over = Vector3.Distance(target, hp) - (l1 + l2) * 0.99f;
                 if (F.rel > 0.5f && over > 0) drop = Mathf.Max(drop, over);
@@ -1462,6 +1496,12 @@ namespace AsciiHero
             {
                 var L = legs[si]; if (L.hip == null) continue;
                 Quaternion footQ = L.foot.rotation;
+                if (neutral > 0)
+                {
+                    float toeOut = si == 0 ? -6f : 6f;
+                    footQ = Quaternion.Slerp(footQ, model.rotation * Quaternion.Euler(0,toeOut,0),neutral);
+                    L.foot.rotation = footQ;
+                }
                 Vector3 hp = L.hip.position, kp = L.knee.position, ap = L.foot.position;
                 if ((ap - L.target).sqrMagnitude < 1e-7f) continue;
                 Vector3 toT = L.target - hp; float d = Mathf.Clamp(toT.magnitude, Mathf.Abs(L.l1 - L.l2) + 0.01f, (L.l1 + L.l2) * 0.995f); toT.Normalize();

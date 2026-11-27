@@ -356,22 +356,14 @@ namespace AsciiHero
                 rx *= expand; rz *= expand;
                 prevBack = rz; capeRx[kk] = rx; capeRz[kk] = rz;
             }
-            cuirassSurface = null;
             float vOf(float y) => Mathf.Pow(Mathf.Clamp01((capeTop - y) / (capeTop - capeBot)), 1f / CAPE_EXP);
             capeVs = vOf(shY - 0.04f); capeVe = vOf(elY);
             capeMap = new Vector4(capeCz, capeTop, capeBot, 1);
             capeMap2 = new Vector4(Mathf.PI * .99f, Mathf.PI * .99f, Mathf.PI * .99f, capeVs);       // The imported mesh supplies the front opening and the armholes at every height.
             capeMap3 = new Vector4(capeVe, 1f / CAPE_EXP, CAPE_C, CAPE_R);
             capeRest = new Vector3[CAPE_C * CAPE_R]; capeNrm = new Vector3[CAPE_C * CAPE_R];
-            for (int r = 0; r < CAPE_R; r++) for (int c = 0; c < CAPE_C; c++)
-                {
-                    float u = c / (CAPE_C - 1f), v = r / (CAPE_R - 1f), e = 0.01f;
-                    var p0 = CapePt(u, v); capeRest[r * CAPE_C + c] = p0;
-                    var n = Vector3.Cross(CapePt(Mathf.Min(1, u + e), v) - CapePt(Mathf.Max(0, u - e), v), CapePt(u, Mathf.Min(1, v + e)) - CapePt(u, Mathf.Max(0, v - e))).normalized;
-                    if (Vector3.Dot(n, new Vector3(p0.x, 0, p0.z - capeCz)) < 0) n = -n;          // outward, away from the body
-                    capeNrm[r * CAPE_C + c] = n;
-                }
             skirt = MountKnightMantle();
+            cuirassSurface = null;
         }
         /// the hood thrown back: a soft fold of cloth lying on the cloak's back below the neck (shown when the head is gone)
         void HoodDown()
