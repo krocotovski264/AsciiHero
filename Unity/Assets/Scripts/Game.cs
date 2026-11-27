@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.1.31 · Unity";
+        public const string VERSION = "beta 0.1.32 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -1016,7 +1016,30 @@ namespace AsciiHero
             if (hero != null) Destroy(hero.go);
             var hc = cfg.Clone(); hc.shadow = true;       // the hero is a shadow wearing armour
             hero = Character.Build(hc, actorMats, "Hero");
+            var worn = new HashSet<Renderer>();
+            if (hc.armor == "plate")
+            {
+                foreach (var r in hero.go.GetComponentsInChildren<Renderer>())
+                {
+                    if (r.transform == hero.skirt || r.sharedMaterial == actorMats["SHADOW"] || r.sharedMaterial == actorMats["EYE"]) continue;
+                    if (hero.weapon != null && r.transform.IsChildOf(hero.weapon)) continue;
+                    if (hero.weaponL != null && r.transform.IsChildOf(hero.weaponL)) continue;
+                    if (hero.shield != null && r.transform.IsChildOf(hero.shield)) continue;
+                    worn.Add(r);
+                }
+            }
+            var flying = hc.armor == "plate" ? hero.BuildFlightArmour() : new List<Renderer>();
             hero.glyphs = GlyphLayer.Build(hero.go, Character.LimbOfBone());
+            wornKnight.Clear(); flyingKnight.Clear();
+            void AddPair(Renderer r, List<Renderer> list)
+            {
+                list.Add(r);
+                if (GlyphLayer.pairs.TryGetValue(r, out var glyph) && glyph != null) list.Add(glyph);
+            }
+            foreach (var r in worn) AddPair(r, wornKnight);
+            foreach (var r in flying) AddPair(r, flyingKnight);
+            showingFlight = null;
+            ShowFlightArmour(world && dashShifted && dashT < dashSettle);
             // armour pieces (every shell, the weapon, the shield...) can be offset on their own: the dash sends the shadow ahead and the armour after it
             pieces.Clear();
             {
@@ -1024,6 +1047,7 @@ namespace AsciiHero
                 foreach (var kv in GlyphLayer.pairs)
                 {
                     var r = kv.Key; var sm = r.sharedMaterial;
+                    if (worn.Contains(r)) continue;
                     if (sm == actorMats["SHADOW"] || sm == actorMats["EYE"]) continue;
                     Object key = r is SkinnedMeshRenderer ? (Object)r : r.transform.parent;
                     string kind = sm == actorMats["CHAIN"] ? "chain" : (cfg.armor == "robe" && (sm == actorMats["ROBE"] || sm == actorMats["ROBED"])) || r.transform == hero.skirt || sm == actorMats["CAPE"] ? "robe" : "";
@@ -1031,6 +1055,8 @@ namespace AsciiHero
                     pc.rs.Add(r); if (kv.Value != null) pc.rs.Add(kv.Value);
                 }
             }
+            foreach (var r in flying)
+                if (!GlyphLayer.pairs.ContainsKey(r)) { var piece = new Piece(); piece.rs.Add(r); pieces.Add(piece); }
             // the robe's skirt is simulated cloth
             cloak = null; cloakRs.Clear();
             if (hero.skirt != null)
@@ -1670,6 +1696,7 @@ namespace AsciiHero
             // moving: where the stick points; standing: where the hero looks
             Vector3 d = moveDir.HasValue ? new Vector3(moveDir.Value.x, 0, moveDir.Value.y) : new Vector3(Mathf.Sin(player.heading), 0, Mathf.Cos(player.heading));
             if (swipe.HasValue && swipe.Value.sqrMagnitude > 1e-4f) { var w = ScreenToWorldDir(swipe.Value); d = new Vector3(w.x, 0, w.y); }      // a swipe: where the finger went
+            ShowFlightArmour(true);
             dashDir = d.normalized; dashT = 0; dashFrom = pos; dashMist = 0; player.StartLeap(); player.PokeIdle(); if (sfx != null) { sfx.Play("swing", 0.45f, 0.6f); sfx.Play("cloth", 0.3f); }
             // the shadow passes straight through trees, rocks and furniture; it only has to come out on free ground:
             // if the end of the dash is inside something it goes on until it is clear (or, failing that, stops short)
@@ -1742,12 +1769,22 @@ namespace AsciiHero
                 r.SetPropertyBlock(shiftMpb);
             }
         }
+        readonly List<Renderer> wornKnight = new List<Renderer>(), flyingKnight = new List<Renderer>();
+        bool? showingFlight;
+        void ShowFlightArmour(bool flying)
+        {
+            if (showingFlight == flying) return;
+            showingFlight = flying;
+            foreach (var r in wornKnight) if (r != null) r.forceRenderingOff = flying;
+            foreach (var r in flyingKnight) if (r != null) r.forceRenderingOff = !flying;
+        }
+
         void UpdateDash(float dt)
         {
             dashCd = Mathf.Max(0, dashCd - dt);
             if (dashT > dashSettle)
             {
-                if (dashShifted) { foreach (var pc in pieces) SetShift(pc, Vector3.zero, new Vector4(0, 1, 0, 0)); SetSmoke(Vector3.zero, 0); dashShifted = false; }
+                if (dashShifted) { ShowFlightArmour(false); foreach (var pc in pieces) SetShift(pc, Vector3.zero, new Vector4(0, 1, 0, 0)); SetSmoke(Vector3.zero, 0); dashShifted = false; }
                 return;
             }
             if (dashT < DASH_T)
@@ -1786,6 +1823,7 @@ namespace AsciiHero
                 Vector3 sh = Around(pc, back * (1 - p) + sideV * (pc.side * arc) + Vector3.up * (pc.lift * arc));
                 SetShift(pc, sh, new Vector4(pc.axis.x, pc.axis.y, pc.axis.z, tau > 0 && !last ? pc.turns * Mathf.PI * 2 * (1 - sm) + pc.wob * (sm - p) * 3 : 0));
             }
+            if (last) ShowFlightArmour(false);
             // mist hangs along the path
             dashMist -= dt;
             if (dashMist <= 0 && dashT < dashAnim) { dashMist = 0.035f; float rr = Random.value; SpawnPuff(new Vector3(pos.x + back.x * rr, 0.35f + Random.value * 1.1f, pos.z + back.z * rr), 0.07f, new Vector3(0, 0.15f, 0)); }
@@ -2120,6 +2158,7 @@ namespace AsciiHero
                 cloak.Apply(clothMpb, cloakRs);
                 accA += Ms(start);
             }
+            ShowFlightArmour(world && dashShifted && dashT < dashSettle);
             if (world && invOpen) MirrorPose();
             SmokeLayerPrepare();
             HideHeroBehindPocket(world && invOpen && pocketT > 0.3f && pocketClose < 0.3f);

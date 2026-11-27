@@ -17,6 +17,7 @@ namespace AsciiHero
             public Vector2[] uv;
             public int[] triangles;
             public int finger;
+            public BoneWeight[] rigWeights;
         }
         static readonly Dictionary<string, Plate[]> knightParts = new Dictionary<string, Plate[]>();
 
@@ -48,16 +49,23 @@ namespace AsciiHero
                     m.SetFloat("_GearMaps", normal != null ? 2 : mr != null ? 1 : 0);
                     materials[i] = m;
                 }
+                if (name == "Flight") ReadFlightRig(r);
                 var parts = new Plate[r.ReadInt32()];
                 for (int i = 0; i < parts.Length; i++)
                 {
                     var p = new Plate { material = materials[r.ReadInt32()], finger = r.ReadInt32() };
                     int count = r.ReadInt32(), indices = r.ReadInt32();
                     p.pos = new Vector3[count]; p.normal = new Vector3[count]; p.uv = new Vector2[count];
+                    if (name == "Flight") p.rigWeights = new BoneWeight[count];
                     for (int k = 0; k < count; k++)
                     {
                         p.pos[k] = ReadPoint(r); p.normal[k] = ReadPoint(r);
                         p.uv[k] = new Vector2(r.ReadSingle(), r.ReadSingle());
+                        if (p.rigWeights != null)
+                            p.rigWeights[k] = new BoneWeight {
+                                boneIndex0 = r.ReadByte(), boneIndex1 = r.ReadByte(), boneIndex2 = r.ReadByte(), boneIndex3 = r.ReadByte(),
+                                weight0 = r.ReadByte()/255f, weight1 = r.ReadByte()/255f, weight2 = r.ReadByte()/255f, weight3 = r.ReadByte()/255f };
+
                     }
                     p.triangles = new int[indices];
                     for (int k = 0; k < indices; k++) p.triangles[k] = r.ReadUInt16();

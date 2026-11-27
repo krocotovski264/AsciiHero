@@ -368,11 +368,7 @@ namespace AsciiHero
                     if (Vector3.Dot(n, new Vector3(p0.x, 0, p0.z - capeCz)) < 0) n = -n;          // outward, away from the body
                     capeNrm[r * CAPE_C + c] = n;
                 }
-            float width = Mathf.Max(chest.x * 2.65f, Mathf.Abs(h.Head("upperarm01.R").x) * 2.45f);
-            float depth = Mathf.Max(0.20f, chest.z - chest.y + 0.11f);
-            var size = new Vector3(width, capeTop - capeBot, depth);
-            var center = new Vector3(0, (capeTop + capeBot) * 0.5f, capeCz - 0.025f);
-            skirt = MountKnight("Cape", "spine01", center, Quaternion.identity, size);
+            skirt = MountKnightMantle();
         }
         /// the hood thrown back: a soft fold of cloth lying on the cloak's back below the neck (shown when the head is gone)
         void HoodDown()
