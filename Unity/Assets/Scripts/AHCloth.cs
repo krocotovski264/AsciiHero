@@ -295,6 +295,12 @@ namespace AsciiHero
             int k = Mathf.Clamp(Mathf.RoundToInt(v * (chr.capeRx.Length - 1)), 0, chr.capeRx.Length - 1);
             float sh = Mathf.Lerp(.98f, .90f, v);
             float rx = chr.capeRx[k] * sh, rz = chr.capeRz[k] * sh;
+            // Cap the collision envelope at the actual fitted garment. A broad underlying
+            // body must not inflate the back of a knight whose body mesh is hidden.
+            Vector3 bind = restL[i];
+            float bx = bind.x / rx, bz = (bind.z - chr.capeCz) / rz;
+            float fit = Mathf.Clamp(Mathf.Sqrt(bx*bx + bz*bz), .01f, 1f);
+            rx *= fit; rz *= fit;
             float dx = l.x, dz = l.z - chr.capeCz, e = (dx / rx) * (dx / rx) + (dz / rz) * (dz / rz);
             if (e >= 1) return false;
             if (e < 0.25f) { x[i] = rest[i]; ox[i] = rest[i]; return true; }

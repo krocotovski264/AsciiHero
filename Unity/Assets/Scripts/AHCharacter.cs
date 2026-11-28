@@ -169,7 +169,53 @@ namespace AsciiHero
             if (W == "shield") AddShield();
         }
 
-        public Renderer BuildDashShadow() => AddSkinned(human.PartMesh(0), "SHADOW", "DashShadow");
+        public Renderer BuildDashShadow()
+        {
+            var h = human;
+            var vertices = new Vector3[h.n];
+            var torsoFit = KnightTorsoFit();
+            var donorHead = System.Array.Find(flightRig, b => b.bone == "head");
+            Vector3 helmetCentre = torsoFit.MultiplyPoint3x4(donorHead.start + Vector3.up*.075f);
+            Vector3 faceCentre = (h.Head("head") + h.Tail("head"))*.5f;
+            var donorChest = System.Array.Find(flightRig, b => b.bone == "spine01");
+            var donorHips = System.Array.Find(flightRig, b => b.bone == "root");
+            Vector3 chest = torsoFit.MultiplyPoint3x4(donorChest.start);
+            Vector3 hips = torsoFit.MultiplyPoint3x4(donorHips.start);
+            for (int i = 0; i < h.n; i++)
+            {
+                if (HumanDB.vpart[i] != 0) continue;
+                Vector3 point = h.pos[i], centre = Vector3.zero;
+                for (int j = 0; j < 4; j++)
+                {
+                    int k = 4*i+j;
+                    float weight = HumanDB.skinWeight[k]/255f;
+                    if (weight == 0) continue;
+                    int bone = HumanDB.skinIndex[k];
+                    Vector3 axis = h.tails[bone]-h.heads[bone];
+                    float t = Mathf.Clamp01(Vector3.Dot(point-h.heads[bone],axis) /
+                                            Mathf.Max(axis.sqrMagnitude,.000001f));
+                    centre += (h.heads[bone] + axis*t)*weight;
+                }
+                // Keep limb pivots aligned as the plates return, even on broad custom bodies.
+                vertices[i] = Vector3.Lerp(centre, point, .48f);
+                if (h.region[i] == Region.Torso || h.region[i] == Region.Pelvis)
+                {
+                    float level = Mathf.InverseLerp(hips.y, chest.y, point.y);
+                    Vector3 mid = Vector3.Lerp(hips, chest, level);
+                    mid.y = point.y;
+                    vertices[i] = Vector3.Lerp(mid, point, .42f);
+                }
+                if (h.region[i] == Region.Foot || h.region[i] == Region.Hand)
+                {
+                    string side = point.x < 0 ? ".L" : ".R";
+                    string joint = h.region[i] == Region.Foot ? "foot" : "wrist";
+                    vertices[i] = Vector3.Lerp(h.Head(joint + side), vertices[i], .84f);
+                }
+                float head = h.region[i] == Region.Head || h.region[i] == Region.Neck ? Mathf.InverseLerp(h.Head("neck01").y, h.Head("head").y, point.y) : 0;
+                vertices[i] = Vector3.Lerp(vertices[i], helmetCentre + (point-faceCentre)*.56f, head);
+            }
+            return AddSkinned(h.MakeMesh(vertices, h.partTris[0]), "SHADOW", "DashShadow");
+        }
 
         SkinnedMeshRenderer AddSkinned(Mesh m, string mat, string name)
         {

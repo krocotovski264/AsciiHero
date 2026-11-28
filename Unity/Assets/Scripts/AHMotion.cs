@@ -1411,20 +1411,18 @@ namespace AsciiHero
                 (1-Mathf.Clamp01(Mathf.Max(stance, ovW, cutW, footLift, sitW)));
         }
 
+        static readonly string[] KnightUprightChain = { "spine05", "spine04", "spine03", "spine02", "spine01",
+            "neck01", "neck02", "neck03", "head" };
+
         void BalanceKnight(float weight)
         {
             if (weight <= 0) return;
-            var hips = H.root;
-            var neck = H.Bone("neck01");
-            var spine = H.Bone("spine05");
-            hips.localRotation = Quaternion.Slerp(hips.localRotation, Quaternion.identity, weight);
-            var axis = neck.position - hips.position;
-            var upright = Quaternion.FromToRotation(axis, ch.model.up);
-            spine.rotation = Quaternion.Slerp(Quaternion.identity, upright, .8f*weight) * spine.rotation;
-            var head = H.Bone("head");
-            var forward = Vector3.ProjectOnPlane(head.forward, ch.model.up);
-            if (forward.sqrMagnitude > .001f)
-                head.rotation = Quaternion.Slerp(head.rotation, Quaternion.LookRotation(forward,ch.model.up), .85f*weight);
+            H.root.localRotation = Quaternion.Slerp(H.root.localRotation, Quaternion.identity, weight);
+            foreach (string bone in KnightUprightChain)
+            {
+                var joint = H.Bone(bone);
+                joint.localRotation = Quaternion.Slerp(joint.localRotation, Quaternion.identity, weight);
+            }
         }
 
         void FootIK(float dt)

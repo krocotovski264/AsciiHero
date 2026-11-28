@@ -94,13 +94,34 @@ namespace AsciiHero
             return result;
         }
 
+        // The helmet, gorget and breastplate form one silhouette in the donor rest pose.
+        // Give them one similarity transform. Their weights still animate on the game skeleton.
+        Matrix4x4 KnightTorsoFit()
+        {
+            var left = System.Array.Find(flightRig, b => b.bone == "upperarm01.L").start;
+            var right = System.Array.Find(flightRig, b => b.bone == "upperarm01.R").start;
+            var donor = (left + right) * .5f;
+            var shoulder = (human.Head("upperarm01.L") + human.Head("upperarm01.R")) * .5f;
+            float scale = human.height / 1.84f;
+            return Matrix4x4.TRS(shoulder, Quaternion.identity, Vector3.one*scale)
+                 * Matrix4x4.Translate(-donor);
+        }
+
         void MakeKnightBind(out Matrix4x4[] transforms, out int[] indices)
         {
+            var torsoFit = KnightTorsoFit();
             transforms = new Matrix4x4[flightRig.Length];
             indices = new int[flightRig.Length];
             for (int i = 0; i < flightRig.Length; i++)
             {
                 var b = flightRig[i];
+                indices[i] = HumanDB.BI[b.bone];
+                if (b.bone == "root" || b.bone.StartsWith("spine") || b.bone == "neck01" ||
+                    b.bone == "head" || b.bone.StartsWith("clavicle"))
+                {
+                    transforms[i] = torsoFit;
+                    continue;
+                }
                 var start = human.Head(b.bone);
                 var end = b.tip.Length > 0 ? human.Head(b.tip) : human.Tail(b.bone);
                 var from = b.end - b.start;
@@ -108,7 +129,6 @@ namespace AsciiHero
                 var rot = Quaternion.FromToRotation(from, to);
                 float scale = Mathf.Clamp(to.magnitude / Mathf.Max(.001f, from.magnitude), .4f, 1.8f);
                 transforms[i] = Matrix4x4.TRS(start, rot, Vector3.one * scale) * Matrix4x4.Translate(-b.start);
-                indices[i] = HumanDB.BI[b.bone];
             }
         }
 
@@ -127,20 +147,8 @@ namespace AsciiHero
             var release = new float[v.Length];
             var weights = new BoneWeight[v.Length];
             var boundNormals = new Vector3[v.Length];
-            float scale = human.height / 1.84f;
-            float donorShoulder = flightRig[part.rigWeights[0].boneIndex0].start.y;
-            for (int j = 0; j < flightRig.Length; j++)
-                if (flightRig[j].bone == "upperarm01.L") { donorShoulder = flightRig[j].start.y; break; }
-            var shoulder = human.Head("upperarm01.L");
-            var rear = new float[capeRz.Length];
-            for (int row = 0; row < rear.Length; row++) rear[row] = float.PositiveInfinity;
-            foreach (var q in cuirassSurface)
-            {
-                if (Mathf.Abs(q.x) > Mathf.Abs(shoulder.x) * .8f) continue;
-                int row = Mathf.RoundToInt(Mathf.InverseLerp(capeBot, capeTop, q.y) * (rear.Length-1));
-                for (int k = Mathf.Max(0,row-1); k <= Mathf.Min(rear.Length-1,row+1); k++)
-                    rear[k] = Mathf.Min(rear[k], q.z);
-            }
+            var torsoFit = KnightTorsoFit();
+            float donorShoulder = System.Array.Find(flightRig, b => b.bone == "upperarm01.L").start.y;
             for (int i = 0; i < v.Length; i++)
             {
                 var p = part.pos[i]; var w = part.rigWeights[i];
@@ -159,11 +167,7 @@ namespace AsciiHero
                 w.boneIndex0 = indices[w.boneIndex0]; w.boneIndex1 = indices[w.boneIndex1];
                 w.boneIndex2 = indices[w.boneIndex2]; w.boneIndex3 = indices[w.boneIndex3];
                 weights[i] = w;
-                float y = shoulder.y + (p.y-donorShoulder)*scale;
-                int row = Mathf.RoundToInt(Mathf.InverseLerp(capeBot,capeTop,y)*(rear.Length-1));
-                float z = capeCz + p.z*scale;
-                if (!float.IsInfinity(rear[row])) z = Mathf.Min(z, rear[row]-.018f + Mathf.Min(0,p.z+.12f)*.20f);
-                v[i] = Vector3.Lerp(collar, new Vector3(p.x*scale,y,z), free);
+                v[i] = Vector3.Lerp(collar, torsoFit.MultiplyPoint3x4(p), free);
             }
             mesh.vertices = v; mesh.RecalculateBounds(); mesh.RecalculateNormals();
             var normals = mesh.normals;
