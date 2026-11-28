@@ -1403,6 +1403,8 @@ namespace AsciiHero
         static void RotateWorld(Transform b, Quaternion delta) { b.rotation = delta * b.rotation; }
         struct LegInfo { public Transform hip, knee, foot, toe; public Vector3 target; public float l1, l2; }
         readonly LegInfo[] legs = new LegInfo[2];
+        static readonly string[] KnightToeBones = { "toe1-1", "toe1-2", "toe2-1", "toe2-2", "toe2-3",
+            "toe3-1", "toe3-2", "toe3-3", "toe4-1", "toe4-2", "toe4-3", "toe5-1", "toe5-2", "toe5-3" };
         static readonly string[] SIDES = { "L", "R" };
         float NeutralKnightWeight()
         {
@@ -1513,6 +1515,11 @@ namespace AsciiHero
                     float toeOut = si == 0 ? -6f : 6f;
                     footQ = Quaternion.Slerp(footQ, model.rotation * Quaternion.Euler(0,toeOut,0),neutral);
                     L.foot.rotation = footQ;
+                    foreach (string joint in KnightToeBones)
+                    {
+                        var toe = H.Bone(joint + "." + SIDES[si]);
+                        if (toe != null) toe.localRotation = Quaternion.Slerp(toe.localRotation, Quaternion.identity, neutral);
+                    }
                 }
                 Vector3 hp = L.hip.position, kp = L.knee.position, ap = L.foot.position;
                 if (neutral <= 0 && (ap - L.target).sqrMagnitude < 1e-7f) continue;

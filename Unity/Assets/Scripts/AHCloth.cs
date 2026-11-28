@@ -277,7 +277,14 @@ namespace AsciiHero
             {
                 Vector3 ab = capB[k] - capA[k]; float t = Mathf.Clamp01(Vector3.Dot(x[i] - capA[k], ab) / Mathf.Max(ab.sqrMagnitude, 1e-6f));
                 Vector3 p = capA[k] + ab * t, d = x[i] - p; float l = d.magnitude, rr = capR[k] + 0.025f;
-                if (l < rr) x[i] = p + (l > 1e-5f ? d / l : -model.forward) * rr;
+                if (l < rr)
+                {
+                    var push = (l > 1e-5f ? d/l : -model.forward) * (rr-l);
+                    // The rear armour envelope already supports this narrow strip under the collar.
+                    // Limit the bulky torso capsules there so they do not punch a corner into the drape.
+                    if (k < 4) push *= Mathf.SmoothStep(.16f, 1, Mathf.InverseLerp(.12f, .43f, chr.capeTop-restL[i].y));
+                    x[i] += push;
+                }
             }
             // (no backstop: the body's capsules alone keep it out, so wind from behind lays it on the back and it flows
             // round the body)  max distance from the rest place:

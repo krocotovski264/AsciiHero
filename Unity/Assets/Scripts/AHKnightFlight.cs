@@ -59,6 +59,7 @@ namespace AsciiHero
                     Influence(w.boneIndex0, w.weight0); Influence(w.boneIndex1, w.weight1);
                     Influence(w.boneIndex2, w.weight2); Influence(w.boneIndex3, w.weight3);
                     n[i].Normalize();
+                    v[i] = FitBreastplate(part.pos[i], v[i], ref n[i]);
                     w.boneIndex0 = indices[w.boneIndex0]; w.boneIndex1 = indices[w.boneIndex1];
                     w.boneIndex2 = indices[w.boneIndex2]; w.boneIndex3 = indices[w.boneIndex3];
                     bw[i] = w;
@@ -170,6 +171,28 @@ namespace AsciiHero
                  * Matrix4x4.Translate(-donor);
         }
 
+        static float BreastplateInset(Vector3 donorPoint)
+        {
+            float height = Mathf.SmoothStep(0, 1, Mathf.InverseLerp(1.12f, 1.30f, donorPoint.y))
+                         * Mathf.SmoothStep(0, 1, Mathf.InverseLerp(1.53f, 1.40f, donorPoint.y));
+            float front = Mathf.SmoothStep(0, 1, Mathf.InverseLerp(.10f, .26f, donorPoint.z));
+            float centre = Mathf.SmoothStep(0, 1, Mathf.InverseLerp(.25f, .13f, Mathf.Abs(donorPoint.x)));
+            return .054f * height * front * centre;
+        }
+
+        Vector3 FitBreastplate(Vector3 donorPoint, Vector3 fitted, ref Vector3 normal)
+        {
+            float inset = BreastplateInset(donorPoint);
+            if (inset <= 0) return fitted;
+            const float step = .001f;
+            float dx = (BreastplateInset(donorPoint + Vector3.right*step) - inset)/step;
+            float dy = (BreastplateInset(donorPoint + Vector3.up*step) - inset)/step;
+            float dz = (BreastplateInset(donorPoint + Vector3.forward*step) - inset)/step;
+            float nz = normal.z/Mathf.Max(.2f, 1-dz);
+            normal = new Vector3(normal.x+dx*nz, normal.y+dy*nz, nz).normalized;
+            return fitted - Vector3.forward*(inset*human.height/1.84f);
+        }
+
         void MakeKnightBind(out Matrix4x4[] transforms, out int[] indices)
         {
             var torsoFit = KnightTorsoFit();
@@ -183,6 +206,17 @@ namespace AsciiHero
                     b.bone == "head" || b.bone.StartsWith("clavicle"))
                 {
                     transforms[i] = torsoFit;
+                    continue;
+                }
+                if (b.bone.StartsWith("foot.") || b.bone.StartsWith("toe"))
+                {
+                    // The source sabaton already has a level heel and forefoot.
+                    // Retarget both ankle and toes in the same frame to retain that plane.
+                    string side = b.bone.Substring(b.bone.Length-2);
+                    var source = System.Array.Find(flightRig, joint => joint.bone == "foot"+side);
+                    float bootScale = human.height/1.84f;
+                    transforms[i] = Matrix4x4.TRS(human.Head(source.bone), Quaternion.identity,
+                        Vector3.one*bootScale) * Matrix4x4.Translate(-source.start);
                     continue;
                 }
                 var start = human.Head(b.bone);
@@ -230,7 +264,12 @@ namespace AsciiHero
                 w.boneIndex0 = indices[w.boneIndex0]; w.boneIndex1 = indices[w.boneIndex1];
                 w.boneIndex2 = indices[w.boneIndex2]; w.boneIndex3 = indices[w.boneIndex3];
                 weights[i] = w;
-                v[i] = Vector3.Lerp(collar, torsoFit.MultiplyPoint3x4(p), free);
+                float back = Mathf.SmoothStep(0, 1, Mathf.InverseLerp(-.07f, -.15f, p.z));
+                float drape = Mathf.SmoothStep(0, 1, Mathf.InverseLerp(1.43f, 1.05f, p.y))
+                            * Mathf.SmoothStep(0, 1, Mathf.InverseLerp(.15f, .76f, p.y));
+                Vector3 cloth = torsoFit.MultiplyPoint3x4(p);
+                cloth.z += .062f * (human.height/1.84f) * back * drape;
+                v[i] = FitBreastplate(p, Vector3.Lerp(collar, cloth, free), ref boundNormals[i]);
             }
             RoundMantleShoulders(v, part, donorShoulder);
             mesh.vertices = v; mesh.RecalculateBounds(); mesh.RecalculateNormals();
