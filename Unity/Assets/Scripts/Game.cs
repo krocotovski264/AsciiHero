@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.1.37 · Unity";
+        public const string VERSION = "beta 0.1.38 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -1071,6 +1071,7 @@ namespace AsciiHero
                 if (!GlyphLayer.pairs.ContainsKey(r)) { var piece = new Piece(); piece.rs.Add(r); pieces.Add(piece); }
             // the robe's skirt is simulated cloth
             cloak = null; cloakRs.Clear();
+            previewClothActive = false;
             if (hero.skirt != null)
             {
                 cloak = hero.capeRest != null ? (ICloth)new CapeSim(hero) : new Cloak(hero);
@@ -1691,6 +1692,8 @@ namespace AsciiHero
         static Vector3 Mirror(Vector3 v) { return new Vector3(-v.x, v.y, v.z); }
 
         // ---------- actions: attack, guard, dash ----------
+        float previewClothYaw;
+        bool previewClothActive;
         ICloth cloak; readonly List<Renderer> cloakRs = new List<Renderer>(); MaterialPropertyBlock clothMpb;
         readonly Sky skyS = new Sky(); bool skyOpen; GameObject precipGo;
         Vector3 windV; Vector2 windOff; float windA = 0.7f, windStr = 0.3f, windTarget = 0.4f, windPhaseT, windRun; int windPhase = 1;
@@ -2210,10 +2213,18 @@ namespace AsciiHero
                 fill.transform.rotation = Quaternion.LookRotation(-rot(-2.5f, 0.8f, 2.0f));
             }
             if (player != null && player.driver != null) player.Animate(tNow, Mathf.Min(0.1f, Time.deltaTime));
+            bool previewCloth = !world && !inMenu && !perfNoAnim;
+            float previewTurn = previewCloth && previewClothActive
+                ? Mathf.DeltaAngle(previewClothYaw, cam.yaw*Mathf.Rad2Deg) : 0;
+            previewClothYaw = cam.yaw*Mathf.Rad2Deg;
+            previewClothActive = previewCloth;
             if (cloak != null && !perfNoAnim && (world || !inMenu))
             {
                 long start = System.Diagnostics.Stopwatch.GetTimestamp();
-                cloak.Update(Mathf.Min(.1f, Time.deltaTime), world ? windV : new Vector3(.35f, 0, .15f));
+                float clothDt = Mathf.Min(.1f, Time.deltaTime);
+                var studioBreeze = new Vector3(.35f, 0, .15f);
+                if (previewCloth && cloak is CapeSim mantle) mantle.UpdatePreview(clothDt, studioBreeze, previewTurn);
+                else cloak.Update(clothDt, world ? windV : studioBreeze);
                 if (clothMpb == null) clothMpb = new MaterialPropertyBlock();
                 cloak.Apply(clothMpb, cloakRs);
                 accA += Ms(start);

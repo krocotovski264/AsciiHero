@@ -334,7 +334,16 @@ namespace AsciiHero
             x[i] += push;
             ox[i] += push;
         }
-        public void Update(float dt, Vector3 windW)
+        public void Update(float dt, Vector3 windW) => Advance(dt, windW, 0);
+
+        public void UpdatePreview(float dt, Vector3 windW, float cameraYawDelta)
+        {
+            // Orbiting the camera represents turning the knight on the plinth.
+            // Carry the cloth's world history into the new view of that turn.
+            Advance(dt, windW, cameraYawDelta);
+        }
+
+        void Advance(float dt, Vector3 windW, float cameraYawDelta)
         {
             if (cape == null || restL == null) return;
             for (int i = 0; i < rest.Length; i++) { rest[i] = cape.TransformPoint(restL[i]); rn[i] = cape.TransformDirection(nrmL[i]).normalized; }
@@ -343,6 +352,19 @@ namespace AsciiHero
             {   // start, a respawn, a new place: the cloth at rest
                 for (int i = 0; i < x.Length; i++) x[i] = ox[i] = rest[i];
                 ready = true; lastAnchor = anchor;
+                cameraYawDelta = 0;
+            }
+            if (Mathf.Abs(cameraYawDelta) > 1e-4f)
+            {
+                Vector3 pivot = model.position;
+                for (int i = 2*C; i < x.Length; i++)
+                {
+                    float depth = chr.capeTop - restL[i].y;
+                    float freedom = Mathf.SmoothStep(0, 1, Mathf.InverseLerp(.04f, .65f, depth));
+                    var turn = Quaternion.AngleAxis(-cameraYawDelta * freedom, model.up);
+                    x[i] = pivot + turn * (x[i] - pivot);
+                    ox[i] = pivot + turn * (ox[i] - pivot);
+                }
             }
             // inertia scale: 60 % of the body's movement this frame goes straight into the cloth (positions and their
             // history alike, so it brings no speed of its own) - the rest it has to catch up with
@@ -413,8 +435,14 @@ namespace AsciiHero
                 if (chr.mantleNodes[i] != null)
                 {
                     float depth = chr.capeTop - restL[i].y;
-                    float freedom = Mathf.SmoothStep(0, 1, Mathf.InverseLerp(.07f, .36f, depth));
-                    chr.mantleNodes[i].position = cape.position + d * freedom;
+                    float freedom = Mathf.SmoothStep(0, 1, Mathf.InverseLerp(.035f, .42f, depth));
+                    // Filter the kink between adjacent solver rows around the shoulder.
+                    // Fade the filter out so the hem still carries the folds and flutter.
+                    int above = Mathf.Max(0, i/C-1)*C + i%C;
+                    int below = Mathf.Min(R-1, i/C+1)*C + i%C;
+                    var adjacent = ((x[above]-rest[above]) + (x[below]-rest[below]))*.5f;
+                    float smooth = .55f * (1-Mathf.InverseLerp(.17f, .62f, depth));
+                    chr.mantleNodes[i].position = cape.position + Vector3.Lerp(d, adjacent, smooth) * freedom;
                 }
             }
         }

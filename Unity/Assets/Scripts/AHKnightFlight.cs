@@ -232,6 +232,7 @@ namespace AsciiHero
                 weights[i] = w;
                 v[i] = Vector3.Lerp(collar, torsoFit.MultiplyPoint3x4(p), free);
             }
+            RoundMantleShoulders(v, part, donorShoulder);
             mesh.vertices = v; mesh.RecalculateBounds(); mesh.RecalculateNormals();
             var normals = mesh.normals;
             for (int i = 0; i < normals.Length; i++)
@@ -284,6 +285,55 @@ namespace AsciiHero
             renderer.bones = bones.ToArray();
             renderer.sharedMaterial = mantleMaterial;
             return renderer.transform;
+        }
+
+        static void RoundMantleShoulders(Vector3[] vertices, Plate part, float shoulderY)
+        {
+            // Work on welded positions so smoothing cannot open a texture seam.
+            var welded = new Dictionary<Vector3, int>();
+            var neighbours = new HashSet<int>[vertices.Length];
+            var vertexGroup = new int[vertices.Length];
+            for (int i = 0; i < vertices.Length; i++)
+            {
+                if (!welded.TryGetValue(part.pos[i], out int group))
+                {
+                    welded.Add(part.pos[i], group = i);
+                    neighbours[group] = new HashSet<int>();
+                }
+                vertexGroup[i] = group;
+            }
+            for (int i = 0; i < part.triangles.Length; i += 3)
+                for (int edge = 0; edge < 3; edge++)
+                {
+                    int a = vertexGroup[part.triangles[i+edge]];
+                    int b = vertexGroup[part.triangles[i+(edge+1)%3]];
+                    if (a == b) continue;
+                    neighbours[a].Add(b);
+                    neighbours[b].Add(a);
+                }
+            var rounded = (Vector3[])vertices.Clone();
+            var next = (Vector3[])vertices.Clone();
+            for (int pass = 0; pass < 5; pass++)
+            {
+                foreach (int i in welded.Values)
+                {
+                    float depth = shoulderY - part.pos[i].y;
+                    float blend = (part.mantleRelease[i]/255f)
+                        * Mathf.SmoothStep(0, 1, Mathf.InverseLerp(.015f, .13f, depth))
+                        * (1-Mathf.SmoothStep(0, 1, Mathf.InverseLerp(.26f, .50f, depth)));
+                    if (blend == 0 || neighbours[i].Count == 0) continue;
+                    Vector3 centre = Vector3.zero;
+                    foreach (int adjacent in neighbours[i]) centre += rounded[adjacent];
+                    Vector3 shift = centre/neighbours[i].Count - rounded[i];
+                    shift.y = 0; // preserve the attachment height and the embroidered hem
+                    next[i] = vertices[i] + Vector3.ClampMagnitude(rounded[i]+shift*.5f*blend-vertices[i], .018f);
+                }
+                var previous = rounded;
+                rounded = next;
+                next = previous;
+            }
+            foreach (int group in welded.Values) rounded[group] -= vertices[group];
+            for (int i = 0; i < vertices.Length; i++) vertices[i] += rounded[vertexGroup[i]];
         }
 
         // Fit the solver in the same angular/height coordinates sampled by both cloth shaders.
