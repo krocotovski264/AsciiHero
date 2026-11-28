@@ -1290,12 +1290,20 @@ namespace AsciiHero
             if (tw != null && atkT > C.cut0 - 0.05f && atkT < C.cut1 + 0.03f) { trail.Add(tw.TransformPoint(0, tipY, 0)); trail.Add(tw.TransformPoint(0, tipY * 0.55f, 0)); }
         }
         // two-bone arm IK: brings the hand of arm s to target (world), blended by w; the elbow keeps bending the way it bends
-        void ArmIK(string s, Vector3 target, float w)
+        void ArmIK(string s, Vector3 target, float w, Vector3? preferredElbow = null)
         {
             Transform up = H.Bone("upperarm01." + s), lo = H.Bone("lowerarm01." + s), wr = H.Bone("wrist." + s); if (up == null || lo == null || wr == null || w <= 0.001f) return;
             Vector3 sp = up.position, ep = lo.position, wp = wr.position; float l1 = (ep - sp).magnitude, l2 = (wp - ep).magnitude;
             Vector3 tgt = Vector3.Lerp(wp, target, w), toT = tgt - sp; float d = Mathf.Clamp(toT.magnitude, Mathf.Abs(l1 - l2) + 0.01f, (l1 + l2) * 0.999f); toT.Normalize();
-            Vector3 kd = ep - sp, perp = kd - toT * Vector3.Dot(kd, toT); if (perp.sqrMagnitude < 1e-8f) perp = Vector3.down; perp.Normalize();
+            Vector3 kd = ep - sp, perp = Vector3.ProjectOnPlane(kd, toT);
+            if (preferredElbow.HasValue)
+            {
+                var pole = Vector3.ProjectOnPlane(preferredElbow.Value, toT);
+                if (pole.sqrMagnitude > 1e-8f) perp = Vector3.Lerp(perp.normalized, pole.normalized, w);
+            }
+            if (perp.sqrMagnitude < 1e-8f) perp = Vector3.ProjectOnPlane(Vector3.down, toT);
+            if (perp.sqrMagnitude < 1e-8f) perp = Vector3.ProjectOnPlane(Vector3.right, toT);
+            perp.Normalize();
             float an = Mathf.Acos(Mathf.Clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1f, 1f));
             Vector3 ne = sp + toT * (Mathf.Cos(an) * l1) + perp * (Mathf.Sin(an) * l1);
             up.rotation = Quaternion.FromToRotation(kd.normalized, (ne - sp).normalized) * up.rotation;

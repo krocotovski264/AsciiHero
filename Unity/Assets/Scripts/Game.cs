@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.1.40 · Unity";
+        public const string VERSION = "beta 0.1.41 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -131,9 +131,8 @@ namespace AsciiHero
         const float GLYPH_FAR = 14f;      // (m from the camera: farther scenery gets fewer, larger characters - see AsciiGlyph)
         const float ISO_LOD = 2.5f / 1.5f; float isoYaw = 0, isoPitch = 0.96f, isoYawT = 0, isoPitchT = 0.96f; const float ISO_DIST = 7.6f * ISO_LOD;
         Vector3 pos, camTgt; bool lockOn; float labelT; string animLabel = "idle";
-        // controls (0.38): left half - an invisible stick that appears under the finger, a double tap (tap, then press
-        // and drag) runs; right half - a short tap attacks, holding blocks, a swipe dashes that way; a tap on the hero
-        // opens the backpack. In a fight the hero turns to the nearest creature within 5 m by himself.
+        // Left is the floating stick. Right is combat. The directed sword uses
+        // side/up swipes to guard and a down swipe to dash.
         const float AIM_R = 5f;
         float lastLeftTapT = -9; Vector2 lastLeftTapPos; bool stickRunArmed;
         bool invOpen, menuFromWorld; int saveMode;          // saves page: 0 both, 1 save, 2 load
@@ -1078,6 +1077,7 @@ namespace AsciiHero
                 var sr = hero.skirt.GetComponent<Renderer>(); Renderer gr;
                 if (sr != null) { cloakRs.Add(sr); if (GlyphLayer.pairs.TryGetValue(sr, out gr) && gr != null) cloakRs.Add(gr); }
             }
+            swordGestureBlockUntil = 0;
             player = new MotionActor(hero) { useDirectedSword = true };
             player.useMM = animMode == 1;
             player.SetLimbs(limbs);
@@ -1554,6 +1554,9 @@ namespace AsciiHero
         static bool InCircle(Rect r, Vector2 p) { return r.width > 0 && (p - r.center).magnitude <= r.width * 0.56f; }
         bool InUi(Vector2 p) { foreach (var r in uiRectsPrev) if (r.Contains(p)) return true; return false; }
 
+        float swordGestureBlockUntil;
+        bool SwordTouchMode => player != null && player.DirectedSword;
+
         void HandlePointers(float dt)
         {
             foreach (var p in InputHub.active.Values)
@@ -1561,12 +1564,21 @@ namespace AsciiHero
                 if (!p.began) continue;
                 // floating stick: its centre appears under the finger anywhere in the left part of the screen
                 if (world && (invOpen || menuFromWorld || perfRun || InUi(p.pos))) p.owner = "ui";      // the log and its buttons come before the controls
-                else if (world && PinchPartner(p)) p.owner = "cam";
+                else if (world && !SwordTouchMode && PinchPartner(p)) p.owner = "cam";
                 else if (world && p.pos.x < Screen.width * 0.5f && stickId == int.MinValue)
                 {   // the stick: invisible, its centre where the finger came down; a tap just before (close by) means run
                     p.owner = "stick"; stickId = p.id; stickCenter = p.pos;
                     stickRunArmed = Time.unscaledTime - lastLeftTapT < 0.38f && (p.pos - lastLeftTapPos).magnitude < 1.5f * StickCm();
                     lastLeftTapT = -9;
+                }
+                else if (world && SwordTouchMode)
+                {
+                    bool right = p.pos.x >= Screen.width * .5f;
+                    bool occupied = false;
+                    foreach (var q in InputHub.active.Values)
+                        if (q != p && (q.owner == "sword" || q.owner == "sword:block" || q.owner == "sword:dash"))
+                            occupied = true;
+                    p.owner = right && !occupied ? "sword" : "ignored";
                 }
                 else if (world) p.owner = "rt";      // a gesture: tap, hold or swipe (decided below)
                 else if (!world && !inMenu && tab == 0 && setDev && InField(p.pos)) p.owner = "ui";      // a number box: a tap opens the keyboard
@@ -1600,26 +1612,29 @@ namespace AsciiHero
                     if (world && invOpen && !menuFromWorld && !InPocket(p.pos)) ClosePocket();      // a tap outside the smoke closes the pocket
                     else taps.Add(p.pos);
                 }
+                if (world && SwordTouchMode && !invOpen && !menuFromWorld && !perfRun)
+                {
+                    if (p.owner == "sword")
+                    {
+                        if (!ReadSwordSwipe(p) && (p.pos-p.start).magnitude < .30f*StickCm())
+                            DoAttack(Time.unscaledTime-p.t0 >= .32f);
+                    }
+                    else if (p.owner == "sword:block") swordGestureBlockUntil = Time.unscaledTime + .22f;
+                }
                 if (world && (p.owner == "stick" || p.owner == "rt"))
                 {
                     bool tap = Time.unscaledTime - p.t0 < 0.25f && (p.pos - p.start).magnitude < 0.35f * StickCm();
-                    if (tap && OnHero(p.start)) OpenBackpack();
+                    if (tap && OnHero(p.start) && (!SwordTouchMode || player.combatT <= 0)) OpenBackpack();
                     else if (tap && p.owner == "stick") { lastLeftTapT = Time.unscaledTime; lastLeftTapPos = p.pos; }
                     else if (tap) DoAttack(player != null && player.DirectedSword && player.guardHeld);
                 }
                 if (p.id == stickId) { stickId = int.MinValue; stick = Vector2.zero; stickRun = 0; stickRunArmed = false; }
             }
-            // right-hand gestures: moved far enough soon enough - a swipe (dash that way); kept still - a hold (block)
-            if (world)
+            // The combat finger keeps its assignment when it crosses the screen midpoint.
+            if (world && !invOpen && !menuFromWorld && !perfRun)
                 foreach (var p in InputHub.active.Values)
                 {
-                    if (p.owner == "rt:hold" && player != null && player.DirectedSword)
-                    {
-                        Vector2 drag = p.pos - p.start;
-                        if (drag.magnitude > .28f * StickCm())
-                            player.SelectSwordSide(Mathf.Abs(drag.y) > Mathf.Abs(drag.x) ? MotionActor.SwordSide.High
-                                : drag.x < 0 ? MotionActor.SwordSide.Left : MotionActor.SwordSide.Right);
-                    }
+                    if (p.owner == "sword") { ReadSwordSwipe(p); continue; }
                     if (p.owner != "rt") continue;
                     float el = Time.unscaledTime - p.t0; Vector2 mv = p.pos - p.start;
                     if (mv.magnitude > 0.55f * StickCm()) { p.owner = "rt:done"; if (el < 0.45f) DoDash(mv); }
@@ -1686,6 +1701,36 @@ namespace AsciiHero
                 else { pinching = false; if (interacting) { interacting = false; lastInteract = Time.time; } }
                 if (InputHub.scroll != 0) cam.dist = Mathf.Clamp(cam.dist * (1 - InputHub.scroll * 0.1f), 0.9f, 6);
             }
+        }
+
+        bool ReadSwordSwipe(Pointer pointer)
+        {
+            Vector2 drag = pointer.pos-pointer.start;
+            if (drag.magnitude < .35f*StickCm()) return false;
+            bool vertical = Mathf.Abs(drag.y) > Mathf.Abs(drag.x)*1.15f;
+            if (vertical && drag.y > 0)
+            {
+                pointer.owner = "sword:dash";
+                DoDash(drag);
+                return true;
+            }
+
+            var side = MotionActor.SwordSide.High;
+            if (!vertical)
+            {
+                // Project the character's own right onto screen right. When nearly
+                // edge-on, use the facing hemisphere to settle the ambiguity.
+                Vector3 forward = hero.go.transform.forward;
+                Vector3 right = Vector3.Cross(Vector3.up, forward);
+                float projection = Vector3.Dot(right, sceneCam.transform.right);
+                Vector3 towardCamera = sceneCam.transform.position-hero.go.transform.position;
+                bool inverted = Mathf.Abs(projection) > .06f ? projection < 0 : Vector3.Dot(forward,towardCamera) > 0;
+                side = (drag.x > 0) != inverted ? MotionActor.SwordSide.Right : MotionActor.SwordSide.Left;
+            }
+            player.SelectSwordSide(side);
+            swordGestureBlockUntil = Time.unscaledTime + .22f;
+            pointer.owner = "sword:block";
+            return true;
         }
 
         float StickCm() { return Screen.dpi > 0 ? Screen.dpi / 2.54f : 63f * k; }
@@ -1929,7 +1974,10 @@ namespace AsciiHero
             bool inCombat = player.combatT > 0 || player.Attacking || player.guardHeld;
             if (inCombat) { var tg = NearestEntity(AIM_R); if (tg.HasValue) lockPos = tg; }
             moveDir = dir;
-            bool guardPtr = false; foreach (var ap in InputHub.active.Values) if (ap.owner == "rt:hold") guardPtr = true;
+            bool guardPtr = !invOpen && !menuFromWorld && SwordTouchMode && Time.unscaledTime < swordGestureBlockUntil;
+            if (!invOpen && !menuFromWorld)
+                foreach (var ap in InputHub.active.Values)
+                    if (ap.owner == "rt:hold" || ap.owner == "sword:block") guardPtr = true;
             player.guardHeld = guardPtr || InputHub.Key("Guard");
             bool atkPtr = false;
             player.atkHeld = InputHub.Key("AttackHeld");

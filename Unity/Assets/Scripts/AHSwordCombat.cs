@@ -9,25 +9,33 @@ namespace AsciiHero
 
         struct SwordPose
         {
-            public Vector3 hand, blade;
-            public float twist, drop;
+            public Vector3 hand, blade, leftOffset, elbowOffset;
+            public float twist, drop, weightShift;
             public SwordPose(Vector3 hand, Vector3 blade, float twist, float drop)
             {
                 this.hand = hand;
                 this.blade = blade.normalized;
                 this.twist = twist;
                 this.drop = drop;
+                leftOffset = elbowOffset = Vector3.zero;
+                weightShift = 0;
             }
 
             public static SwordPose Blend(SwordPose a, SwordPose b, float t) => new SwordPose(
                 Vector3.Lerp(a.hand, b.hand, t), Vector3.Slerp(a.blade, b.blade, t),
-                Mathf.Lerp(a.twist, b.twist, t), Mathf.Lerp(a.drop, b.drop, t));
+                Mathf.Lerp(a.twist, b.twist, t), Mathf.Lerp(a.drop, b.drop, t))
+                {
+                    leftOffset = Vector3.Lerp(a.leftOffset, b.leftOffset, t),
+                    elbowOffset = Vector3.Lerp(a.elbowOffset, b.elbowOffset, t),
+                    weightShift = Mathf.Lerp(a.weightShift, b.weightShift, t)
+                };
         }
 
         struct SwordStrike
         {
             public SwordSide exit;
             public bool heavy;
+            public int motion;
             public float windup, contactEnd;
             public SwordPose start, wind, contact, finish;
         }
@@ -103,9 +111,9 @@ namespace AsciiHero
         static SwordPose SwordGuard(SwordSide side)
         {
             if (side == SwordSide.High)
-                return new SwordPose(V(.2f,.27f,.31f), V(-.86f,.29f,.4f), -.08f, .045f);
+                return new SwordPose(V(.21f,.24f,.28f), V(-.91f,.15f,.38f), -.06f, .035f);
             float sign = (int)side;
-            return new SwordPose(V(sign*.24f,-.17f,.39f), V(sign*.34f,.74f,.57f), sign*.13f, .035f);
+            return new SwordPose(V(sign*.22f,-.19f,.40f), V(sign*.34f,.82f,.46f), sign*.11f, .03f);
         }
 
         void BeginSwordStrike(bool heavy, SwordPose from)
@@ -121,6 +129,7 @@ namespace AsciiHero
             {
                 exit = exit,
                 heavy = heavy,
+                motion = (1+(int)side) + (heavy ? 3 : 0),
                 start = from,
                 windup = swordRiposte ? .12f : heavy ? .35f : .20f,
                 wind = high
@@ -163,18 +172,25 @@ namespace AsciiHero
                     swordContact = swordTime >= Mathf.Lerp(strike.windup, strike.contactEnd, .27f)
                         && previous < Mathf.Lerp(strike.windup, strike.contactEnd, .85f);
                 if (swordTime < strike.windup)
-                    swordPose = SwordPose.Blend(strike.start, strike.wind, SmoothSword(swordTime/strike.windup));
+                {
+                    float progress = swordTime/strike.windup;
+                    swordPose = SwordPose.Blend(strike.start, strike.wind, SmoothSword(progress));
+                    AddSwordMotion(strike.motion, 0, progress, .85f);
+                }
                 else if (swordTime < strike.contactEnd)
                 {
                     float swing = (swordTime-strike.windup)/(strike.contactEnd-strike.windup);
                     swordPose = swing < .48f ? SwordPose.Blend(strike.wind, strike.contact, SmoothSword(swing/.48f))
                         : SwordPose.Blend(strike.contact, strike.finish, SmoothSword((swing-.48f)/.52f));
+                    AddSwordMotion(strike.motion, 1, swing, 1);
+
                 }
                 else
                 {
                     SwordPose recoveryStart = swordResult == SwordResult.Blocked ? deflectedPose : strike.finish;
                     float progress = Mathf.Clamp01((swordTime-strike.contactEnd)/SwordRecovery);
                     swordPose = SwordPose.Blend(recoveryStart, SwordGuard(strike.exit), SmoothSword(progress));
+                    if (swordResult != SwordResult.Blocked) AddSwordMotion(strike.motion, 2, progress, .65f);
                     float link = swordResult == SwordResult.Hit && !strike.heavy ? .52f : 1f;
                     if (!swordContact && progress >= link && (swordQueued || atkHeld))
                     {
@@ -198,6 +214,9 @@ namespace AsciiHero
                 guardPose.drop += .055f*impact;
                 if (blockSide == SwordSide.High) guardPose.blade = Vector3.Slerp(guardPose.blade, V(-.93f,-.15f,.25f), impact);
                 swordPose = SwordPose.Blend(blockStart, guardPose, SmoothSword((.26f-blockTime)/.065f));
+                float phase = Mathf.Clamp01(1-blockTime/.26f)*3;
+                int stage = Mathf.Min(2, Mathf.FloorToInt(phase));
+                AddSwordMotion(7+(int)blockSide, stage, phase-stage, .75f);
                 if (swordQueued && blockTime <= .11f) BeginSwordStrike(queuedHeavy, swordPose);
             }
             else if (guardHeld || combatT > 0)
@@ -207,6 +226,30 @@ namespace AsciiHero
             bool ready = cut == null && limbs[2] && leapT < 0 && !IdleBusy;
             float weight = ready && (swordActive || blockTime > 0 || guardHeld || combatT > 0) ? 1 : 0;
             swordPoseWeight = Mathf.MoveTowards(swordPoseWeight, weight, dt*9);
+        }
+
+        static float[] swordMotion;
+        void AddSwordMotion(int track, int phase, float progress, float weight)
+        {
+            const int samples = 13, stride = 12;
+            if (swordMotion == null)
+            {
+                var asset = Resources.Load<TextAsset>("Knight/SwordMotion");
+                swordMotion = new float[9*3*samples*stride];
+                if (asset != null && asset.bytes.Length == swordMotion.Length*sizeof(float))
+                    System.Buffer.BlockCopy(asset.bytes, 0, swordMotion, 0, asset.bytes.Length);
+            }
+            float frame = Mathf.Clamp01(progress)*(samples-1);
+            int frame0 = Mathf.Min(samples-2, Mathf.FloorToInt(frame));
+            int offset = ((track*3+phase)*samples + frame0)*stride;
+            float Read(int channel) => Mathf.Lerp(swordMotion[offset+channel],
+                swordMotion[offset+stride+channel], frame-frame0)*weight;
+            swordPose.hand += V(Read(0),Read(1),Read(2));
+            swordPose.leftOffset = V(Read(3),Read(4),Read(5));
+            swordPose.elbowOffset = V(Read(6),Read(7),Read(8));
+            swordPose.twist += Read(9);
+            swordPose.drop = Mathf.Max(0, swordPose.drop-Read(10));
+            swordPose.weightShift = Read(11);
         }
 
         static float SmoothSword(float t) { t = Mathf.Clamp01(t); return t*t*(3-2*t); }
@@ -233,10 +276,19 @@ namespace AsciiHero
             float weight = swordPoseWeight;
             var root = H.root.localPosition;
             root.y -= swordPose.drop * weight * (1-wWalk*.75f);
+            root.x += swordPose.weightShift * weight * (1-wWalk);
             H.root.localPosition = root;
             TwistRight(swordPose.twist*weight);
             var shoulder = H.Bone("upperarm01.R").position;
-            ArmIK("R", shoulder + facing*(swordPose.hand*ch.model.lossyScale.y), weight);
+            float scale = ch.model.lossyScale.y;
+            Vector3 elbow = facing * (V(.24f,-.5f,.05f) + 2*swordPose.elbowOffset);
+            ArmIK("R", shoulder + facing*(swordPose.hand*scale), weight, elbow);
+            if (limbs[1])
+            {
+                var leftShoulder = H.Bone("upperarm01.L").position;
+                var leftHand = V(-.16f,-.34f,.19f) + swordPose.leftOffset;
+                ArmIK("L", leftShoulder + facing*(leftHand*scale), .8f*weight, facing*V(-.25f,-.65f,.01f));
+            }
             BladeW(facing*swordPose.blade, weight);
             if (swordContact)
             {
