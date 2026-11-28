@@ -30,8 +30,7 @@ namespace AsciiHero
         // Bind the donor knight's T pose to the current character's rest pose before applying the game's animation.
         public List<Renderer> BuildFlightArmour()
         {
-            var parts = ReadKnight("Flight");
-            return BindKnightParts(parts, true);
+            return BindKnightParts(ReadKnight("Worn"), true);
         }
 
         void DressWornKnight()
@@ -42,10 +41,9 @@ namespace AsciiHero
         List<Renderer> BindKnightParts(Plate[] parts, bool flight)
         {
             MakeKnightBind(out var transforms, out var indices);
-            var result = new List<Renderer>(parts.Length - 1);
+            var result = new List<Renderer>();
             foreach (var part in parts)
             {
-                if (flight && part.finger == 2) continue; // the source mantle stays attached throughout the dash
                 var v = new Vector3[part.pos.Length];
                 var n = new Vector3[v.Length];
                 var bw = new BoneWeight[v.Length];
@@ -64,6 +62,11 @@ namespace AsciiHero
                     w.boneIndex0 = indices[w.boneIndex0]; w.boneIndex1 = indices[w.boneIndex1];
                     w.boneIndex2 = indices[w.boneIndex2]; w.boneIndex3 = indices[w.boneIndex3];
                     bw[i] = w;
+                }
+                if (flight)
+                {
+                    AddKnightFlightPieces(part, v, n, bw, result);
+                    continue;
                 }
                 var mesh = new Mesh { vertices = v, normals = n, uv = part.uv, triangles = part.triangles,
                     bindposes = human.bindposes, boneWeights = bw };
@@ -87,11 +90,71 @@ namespace AsciiHero
                     cuirassSurface = torso.ToArray();
                     SamplePlateFront(v, bw, "spine01", mesh.bounds);
                 }
-                var r = AddSkinned(mesh, "PLATE", flight ? "FlightPart" + part.finger : "Knight");
+                var r = AddSkinned(mesh, "PLATE", "Knight");
                 r.sharedMaterial = part.material;
                 result.Add(r);
             }
             return result;
+        }
+
+        public const string FlightChest = "FlightPart24";
+        public const string FlightRightHand = "FlightPart0";
+        public const string FlightLeftHand = "FlightPart12";
+        static byte[] flightGroups;
+
+        void AddKnightFlightPieces(Plate part, Vector3[] vertices, Vector3[] normals, BoneWeight[] weights, List<Renderer> result)
+        {
+            // Transfer the separated model's piece boundaries onto the exact worn mesh.
+            if (flightGroups == null) flightGroups = Resources.Load<TextAsset>("Knight/WornFlightGroups").bytes;
+            if (flightGroups.Length * 3 != part.triangles.Length)
+                throw new InvalidDataException("Knight flight groups do not match the worn mesh");
+            var groups = new SortedDictionary<byte, List<int>>();
+            for (int i = 0; i < flightGroups.Length; i++)
+            {
+                byte id = flightGroups[i];
+                if (!groups.TryGetValue(id, out var triangles)) groups[id] = triangles = new List<int>();
+                triangles.Add(part.triangles[i*3]);
+                triangles.Add(part.triangles[i*3+1]);
+                triangles.Add(part.triangles[i*3+2]);
+            }
+            var whole = new Mesh { vertices = vertices, normals = normals, uv = part.uv, triangles = part.triangles };
+            whole.RecalculateTangents();
+            var tangents = whole.tangents;
+            Object.Destroy(whole);
+            foreach (var group in groups)
+            {
+                var positions = new List<Vector3>();
+                var directions = new List<Vector3>();
+                var texture = new List<Vector2>();
+                var frame = new List<Vector4>();
+                var skin = new List<BoneWeight>();
+                var indices = new List<int>(group.Value.Count);
+                var map = new Dictionary<int, int>();
+                foreach (int i in group.Value)
+                {
+                    if (!map.TryGetValue(i, out int index))
+                    {
+                        map[i] = index = positions.Count;
+                        positions.Add(vertices[i]);
+                        directions.Add(normals[i]);
+                        texture.Add(part.uv[i]);
+                        frame.Add(tangents[i]);
+                        skin.Add(weights[i]);
+                    }
+                    indices.Add(index);
+                }
+                var mesh = new Mesh { bindposes = human.bindposes };
+                mesh.SetVertices(positions);
+                mesh.SetNormals(directions);
+                mesh.SetUVs(0, texture);
+                mesh.SetTangents(frame);
+                mesh.boneWeights = skin.ToArray();
+                mesh.SetTriangles(indices, 0);
+                MeshGen.AddGlyphUV(mesh, false);
+                var renderer = AddSkinned(mesh, "PLATE", "FlightPart" + group.Key);
+                renderer.sharedMaterial = part.material;
+                result.Add(renderer);
+            }
         }
 
         // The helmet, gorget and breastplate form one silhouette in the donor rest pose.

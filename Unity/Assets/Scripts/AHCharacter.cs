@@ -527,7 +527,9 @@ namespace AsciiHero
             Quaternion full = Quaternion.FromToRotation(fr.a, D); float ang = Quaternion.Angle(Quaternion.identity, full);
             if (ang > 0.1f && wr != null) wr.rotation = Quaternion.Slerp(Quaternion.identity, full, Mathf.Min(1f, 25f / ang)) * wr.rotation;
             fr = Pose.Hand(human, side);
-            grip = fr.W + fr.f * 0.08f - fr.n * 0.03f;                     // the middle of the closed fist
+            grip = cfg.armor == "plate"
+                ? fr.F3 + fr.f * .012f - fr.n * (side == "R" ? .022f : -.022f)
+                : fr.W + fr.f * .08f - fr.n * .03f;                     // the middle of the closed fist
             Vector3 fp = (fr.f - D * Vector3.Dot(fr.f, D)).normalized;       // the knuckles' direction, across the haft
             // sword: edge towards the knuckles (blade width on local x); tomahawk: head (holder +z) towards the knuckles
             Vector3 fwd = W == "sword" || W == "shield" ? Vector3.Cross(fp, D) : fp;

@@ -196,7 +196,9 @@ namespace AsciiHero
                 if (w.weight1 > 0) q += toCape[w.boneIndex1].MultiplyPoint3x4(p)*w.weight1;
                 if (w.weight2 > 0) q += toCape[w.boneIndex2].MultiplyPoint3x4(p)*w.weight2;
                 if (w.weight3 > 0) q += toCape[w.boneIndex3].MultiplyPoint3x4(p)*w.weight3;
-                pins[i] = cape.TransformPoint(q);
+                // Arm motion is already applied to the sewn edge by skinning. Give
+                // the solver a stable shoulder frame so it cannot lever the cape out.
+                pins[i] = cape.TransformPoint(Vector3.Lerp(p, q, .25f));
             }
             for (int i = 0; i < DepthBands; i++) plateFront[i] = chr.capeCz;
             foreach (var sample in chr.capeObstacles)
@@ -408,7 +410,12 @@ namespace AsciiHero
             {
                 Vector3 d = x[i] - rest[i];
                 if (!(d.sqrMagnitude < 4f)) { d = Vector3.zero; x[i] = ox[i] = rest[i]; }      // (never flies off, never NaN)
-                if (chr.mantleNodes[i] != null) chr.mantleNodes[i].position = cape.position + d;
+                if (chr.mantleNodes[i] != null)
+                {
+                    float depth = chr.capeTop - restL[i].y;
+                    float freedom = Mathf.SmoothStep(0, 1, Mathf.InverseLerp(.07f, .36f, depth));
+                    chr.mantleNodes[i].position = cape.position + d * freedom;
+                }
             }
         }
         Vector3 NormalAt(int r, int c)

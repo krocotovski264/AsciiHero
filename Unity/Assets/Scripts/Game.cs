@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.1.36 · Unity";
+        public const string VERSION = "beta 0.1.37 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -1039,17 +1039,27 @@ namespace AsciiHero
             }
             foreach (var r in worn) AddPair(r, wornKnight);
             foreach (var r in flying) AddPair(r, flyingKnight);
+            knightShadow = shadow;
             if (shadow != null) AddPair(shadow, flyingKnight);
             showingFlight = null;
             ShowFlightArmour(world && dashShifted && dashT < dashSettle);
             // armour pieces (every shell, the weapon, the shield...) can be offset on their own: the dash sends the shadow ahead and the armour after it
             pieces.Clear();
+            knightCape.Clear(); knightWeapon.Clear(); knightWeaponL.Clear(); knightShield.Clear();
             {
                 var byKey = new Dictionary<Object, Piece>();
                 foreach (var kv in GlyphLayer.pairs)
                 {
                     var r = kv.Key; var sm = r.sharedMaterial;
                     if (worn.Contains(r)) continue;
+                    if (hc.armor == "plate")
+                    {
+                        List<Renderer> companion = r.transform == hero.skirt ? knightCape
+                            : hero.weapon != null && r.transform.IsChildOf(hero.weapon) ? knightWeapon
+                            : hero.weaponL != null && r.transform.IsChildOf(hero.weaponL) ? knightWeaponL
+                            : hero.shield != null && r.transform.IsChildOf(hero.shield) ? knightShield : null;
+                        if (companion != null) { AddPair(r, companion); continue; }
+                    }
                     if (sm == actorMats["SHADOW"] || sm == actorMats["EYE"]) continue;
                     Object key = r is SkinnedMeshRenderer ? (Object)r : r.transform.parent;
                     string kind = sm == actorMats["CHAIN"] ? "chain" : (cfg.armor == "robe" && (sm == actorMats["ROBE"] || sm == actorMats["ROBED"])) || r.transform == hero.skirt || sm == actorMats["CAPE"] ? "robe" : "";
@@ -1738,6 +1748,14 @@ namespace AsciiHero
             foreach (var pc in pieces)
             {
                 if (pc.kind == "robe") { pc.delay = DASH_T * 0.9f; pc.om = 6.5f; pc.zeta = 0.62f; pc.turns = 0; pc.wob = 0; pc.side = 0.25f; pc.lift = 0.55f; }
+                if (pc.rs.Count > 0 && pc.rs[0] != null && pc.rs[0].name == Character.FlightChest)
+                {
+                    pc.delay = DASH_T;
+                    pc.turns = 0;
+                    pc.wob = 0;
+                    pc.lift = .18f;
+                    pc.side = .12f;
+                }
                 if (pc.kind == "chain") pc.delay = DASH_T * 0.5f;
             }
             dashAnim = at + 0.3f; dashSettle = at + 1.3f; dashCd = dashAnim + 0.5f;
@@ -1762,15 +1780,45 @@ namespace AsciiHero
         }
         void SetShift(Piece pc, Vector3 v, Vector4 spin, float cloth = 0)
         {
-            if (shiftMpb == null) shiftMpb = new MaterialPropertyBlock();
-            Vector3 piv = pc.rs.Count > 0 && pc.rs[0] != null ? pc.rs[0].bounds.center : pos;     // the piece tumbles about its own centre
-            foreach (var r in pc.rs)
+            var part = pc.rs.Count > 0 ? pc.rs[0] : null;
+            Vector3 pivot = part != null ? part.bounds.center : pos;
+            ShiftRenderers(pc.rs, v, spin, pivot, cloth);
+            if (part == null) return;
+            switch (part.name)
             {
-                if (r == null) continue; r.GetPropertyBlock(shiftMpb);
-                shiftMpb.SetVector("_DashShift", v); shiftMpb.SetVector("_DashSpin", spin); shiftMpb.SetVector("_DashPivot", piv); shiftMpb.SetVector("_DashScatter", Vector4.zero); shiftMpb.SetFloat("_ClothDash", cloth);
-                r.SetPropertyBlock(shiftMpb);
+                case Character.FlightChest:
+                    ShiftRenderers(knightCape, v, spin, pivot, cloth);
+                    break;
+                case Character.FlightRightHand:
+                    if (!hero.weaponInLeft) ShiftRenderers(knightWeapon, v, spin, pivot, cloth);
+                    break;
+                case Character.FlightLeftHand:
+                    if (hero.weaponInLeft) ShiftRenderers(knightWeapon, v, spin, pivot, cloth);
+                    ShiftRenderers(knightWeaponL, v, spin, pivot, cloth);
+                    ShiftRenderers(knightShield, v, spin, pivot, cloth);
+                    break;
             }
         }
+
+        void ShiftRenderers(List<Renderer> renderers, Vector3 offset, Vector4 spin, Vector3 pivot, float cloth)
+        {
+            if (shiftMpb == null) shiftMpb = new MaterialPropertyBlock();
+            foreach (var renderer in renderers)
+            {
+                if (renderer == null) continue;
+                renderer.GetPropertyBlock(shiftMpb);
+                shiftMpb.SetVector("_DashShift", offset);
+                shiftMpb.SetVector("_DashSpin", spin);
+                shiftMpb.SetVector("_DashPivot", pivot);
+                shiftMpb.SetVector("_DashScatter", Vector4.zero);
+                shiftMpb.SetFloat("_ClothDash", cloth);
+                renderer.SetPropertyBlock(shiftMpb);
+            }
+        }
+
+        readonly List<Renderer> knightCape = new List<Renderer>(), knightWeapon = new List<Renderer>(),
+            knightWeaponL = new List<Renderer>(), knightShield = new List<Renderer>();
+        Renderer knightShadow;
         readonly List<Renderer> wornKnight = new List<Renderer>(), flyingKnight = new List<Renderer>();
         bool? showingFlight;
         void ShowFlightArmour(bool flying)
@@ -1822,13 +1870,23 @@ namespace AsciiHero
                     continue;
                 }
                 if (pc.kind == "robe") { SetShift(pc, Vector3.zero, new Vector4(0, 1, 0, 0)); continue; }     // the robe stays on the body: the cloth simulation streams the skirt out behind
-                Vector3 sh = Around(pc, back * (1 - p) + sideV * (pc.side * arc) + Vector3.up * (pc.lift * arc));
+                Vector3 sh = last ? Vector3.zero
+                    : Around(pc, back * (1 - p) + sideV * (pc.side * arc) + Vector3.up * (pc.lift * arc));
                 SetShift(pc, sh, new Vector4(pc.axis.x, pc.axis.y, pc.axis.z, tau > 0 && !last ? pc.turns * Mathf.PI * 2 * (1 - sm) + pc.wob * (sm - p) * 3 : 0));
             }
+            // The solid shadow is visible in transit. The remaining trail uses the smoke glyphs.
+            if (knightShadow != null && dashT >= DASH_T + .09f) knightShadow.forceRenderingOff = true;
             if (last) ShowFlightArmour(false);
             // mist hangs along the path
             dashMist -= dt;
-            if (dashMist <= 0 && dashT < dashAnim) { dashMist = 0.035f; float rr = Random.value; SpawnPuff(new Vector3(pos.x + back.x * rr, 0.35f + Random.value * 1.1f, pos.z + back.z * rr), 0.07f, new Vector3(0, 0.15f, 0)); }
+            if (dashMist <= 0 && dashT < dashAnim)
+            {
+                bool plate = knightShadow != null;
+                dashMist = plate ? .075f : .035f;
+                float rr = Random.value;
+                SpawnPuff(new Vector3(pos.x + back.x*rr, .35f + Random.value*1.1f, pos.z + back.z*rr),
+                    plate ? .038f : .07f, new Vector3(0, .15f, 0), plate ? .32f : 0);
+            }
         }
 
         void WorldUpdate(float dt)
