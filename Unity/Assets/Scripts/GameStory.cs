@@ -1129,7 +1129,8 @@ namespace AsciiHero
             f.biteT -= dt; if (f.biteT > 0) return; f.biteT = -1;
             if (dist > 1.2f || hp <= 0 || respawnT > 0 || dashT < DASH_T + 0.15f) return;
             var hf = new Vector2(Mathf.Sin(player.heading), Mathf.Cos(player.heading));
-            if (player.guardHeld && Vector2.Dot(hf, -toH / Mathf.Max(dist, 0.01f)) > 0.2f) { Sound("clash", 0.5f, f.p); f.stagger = 0.4f; return; }
+            if (player.guardHeld && Vector2.Dot(hf, -toH / Mathf.Max(dist, 0.01f)) > 0.2f
+                && player.TrySwordBlock(MotionActor.SwordSide.High, false)) { Sound("clash", 0.5f, f.p); f.stagger = 0.4f; return; }
             Sound("hit_flesh", 0.6f, f.p); Damage(f.Boss ? 7 : 5);
         }
         /// his blow reaches the hero: a guard facing it turns it (the chief's second blow of a combination breaks through),
@@ -1143,7 +1144,8 @@ namespace AsciiHero
             f.swingHit = true;
             if (dashT < DASH_T + 0.15f) return;           // under the dash
             var hf = new Vector2(Mathf.Sin(player.heading), Mathf.Cos(player.heading));
-            bool blocked = player.guardHeld && Vector2.Dot(hf, -toH / Mathf.Max(dist, 0.01f)) > 0.2f;
+            bool blocked = player.guardHeld && Vector2.Dot(hf, -toH / Mathf.Max(dist, 0.01f)) > 0.2f
+                && player.TrySwordBlock(f.act.IncomingSwordSide);
             int dmg = f.kind == "zombie" ? 10 : 8;
             if (blocked)
             {
@@ -1174,10 +1176,13 @@ namespace AsciiHero
                     f.guardT = 0; f.act.guardHeld = false;
                     if (f.parryRiposte || !f.Boss) { f.cd = 0; f.combo = 1; f.act.StartAttack(); f.swingHit = false; }      // parried: answered at once
                     else f.cd = 0.3f;                                                                                       // only blocked
+                    player.SwordContact(true);
                     player.combatT = Mathf.Max(player.combatT, 1);
+                    if (player.DirectedSword) break;
                     continue;
                 }
-                int dmg = cfg.weapon == "none" ? 6 : 10;
+                player.SwordContact(false);
+                int dmg = Mathf.RoundToInt((cfg.weapon == "none" ? 6 : 10)*player.SwordDamageScale);
                 f.hp -= dmg; f.stagger = f.Boss ? 0.12f : 0.35f; Sound("hit_flesh", 0.7f, f.p);
                 if (f.Boss) mind.Hit();
                 if (!f.noticed) Notice(f);

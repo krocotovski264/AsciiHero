@@ -9,7 +9,7 @@ namespace AsciiHero
 {
     public partial class Game : MonoBehaviour
     {
-        public const string VERSION = "beta 0.1.39 · Unity";
+        public const string VERSION = "beta 0.1.40 · Unity";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -553,7 +553,7 @@ namespace AsciiHero
                 float fx = Mathf.Sin(player.heading), fz = Mathf.Cos(player.heading), facing = (-dx * fx - dz * fz) * inv;
                 // the hero's cut lands once, while the edge is travelling, on a dummy in reach and in front of him
                 if (player.Cutting && !player.atkHits.Contains(i) && dist < player.Reach && (player.Around || facing > 0.3f))
-                { player.atkHits.Add(i); DummyDamage(d, DUMMY_HIT); if (d.dead > 0) continue; }
+                { player.atkHits.Add(i); player.SwordContact(false); DummyDamage(d, Mathf.RoundToInt(DUMMY_HIT * player.SwordDamageScale)); if (d.dead > 0) continue; }
                 // the worse its state, the more it leans; a hit makes it shudder and rock for a moment
                 d.wob *= Mathf.Exp(-dt * 6);
                 float lean = (1 - d.hp / 100f) * 0.22f, swing = 0;
@@ -574,7 +574,7 @@ namespace AsciiHero
                             {
                                 // blocked if the guard is up and the hero faces the dummy
                                 player.combatT = MotionActor.COMBAT_HOLD;
-                                if (player.Guard > 0.5f && facing > 0.2f) SpawnSparks(new Vector3(pos.x - dx * inv * 0.45f, 1.15f, pos.z - dz * inv * 0.45f), new Vector3(dx * inv, 0, dz * inv));
+                                if (player.Guard > 0.5f && facing > 0.2f && player.TrySwordBlock(MotionActor.SwordSide.Left)) SpawnSparks(new Vector3(pos.x - dx * inv * 0.45f, 1.15f, pos.z - dz * inv * 0.45f), new Vector3(dx * inv, 0, dz * inv));
                                 else Damage(DUMMY_DMG);
                             }
                         }
@@ -1078,7 +1078,7 @@ namespace AsciiHero
                 var sr = hero.skirt.GetComponent<Renderer>(); Renderer gr;
                 if (sr != null) { cloakRs.Add(sr); if (GlyphLayer.pairs.TryGetValue(sr, out gr) && gr != null) cloakRs.Add(gr); }
             }
-            player = new MotionActor(hero);
+            player = new MotionActor(hero) { useDirectedSword = true };
             player.useMM = animMode == 1;
             player.SetLimbs(limbs);
             if (useAnimator && locoCtrl != null)
@@ -1605,7 +1605,7 @@ namespace AsciiHero
                     bool tap = Time.unscaledTime - p.t0 < 0.25f && (p.pos - p.start).magnitude < 0.35f * StickCm();
                     if (tap && OnHero(p.start)) OpenBackpack();
                     else if (tap && p.owner == "stick") { lastLeftTapT = Time.unscaledTime; lastLeftTapPos = p.pos; }
-                    else if (tap) DoAttack();
+                    else if (tap) DoAttack(player != null && player.DirectedSword && player.guardHeld);
                 }
                 if (p.id == stickId) { stickId = int.MinValue; stick = Vector2.zero; stickRun = 0; stickRunArmed = false; }
             }
@@ -1613,6 +1613,13 @@ namespace AsciiHero
             if (world)
                 foreach (var p in InputHub.active.Values)
                 {
+                    if (p.owner == "rt:hold" && player != null && player.DirectedSword)
+                    {
+                        Vector2 drag = p.pos - p.start;
+                        if (drag.magnitude > .28f * StickCm())
+                            player.SelectSwordSide(Mathf.Abs(drag.y) > Mathf.Abs(drag.x) ? MotionActor.SwordSide.High
+                                : drag.x < 0 ? MotionActor.SwordSide.Left : MotionActor.SwordSide.Right);
+                    }
                     if (p.owner != "rt") continue;
                     float el = Time.unscaledTime - p.t0; Vector2 mv = p.pos - p.start;
                     if (mv.magnitude > 0.55f * StickCm()) { p.owner = "rt:done"; if (el < 0.45f) DoDash(mv); }
@@ -1702,7 +1709,13 @@ namespace AsciiHero
         const float DASH_DIST = 2.0f, DASH_T = 0.1f; float dashAnim = 0.4f, dashSettle = 0;
         float dashT = 9, dashCd, dashMist, dashLen = 2; readonly Vector4[] dashObst = new Vector4[8], dashBox = new Vector4[4]; Vector3 dashFrom, dashDir; Vector2? moveDir; bool dashShifted;
         Rect atkRect, defRect, dashRect;
-        void DoAttack() { if (world && player != null && dashT >= DASH_T && !StoryLock()) { player.StartAttack(); StoryFight(); } }
+        void DoAttack(bool heavy = false)
+        {
+            if (!world || player == null || dashT < DASH_T || StoryLock()) return;
+            if (player.DirectedSword) player.RequestSwordAttack(heavy);
+            else player.StartAttack();
+            StoryFight();
+        }
         void DoDash(Vector2? swipe = null)
         {
             if (StoryLock() || HeroGrabbed) return;
@@ -1922,7 +1935,14 @@ namespace AsciiHero
             player.atkHeld = InputHub.Key("AttackHeld");
             if (dir.HasValue || guardPtr || atkPtr || InputHub.Key("Attack") || InputHub.Key("Guard") || InputHub.Key("Dash")) player.PokeIdle();
             if (player.IdleBusy) { dir = null; mag = 0; }          // getting up from the ground first
+            if (player.DirectedSword)
+            {
+                if (InputHub.Key("SwordLeft")) player.SelectSwordSide(MotionActor.SwordSide.Left);
+                if (InputHub.Key("SwordHigh")) player.SelectSwordSide(MotionActor.SwordSide.High);
+                if (InputHub.Key("SwordRight")) player.SelectSwordSide(MotionActor.SwordSide.Right);
+            }
             if (InputHub.Key("Attack")) DoAttack();
+            if (player.DirectedSword && InputHub.Key("HeavyAttack")) DoAttack(true);
             if (InputHub.Key("Dash")) DoDash();
             var dd = player.Locomotion(dt, dir, mag, lockPos, new Vector2(pos.x, pos.z), p => NoDeeper(WCollide(p, 0.27f)));
             dd += player.TakeAttackDrift();          // (the steps of a cut)

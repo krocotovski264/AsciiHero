@@ -13,7 +13,7 @@ using UnityEngine;
 
 namespace AsciiHero
 {
-    public class MotionActor
+    public partial class MotionActor
     {
         const float LN2 = 0.69314718f;
         static float Damp(float h) { return 4f * LN2 / (h + 1e-5f); }
@@ -918,7 +918,7 @@ namespace AsciiHero
         }
         /// sitting or getting up: the hero cannot walk yet
         public bool IdleBusy => idleA != null && idleA.kind == "sit";
-        public void StartLeap() { leapT = 0; }
+        public void StartLeap() { leapT = 0; if (DirectedSword) CancelSwordSequence(); }
         static float LookYaw(float t, float T, float amp)
         {   // left, hold, right, hold, back
             float[] kt = { 0, 0.16f, 0.36f, 0.56f, 0.76f, 1 }, kv = { 0, amp, amp, -amp, -amp, 0 };
@@ -1022,6 +1022,12 @@ namespace AsciiHero
             atkW = 0; grdW = 0; stW = 0; ovW = 0; spinYaw = 0; bashW = 0;
             int nb = MotionDB.nb; if (atkQ == null) { atkQ = new Quaternion[nb]; atkQ2 = new Quaternion[nb]; }
             IdleUpdate(dt);
+            if (DirectedSword)
+            {
+                AdvanceSword(dt);
+                ovW = Mathf.Max(idleW, swordPoseWeight);
+                return;
+            }
             // stance: with a weapon in both hands the body takes the guard the cuts start from (hilt low in front, point forward)
             if (stance > 0.01f && TwoHanded && limbs[2]) { Vector3 s0 = Vector3.zero; SamplePose(ATTACKS[1].a + STANCE_FRAME, atkQ, ref s0, null); Lay(atkQ, s0, stance, true); stW = stance; }
             if (guard > 0.01f && ch.cfg.weapon != "shield" && limbs[2])
@@ -1121,20 +1127,21 @@ namespace AsciiHero
         /// dummies (by index) the current cut has already hit
         public readonly HashSet<int> atkHits = new HashSet<int>();
         /// the edge is travelling: this is when the cut can land
-        public bool Cutting => Attacking && atkT > Clip.cut0 && atkT < Clip.cut1;
-        public float Reach => !Attacking ? 1.75f : Clip.reach > 0 ? Clip.reach : Clip.proc ? 2.3f : 1.75f;
-        public bool Around => Attacking && Clip.around;
+        public bool Cutting => DirectedSword ? swordContact : Attacking && atkT > Clip.cut0 && atkT < Clip.cut1;
+        public float Reach => DirectedSword ? (swordStrike.heavy ? 1.75f : 1.55f) : !Attacking ? 1.75f : Clip.reach > 0 ? Clip.reach : Clip.proc ? 2.3f : 1.75f;
+        public bool Around => !DirectedSword && Attacking && Clip.around;
         public float Guard => guard;
         /// points the blade passed through this frame (tip and mid-blade): the game turns them into a streak in the air
         public readonly List<Vector3> trail = new List<Vector3>();
         int atkType, lastAtk; float atkT = 9, atkDur; float guard; public bool guardHeld;
-        public bool Attacking => atkType != 0 && atkT < atkDur;
+        public bool Attacking => DirectedSword ? swordActive : atkType != 0 && atkT < atkDur;
         /// the cut of the blow has passed (what is left is the recovery)
-        public bool CutDone => Attacking && atkT > Clip.cut1;
+        public bool CutDone => DirectedSword ? swordActive && swordTime >= swordStrike.contactEnd : Attacking && atkT > Clip.cut1;
         /// starts an attack if none is running (the cooldown is the animation itself); pressed during one, the next is chained on.
         /// Standing: any attack of the weapon but the last one. Running with a blade: sword arm behind -> an overhead cut, in front -> a drawn one.
         public bool StartAttack()
         {
+            if (DirectedSword) return RequestSwordAttack(false);
             if (Attacking) { atkQueued = true; return false; }
             if (IdleBusy) { PokeIdle(); return false; }       // sitting: he gets up first
             if (!limbs[2]) return false;
@@ -1222,6 +1229,12 @@ namespace AsciiHero
             { AimW("upperarm01.L", "lowerarm01.L", gq * V(-0.28f, -0.72f, 0.63f), 0.85f * st); AimW("lowerarm01.L", "wrist.L", gq * V(0.3f, 0.2f, 0.93f), 0.85f * st); }
             // guard
             guard += ((guardHeld && !IdleBusy ? 1f : 0f) - guard) * (1 - Mathf.Exp(-dt * LN2 / 0.06f));
+            if (DirectedSword)
+            {
+                ApplySwordPose(gq);
+                PlantSwordFeet(dt);
+                return;
+            }
             float gw = guard; bool shield = Wc == "shield";
             if (gw > 0.01f)
             {

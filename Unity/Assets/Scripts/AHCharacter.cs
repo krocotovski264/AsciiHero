@@ -556,12 +556,8 @@ namespace AsciiHero
             }
             else if (W == "sword" || W == "shield")
             {
-                Part(MeshGen.Cylinder(0.015f, 0.014f, 0.11f, 10), "LEATHER2", g, Vector3.zero);
-                Part(MeshGen.Sphere(0.024f, 10, 8), "GOLD", g, new Vector3(0, -0.07f, 0));
-                Part(MeshGen.Box(0.2f, 0.018f, 0.03f), "GOLD", g, new Vector3(0, 0.065f, 0));
-                foreach (float sx in new[] { -1f, 1f }) Part(MeshGen.Sphere(0.016f, 8, 6), "GOLD", g, new Vector3(sx * 0.1f, 0.065f, 0));
-                Part(Blade(0.78f, 0.024f, 0.019f, 0.004f, 0.1f), "STEEL", g, new Vector3(0, 0.075f, 0));
-                Part(MeshGen.Box(0.008f, 0.5f, 0.0125f), "DARK", g, new Vector3(0, 0.37f, 0));
+                var sword = ReadKnight("KnightSword")[0];
+                MeshGen.Obj(FitPlate(sword, Matrix4x4.identity), sword.material, g, Vector3.zero, Quaternion.identity);
             }
             else if (W == "axe" && cfg.blade == "sabre") Sabre(g);
             else if (W == "axe") Tomahawk(g);
